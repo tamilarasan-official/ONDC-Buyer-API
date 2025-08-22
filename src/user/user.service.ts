@@ -76,4 +76,66 @@ export class UserService {
       throw new BadRequestException("Login failed", error);
     }
   }
+
+  async profile(user: any) {
+    try {
+      const profile = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException("User profile not found");
+      }
+
+      profile.phone_number = Number(profile.phone_number);
+
+      return profile;
+    } catch (error) {
+      throw new BadRequestException("Failed to retrieve user profile", error);
+    }
+  }
+
+  async updateProfile(user: any, updateUserDto: any) {
+    try {
+      const profile = await this.userRepository.findOne({
+        where: { id: user.id },
+      });
+
+      if (!profile) {
+        throw new NotFoundException("User profile not found");
+      }
+
+      if (updateUserDto.phone_number) {
+        const existingUser = await this.userRepository.findOne({
+          where: { phone_number: updateUserDto.phone_number },
+        });
+
+        if (existingUser && existingUser.id !== profile.id) {
+          throw new ConflictException("Phone number already in use");
+        }
+      }
+
+      if (updateUserDto.email) {
+        const existingEmailUser = await this.userRepository.findOne({
+          where: { email: updateUserDto.email },
+        });
+
+        if (existingEmailUser && existingEmailUser.id !== profile.id) {
+          throw new ConflictException("Email already in use");
+        }
+      }
+
+      const updatedUser = Object.assign(profile, updateUserDto);
+      await this.userRepository.save(updatedUser);
+
+      updatedUser.phone_number = Number(updatedUser.phone_number);
+
+      return updatedUser;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new ConflictException("Failed to update user profile", error);
+    }
+  }
 }
