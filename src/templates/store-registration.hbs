@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta charset="UTF-8">
+  <title>Seller Registration Successful</title>
+</head>
+
+<body style="font-family: Arial, sans-serif; background-color: #f2f4f6; margin: 0; padding: 0;">
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td align="center" style="padding: 40px 0;">
+        <table width="600" cellpadding="0" cellspacing="0"
+          style="background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+
+          <!-- Header with Logo -->
+          <tr>
+            <td align="center" style="padding: 30px;">
+              <img src="https://sqc-bucket.in-maa-1.linodeobjects.com/Valar%20Logo.png" alt="Valar Commerce Logo" width="120"
+                style="margin-bottom: 15px;">
+              <h2 style="color: #2c3e50;">🎉 Welcome to Valar Commerce!</h2>
+              <p style="font-size: 16px; color: #333;">Your seller registration was successful.</p>
+            </td>
+          </tr>
+
+          <!-- Seller Details -->
+          <tr>
+            <td style="padding: 0 30px 10px 30px;">
+              <table width="100%" style="font-size: 15px; color: #333;">
+                <tr>
+                  <td style="vertical-align: middle; white-space: nowrap;"><strong>Store Name:</strong></td>
+                  <td style="display: flex; align-items: center;">
+                    <img src="{{store.logo}}" alt="Store Logo" width="40" height="40"
+                      style="border-radius: 4px; vertical-align: middle;">
+                    <span style="margin-right: 10px;">{{store.name}}</span>
+                  </td>
+                </tr>
+                <tr>
+                  <td><strong>Seller ID:</strong></td>
+                  <td>{{store.id}}</td>
+                </tr>
+                <tr>
+                  <td><strong>Registration Date:</strong></td>
+                  <td>{{store.created_at}}</td>
+                </tr>
+                <tr><td><strong>Category:</strong></td><td>{{store.category}}</td></tr>
+                <tr><td><strong>Location:</strong></td><td>{{store.city}}, {{store.state}}</td></tr>
+
+              </table>
+            </td>
+          </tr>
+
+          <!-- Store Admin Login Credentials -->
+          <tr>
+            <td style="padding: 0 30px 20px 30px;">
+              <h4 style="margin-bottom: 8px; color: #2c3e50;">🔐 Store Admin Login Details</h4>
+              <table width="100%" style="font-size: 15px; color: #333;">
+                <tr>
+                  <td><strong>Login URL:</strong></td>
+                  <td><a href="https://adminuat.valardigital.in/" style="color: #1a73e8;">Seller Login</a></td>
+                </tr>
+                <tr>
+                  <td><strong>Email:</strong></td>
+                  <td>{{store.email}}</td>
+                </tr>
+                <tr>
+                  <td><strong>Password:</strong></td>
+                  <td>{{store.password}}</td>
+                </tr>
+              </table>
+              <p style="font-size: 14px; color: #e67e22; margin-top: 10px;"><strong>Note:</strong> Please change your
+                password after your first login.</p>
+            </td>
+          </tr>
+
+          <!-- How to proceed -->
+          <tr>
+            <td style="padding: 0 30px 20px 30px;">
+              <p style="font-size: 15px; color: #333;">
+                You can now:
+              <ul>
+                <li>Access your Seller Dashboard</li>
+                <li>Update your store details and KYC documents</li>
+                <li>Upload and manage your products</li>
+                <li>Start selling on the [ONDC/Valar Commerce] network</li>
+              </ul>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Custom Message Block -->
+          <tr>
+            <td style="padding: 10px 30px 20px 30px;">
+              <p style="font-size: 15px; color: #d35400;"><strong>Important:</strong> Please complete your profile and upload the required documents to get verified and go live faster.</p>
+              <p style="font-size: 15px; color: #333;">
+                Our support team will connect with you shortly. If you have any questions or need assistance, feel free to reach out to our support team at 
+                <a href="mailto:support@yourplatform.com" style="color: #1a73e8;">support@valardigital.in</a>.
+              </p>
+              <p style="font-size: 15px; color: #333;">
+                We’re here to help you grow your business online 🚀
+              </p>
+              <p style="font-size: 15px; color: #333;">
+                Best regards,<br>
+                <strong>The Valar Commerce Team</strong>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f9f9f9; padding: 20px 30px; text-align: center; border-top: 1px solid #eee;">
+              <p style="font-size: 13px; color: #999;">
+                Need help? Contact us at <a href="mailto:support@valardigital.in"
+                  style="color: #1a73e8;">support@valardigital.in</a>
+              </p>
+             
+              <p style="font-size: 12px; color: #ccc; margin-top: 10px;">
+                &copy; 2025 Valar Commerce. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+
+</html>
