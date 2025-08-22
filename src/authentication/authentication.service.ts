@@ -20,7 +20,6 @@ export class AuthenticationService {
   async generateOtp(generateOtpDto: GenerateOtpDto) {
     try {
       const user = await this.userService.generateOtp(generateOtpDto)
-
       if(user) {
         return { message: 'OTP sent successfully' };
       }
@@ -28,18 +27,22 @@ export class AuthenticationService {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException('Failed to generate OTP', error.message);
+      throw new BadRequestException('Failed to generate OTP', error);
     }
   }
 
   async login(loginDto: LoginDto) {
     try {
+      console.log("Login DTO:", loginDto);
       const user = await this.userService.login(loginDto)
+      console.log("User after login:", user);
 
       const payload = {
         id: user.id,
-        email: user.email,
+        phone_number: user.phone_number,
       };
+
+      console.log("Payload for tokens:", payload);
 
       return {
         access_token: generateAccessToken(payload),
@@ -47,9 +50,12 @@ export class AuthenticationService {
       }
 
     } catch (error) {
+      console.error("Login error:", error);
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        console.error("Specific error caught:", error);
         throw error;
       }
+      console.error("General error caught:", error);
       throw new BadRequestException('Login failed', error.message);
     }
   }
@@ -63,7 +69,7 @@ export class AuthenticationService {
 
       const newPayload = {
         id: user.id,
-        email: user.email,
+        phone_number: user.phone_number,
       };
 
       return {

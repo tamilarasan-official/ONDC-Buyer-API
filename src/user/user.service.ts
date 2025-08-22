@@ -18,7 +18,7 @@ export class UserService {
     private readonly userRepository: Repository<User>,
 
     @InjectRepository(UserOtp)
-    private readonly userOtpRepository: Repository<UserOtp>,
+    private readonly userOtpRepository: Repository<UserOtp>
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
@@ -39,13 +39,7 @@ export class UserService {
 
       return user;
     } catch (error) {
-      if (
-        error instanceof NotFoundException ||
-        error instanceof ConflictException
-      ) {
-        throw error;
-      }
-      throw new BadRequestException("Failed to generate OTP");
+      throw new BadRequestException("Failed to generate OTP", error);
     }
   }
 
@@ -64,7 +58,12 @@ export class UserService {
         throw new BadRequestException("Invalid OTP");
       }
 
-      await this.userOtpRepository.remove(user.userOtp);
+      const otpEntity = user.userOtp;
+
+      user.userOtp = null;
+      await this.userRepository.save(user);
+
+      await this.userOtpRepository.remove(otpEntity);
 
       return user;
     } catch (error) {
@@ -74,7 +73,7 @@ export class UserService {
       ) {
         throw error;
       }
-      throw new BadRequestException("Login failed");
+      throw new BadRequestException("Login failed", error);
     }
   }
 }

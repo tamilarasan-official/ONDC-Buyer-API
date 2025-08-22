@@ -59,7 +59,7 @@ import 'dotenv/config';
         password: configService.get<string>('DB_PASSWORD'),
         database: configService.get<string>('DB_NAME'),
         entities: [join(__dirname, '**/*.entity{.ts,.js}')],
-        synchronize: configService.get<boolean>('DB_SYNC'),
+        synchronize: false,
         logging: configService.get<boolean>('DB_LOGGING'),
       }),
     }),

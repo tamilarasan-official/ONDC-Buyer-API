@@ -12,7 +12,7 @@ export class User {
     @Column({ type: 'varchar', length: 255, unique: true, nullable: true })
     email?: string;
 
-    @Column({ type: 'int', nullable: false })
+    @Column({ type: 'bigint', nullable: false })
     phone_number: number;
 
     @Column({ type: 'boolean', default: true })
@@ -20,7 +20,7 @@ export class User {
 
     @OneToOne(() => UserOtp, (userOtp) => userOtp.user, { cascade: true, nullable: true })
     @JoinColumn({ name: "user_otp_id" })
-    userOtp: UserOtp;
+    userOtp: UserOtp | null;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     createdAt: Date;
