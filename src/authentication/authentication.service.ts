@@ -33,16 +33,12 @@ export class AuthenticationService {
 
   async login(loginDto: LoginDto) {
     try {
-      console.log("Login DTO:", loginDto);
       const user = await this.userService.login(loginDto)
-      console.log("User after login:", user);
 
       const payload = {
         id: user.id,
         phone_number: user.phone_number,
       };
-
-      console.log("Payload for tokens:", payload);
 
       return {
         access_token: generateAccessToken(payload),
@@ -50,12 +46,9 @@ export class AuthenticationService {
       }
 
     } catch (error) {
-      console.error("Login error:", error);
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
-        console.error("Specific error caught:", error);
         throw error;
       }
-      console.error("General error caught:", error);
       throw new BadRequestException('Login failed', error.message);
     }
   }
