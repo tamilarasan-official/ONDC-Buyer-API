@@ -33,9 +33,9 @@ export class UserService {
       }
 
       const otp = Math.floor(1000 + Math.random() * 9000);
-      user.userOtp = this.userOtpRepository.create({ otp, user });
+      user.otp = this.userOtpRepository.create({ otp, user });
 
-      await this.userOtpRepository.save(user.userOtp);
+      await this.userOtpRepository.save(user.otp);
 
       return user;
     } catch (error) {
@@ -47,20 +47,20 @@ export class UserService {
     try {
       const user = await this.userRepository.findOne({
         where: { phone_number: loginDto.phone_number },
-        relations: ["userOtp"],
+        relations: ["otp"],
       });
 
-      if (!user?.userOtp) {
+      if (!user?.otp) {
         throw new NotFoundException("OTP already expired or not found");
       }
 
-      if (user.userOtp.otp !== loginDto.otp) {
+      if (user.otp.otp !== loginDto.otp) {
         throw new BadRequestException("Invalid OTP");
       }
 
-      const otpEntity = user.userOtp;
+      const otpEntity = user.otp;
 
-      user.userOtp = null;
+      user.otp = null;
       await this.userRepository.save(user);
 
       await this.userOtpRepository.remove(otpEntity);
@@ -71,8 +71,10 @@ export class UserService {
         error instanceof NotFoundException ||
         error instanceof BadRequestException
       ) {
+        console.log("Known error:", error.message);
         throw error;
       }
+      console.log("Unknown error:", error);
       throw new BadRequestException("Login failed", error);
     }
   }
