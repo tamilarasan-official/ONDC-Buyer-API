@@ -4,6 +4,7 @@ import { LoginDto } from './dto/login.dto';
 import { PaginationDto } from 'src/shared/dto/pagination.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { GenerateOtpDto } from './dto/generate-otp.dto';
+import { generate } from 'rxjs';
 
 @Controller('authentication')
 export class AuthenticationController {
@@ -23,5 +24,4 @@ export class AuthenticationController {
   refreshToken(@Body() refreshTokenDto: RefreshTokenDto) {
     return this.authenticationService.refreshToken(refreshTokenDto);
   }
-
 }
