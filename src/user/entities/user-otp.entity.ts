@@ -6,16 +6,16 @@ export class UserOtp {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @OneToOne(() => User, (user) => user.userOtp, { onDelete: 'CASCADE' })
+    @OneToOne(() => User, (user) => user.otp, { onDelete: 'CASCADE' })
     user: User;
 
     @Column({ type: 'int', nullable: false })
     otp: number;
 
     @CreateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-    createdAt: Date;
+    created_at: Date;
 
     @UpdateDateColumn({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
-    updatedAt: Date;
+    updated_at: Date;
 
 }
