@@ -24,9 +24,6 @@ export class AuthenticationService {
         return { message: 'OTP sent successfully' };
       }
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
-        throw error;
-      }
       throw new BadRequestException('Failed to generate OTP', error);
     }
   }
@@ -46,9 +43,6 @@ export class AuthenticationService {
       }
 
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
-        throw error;
-      }
       throw new BadRequestException('Login failed', error.message);
     }
   }
@@ -70,7 +64,7 @@ export class AuthenticationService {
         refresh_token: generateRefreshToken(newPayload),
       };
     } catch (error) {
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+      if (error instanceof BadRequestException) {
         throw error;
       }
       throw new BadRequestException('Failed to refresh token', error.message);
