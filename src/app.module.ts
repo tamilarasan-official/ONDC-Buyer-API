@@ -10,6 +10,7 @@ import { MailerModule } from '@nestjs-modules/mailer';
 import { HandlebarsAdapter } from '@nestjs-modules/mailer/dist/adapters/handlebars.adapter';
 import { UserModule } from './user/user.module';
 import { AuthenticationModule } from './authentication/authentication.module';
+import { CategoryModule } from './category/category.module';
 import { DishModule } from './dish/dish.module';
 import 'dotenv/config';
 
@@ -66,6 +67,7 @@ import 'dotenv/config';
     }),
     UserModule,
     AuthenticationModule,
+    CategoryModule,
     DishModule,
   ],
   controllers: [AppController],
