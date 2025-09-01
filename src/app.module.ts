@@ -12,6 +12,10 @@ import { UserModule } from './user/user.module';
 import { AuthenticationModule } from './authentication/authentication.module';
 import { CategoryModule } from './category/category.module';
 import { DishModule } from './dish/dish.module';
+import { StoreModule } from './store/store.module';
+import { ItemModule } from './item/item.module';
+import { VariantModule } from './variant/variant.module';
+import { OfferModule } from './offer/offer.module';
 import 'dotenv/config';
 
 
@@ -69,6 +73,10 @@ import 'dotenv/config';
     AuthenticationModule,
     CategoryModule,
     DishModule,
+    StoreModule,
+    ItemModule,
+    VariantModule,
+    OfferModule,
   ],
   controllers: [AppController],
   providers: [AppService],
