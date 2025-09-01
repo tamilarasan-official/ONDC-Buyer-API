@@ -110,6 +110,15 @@ export class Item {
   @Column({ type: "text", nullable: true })
   consumer_care_details: string;
 
+  @Column({ type: "decimal", precision: 5, scale: 2, nullable: true })
+  tax_rate?: number; // Tax rate percentage like 5.00, 12.00, 18.00, 28.00
+
+  @Column({ type: "varchar", length: 20, nullable: true })
+  tax_type?: string; // "GST", "CGST+SGST", "IGST", "VAT"
+
+  @Column({ type: "varchar", length: 20, nullable: true })
+  hsn_code?: string; // HSN/SAC code for tax classification
+
   @Column({ type: "boolean", default: true })
   status: boolean;
 

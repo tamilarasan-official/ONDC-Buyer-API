@@ -45,6 +45,9 @@ export class Store {
   @Column({ type: "varchar", length: 10, nullable: true })
   ttl?: string; // Time to live like "P1D"
 
+  @Column({ type: "varchar", length: 15, nullable: true })
+  gst_number?: string; // GST registration number like "22AAAAA0000A1Z5"
+
   @Column({ type: "boolean", default: true })
   status: boolean;
 

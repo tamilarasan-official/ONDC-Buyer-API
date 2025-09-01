@@ -34,6 +34,10 @@ export class CreateStoreDto {
   ttl?: string;
 
   @IsOptional()
+  @IsString()
+  gst_number?: string;
+
+  @IsOptional()
   @IsBoolean()
   status?: boolean;
 }
