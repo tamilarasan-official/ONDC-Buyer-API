@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
@@ -18,6 +19,7 @@ import { ItemModule } from './item/item.module';
 import { VariantModule } from './variant/variant.module';
 import { OfferModule } from './offer/offer.module';
 import { OndcSearchModule } from './ondc-search/ondc-search.module';
+import { CatalogSyncModule } from './catalog-sync/catalog-sync.module';
 import 'dotenv/config';
 
 
@@ -26,6 +28,7 @@ import 'dotenv/config';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
+    ScheduleModule.forRoot(),
 
     ServeStaticModule.forRoot({
       rootPath: join(__dirname, '..', 'uploads'),
@@ -81,8 +84,9 @@ import 'dotenv/config';
     OfferModule,
     OndcSearchModule,
     CatalogIngestionModule,
+    CatalogSyncModule,
   ],
   controllers: [AppController],
-  providers: [AppService, CatalogIngestionService],
+  providers: [AppService],
 })
 export class AppModule { }

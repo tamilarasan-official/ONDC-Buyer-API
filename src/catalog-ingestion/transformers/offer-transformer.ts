@@ -44,8 +44,8 @@ export class OfferTransformer extends BaseTransformer {
    */
   private parseOfferTiming(offerData: ONDCOffer, offer: Offers): void {
     if (offerData.time?.range) {
-      offer.valid_from = this.parseDateTime(offerData.time.range.start, new Date());
-      offer.valid_to = this.parseDateTime(offerData.time.range.end, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000));
+      offer.valid_from = this.parseDateTime(offerData.time.range.start, new Date()) || new Date();
+      offer.valid_to = this.parseDateTime(offerData.time.range.end, new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)) || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
     } else {
       // Set default validity if not provided
       offer.valid_from = new Date();
