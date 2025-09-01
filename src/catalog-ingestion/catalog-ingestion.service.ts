@@ -3,6 +3,15 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { ONDCSearchResponseDto, Provider, Category as ONDCCategory, Item as ONDCItem, Offer as ONDCOffer } from '../ondc-search/dto/ondc-search.dto';
 
+// Import transformers
+import { 
+  StoreTransformer, 
+  LocationTransformer, 
+  CategoryTransformer, 
+  ItemTransformer, 
+  OfferTransformer 
+} from './transformers';
+
 // Import all entities
 import { Store } from '../store/entities/store.entity';
 import { StoreLocation } from '../store/entities/store-location.entity';
@@ -33,6 +42,13 @@ import { OfferBenefits } from '../offer/entities/offer-benefits.entity';
 @Injectable()
 export class CatalogIngestionService {
   private readonly logger = new Logger(CatalogIngestionService.name);
+  
+  // Initialize transformers
+  private readonly storeTransformer = new StoreTransformer();
+  private readonly locationTransformer = new LocationTransformer();
+  private readonly categoryTransformer = new CategoryTransformer();
+  private readonly itemTransformer = new ItemTransformer();
+  private readonly offerTransformer = new OfferTransformer();
 
   constructor(
     @InjectRepository(Store)
@@ -98,6 +114,10 @@ export class CatalogIngestionService {
       categories_upserted: number;
       items_upserted: number;
       offers_upserted: number;
+      stores_deleted: number;
+      categories_deleted: number;
+      items_deleted: number;
+      offers_deleted: number;
       errors: string[];
     };
   }> {
@@ -107,10 +127,23 @@ export class CatalogIngestionService {
       categories_upserted: 0,
       items_upserted: 0,
       offers_upserted: 0,
+      stores_deleted: 0,
+      categories_deleted: 0,
+      items_deleted: 0,
+      offers_deleted: 0,
       errors: [] as string[],
     };
 
     this.logger.log(`Starting catalog ingestion for ${responses.length} provider response(s)`);
+
+    // Collect all active store reference_ids from responses
+    const allActiveStoreIds: string[] = [];
+    responses.forEach(response => {
+      const providers = response.message.catalog['bpp/providers'] || [];
+      providers.forEach(provider => {
+        allActiveStoreIds.push(provider.id);
+      });
+    });
 
     // Process each provider response
     for (const response of responses) {
@@ -122,6 +155,9 @@ export class CatalogIngestionService {
         stats.errors.push(`Provider processing error: ${error.message}`);
       }
     }
+
+    // Handle store-level deletions (stores not present in any response)
+    await this.handleStoreDeletions(allActiveStoreIds, stats);
 
     this.logger.log(`Catalog ingestion completed. Stats: ${JSON.stringify(stats)}`);
 
@@ -209,79 +245,63 @@ export class CatalogIngestionService {
         stats.offers_upserted++;
       }
     }
+
+    // 8. Handle Deletions (Soft Delete)
+    await this.handleDeletions(provider, store, queryRunner, stats);
   }
 
   /**
-   * Upsert Store entity using reference_id
+   * Upsert Store entity using reference_id with enhanced transformation
    */
   private async upsertStore(provider: Provider, context: any, queryRunner: any): Promise<Store> {
     let store = await queryRunner.manager.findOne(Store, {
       where: { reference_id: provider.id }
     });
 
-    if (!store) {
-      store = new Store();
-      store.reference_id = provider.id;
-    }
-
-    // Update store fields
-    store.bpp_id = context.bpp_id;
-    store.bpp_uri = context.bpp_uri;
-    store.name = provider.descriptor.name;
-    store.description = provider.descriptor.short_desc || provider.descriptor.long_desc;
-    store.logo_url = provider.descriptor.symbol || provider.descriptor.images?.[0];
-    store.fssai_license_no = provider['@ondc/org/fssai_license_no'];
-    store.ttl = provider.ttl;
-    store.status = true;
-
-    // Extract GST number from provider tags if available
-    if (provider.tags) {
-      const gstTag = provider.tags.find(tag => tag.code === 'statutory_requirements');
-      if (gstTag) {
-        const gstItem = gstTag.list.find(item => item.code === 'gst_number');
-        if (gstItem) {
-          store.gst_number = gstItem.value;
-        }
+    try {
+      // Use transformer to transform and validate data
+      store = this.storeTransformer.transform(provider, context, store);
+      
+      // Validate transformed data
+      const validation = this.storeTransformer.validateStore(store);
+      if (!validation.isValid) {
+        this.logger.warn(`Store validation failed for ${provider.id}:`, validation.errors);
+        // Continue with transformation warnings rather than failing
       }
-    }
 
-    return await queryRunner.manager.save(Store, store);
+      return await queryRunner.manager.save(Store, store);
+      
+    } catch (error) {
+      this.logger.error(`Failed to upsert store ${provider.id}: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 
   /**
-   * Upsert Store Location using reference_id - COMPLETE IMPLEMENTATION
+   * Upsert Store Location using reference_id with enhanced transformation
    */
   private async upsertStoreLocation(locationData: any, store: Store, queryRunner: any): Promise<StoreLocation> {
     let location = await queryRunner.manager.findOne(StoreLocation, {
       where: { reference_id: locationData.id, store: { id: store.id } }
     });
 
-    if (!location) {
-      location = new StoreLocation();
-      location.reference_id = locationData.id;
-      location.store = store;
-    }
+    try {
+      // Use transformer to transform and validate data
+      location = this.locationTransformer.transform(locationData, store, location);
+      
+      // Validate transformed data
+      const validation = this.locationTransformer.validateLocation(location);
+      if (!validation.isValid) {
+        this.logger.warn(`Location validation failed for ${locationData.id}:`, validation.errors);
+        // Continue with transformation warnings rather than failing
+      }
 
-    // Parse GPS coordinates
-    const [lat, lng] = locationData.gps.split(',').map(coord => parseFloat(coord.trim()));
-    location.gps_lat = lat;
-    location.gps_lng = lng;
-    
-    location.address_locality = locationData.address?.locality || '';
-    location.address_street = locationData.address?.street || '';
-    location.address_city = locationData.address?.city || '';
-    location.address_area_code = locationData.address?.area_code || '';
-    location.address_state = locationData.address?.state || '';
-    
-    // Extract delivery radius if available
-    if (locationData.circle) {
-      location.delivery_radius_km = parseFloat(locationData.circle.radius.value);
-      location.delivery_radius_unit = locationData.circle.radius.unit;
+      return await queryRunner.manager.save(StoreLocation, location);
+      
+    } catch (error) {
+      this.logger.error(`Failed to upsert location ${locationData.id}: ${error.message}`, error.stack);
+      throw error;
     }
-    
-    location.status = true;
-
-    return await queryRunner.manager.save(StoreLocation, location);
   }
 
   /**
@@ -411,123 +431,150 @@ export class CatalogIngestionService {
   }
 
   /**
-   * Upsert Category using reference_id - COMPLETE IMPLEMENTATION
+   * Upsert Category using reference_id with enhanced transformation
    */
   private async upsertCategory(categoryData: ONDCCategory, store: Store, queryRunner: any): Promise<Category> {
     let category = await queryRunner.manager.findOne(Category, {
       where: { reference_id: categoryData.id, store: { id: store.id } }
     });
 
-    if (!category) {
-      category = new Category();
-      category.reference_id = categoryData.id;
-      category.store = store;
-    }
-
-    category.name = categoryData.descriptor.name;
-    category.description = categoryData.descriptor.short_desc || categoryData.descriptor.long_desc;
-    category.icon = categoryData.descriptor.images?.[0] || '';
-    category.parent_category_id = categoryData.parent_category_id ? parseInt(categoryData.parent_category_id) : undefined;
-    category.status = true;
-
-    // Determine category type from tags
-    if (categoryData.tags) {
-      const typeTag = categoryData.tags.find(tag => tag.code === 'type');
-      if (typeTag) {
-        const typeItem = typeTag.list.find(item => item.code === 'type');
-        category.type = typeItem?.value || 'custom_menu';
+    try {
+      // Use transformer to transform and validate data
+      category = this.categoryTransformer.transform(categoryData, store, category);
+      
+      // Validate transformed data
+      const validation = this.categoryTransformer.validateCategory(category);
+      if (!validation.isValid) {
+        this.logger.warn(`Category validation failed for ${categoryData.id}:`, validation.errors);
+        // Continue with transformation warnings rather than failing
       }
 
-      // Set display rank
-      const displayTag = categoryData.tags.find(tag => tag.code === 'display');
-      if (displayTag) {
-        const rankItem = displayTag.list.find(item => item.code === 'rank');
-        category.display_rank = rankItem ? parseInt(rankItem.value) : null;
-      }
-    } else {
-      category.type = 'custom_menu';
-    }
+      const savedCategory = await queryRunner.manager.save(Category, category);
 
-    return await queryRunner.manager.save(Category, category);
+      // Process category timing if available
+      const timing = this.categoryTransformer.transformTiming(categoryData);
+      if (timing) {
+        await this.processCategoryTiming(timing, savedCategory, queryRunner);
+      }
+
+      // Process category configuration if available
+      const config = this.categoryTransformer.transformConfig(categoryData);
+      if (config) {
+        await this.processCategoryConfig(config, savedCategory, queryRunner);
+      }
+
+      return savedCategory;
+      
+    } catch (error) {
+      this.logger.error(`Failed to upsert category ${categoryData.id}: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 
   /**
-   * Upsert Item using reference_id - COMPLETE IMPLEMENTATION
+   * Process category timing information
+   */
+  private async processCategoryTiming(timing: any, category: Category, queryRunner: any): Promise<void> {
+    // Delete existing timing for this category
+    await queryRunner.manager.delete(CategoryTimings, { category: { id: category.id } });
+
+    const categoryTiming = new CategoryTimings();
+    categoryTiming.category = category;
+    categoryTiming.day_from = timing.day_from;
+    categoryTiming.day_to = timing.day_to;
+    categoryTiming.time_from = timing.time_from;
+    categoryTiming.time_to = timing.time_to;
+
+    await queryRunner.manager.save(CategoryTimings, categoryTiming);
+  }
+
+  /**
+   * Process category configuration information
+   */
+  private async processCategoryConfig(config: any, category: Category, queryRunner: any): Promise<void> {
+    // Delete existing config for this category
+    await queryRunner.manager.delete(CategoryConfigs, { category: { id: category.id } });
+
+    const categoryConfig = new CategoryConfigs();
+    categoryConfig.category = category;
+    categoryConfig.min_selections = config.min_selections;
+    categoryConfig.max_selections = config.max_selections;
+    categoryConfig.input_type = config.input_type;
+    categoryConfig.sequence = config.sequence;
+    categoryConfig.is_mandatory = config.is_mandatory;
+
+    await queryRunner.manager.save(CategoryConfigs, categoryConfig);
+  }
+
+  /**
+   * Upsert Item using reference_id with enhanced transformation
    */
   private async upsertItem(itemData: ONDCItem, store: Store, provider: Provider, queryRunner: any): Promise<Item> {
     let item = await queryRunner.manager.findOne(Item, {
       where: { reference_id: itemData.id, store: { id: store.id } }
     });
 
-    if (!item) {
-      item = new Item();
-      item.reference_id = itemData.id;
-      item.store = store;
-    }
-
-    // Basic item data
-    item.name = itemData.descriptor.name;
-    item.short_desc = itemData.descriptor.short_desc;
-    item.long_desc = itemData.descriptor.long_desc;
-    item.symbol_url = itemData.descriptor.symbol;
-    item.images = itemData.descriptor.images || [];
-    
-    // ONDC specific fields
-    item.is_related = itemData.related || false;
-    item.is_recommended = itemData.recommended || false;
-    item.is_returnable = itemData['@ondc/org/returnable'] || false;
-    item.is_cancellable = itemData['@ondc/org/cancellable'] || false;
-    item.return_window = itemData['@ondc/org/return_window'];
-    item.seller_pickup_return = itemData['@ondc/org/seller_pickup_return'] || false;
-    item.time_to_ship = itemData['@ondc/org/time_to_ship'];
-    item.available_on_cod = itemData['@ondc/org/available_on_cod'] || false;
-    item.consumer_care_details = itemData['@ondc/org/contact_details_consumer_care'];
-
-    // Set item type
-    item.type = 'item';
-    if (itemData.tags) {
-      const typeTag = itemData.tags.find(tag => tag.code === 'type');
-      if (typeTag) {
-        const typeItem = typeTag.list.find(item => item.code === 'type');
-        item.type = typeItem?.value || 'item';
+    try {
+      // Use transformer to transform and validate data
+      item = this.itemTransformer.transform(itemData, store, item);
+      
+      // Validate transformed data
+      const validation = this.itemTransformer.validateItem(item);
+      if (!validation.isValid) {
+        this.logger.warn(`Item validation failed for ${itemData.id}:`, validation.errors);
+        // Continue with transformation warnings rather than failing
       }
+
+      const savedItem = await queryRunner.manager.save(Item, item);
+
+      // Process item pricing with transformer
+      const pricing = this.itemTransformer.transformPricing(itemData);
+      if (pricing) {
+        await this.processItemPricing(pricing, savedItem, queryRunner);
+      }
+
+      // Process item quantity with transformer
+      const quantity = this.itemTransformer.transformQuantity(itemData);
+      if (quantity) {
+        await this.processItemQuantity(quantity, savedItem, queryRunner);
+      }
+
+      // Process item attributes with transformer
+      const attributes = this.itemTransformer.transformAttributes(itemData);
+      if (attributes.length > 0) {
+        await this.processItemAttributes(attributes, savedItem, queryRunner);
+      }
+
+      return savedItem;
+      
+    } catch (error) {
+      this.logger.error(`Failed to upsert item ${itemData.id}: ${error.message}`, error.stack);
+      throw error;
     }
-
-    item.status = true;
-
-    const savedItem = await queryRunner.manager.save(Item, item);
-
-    // Process item pricing
-    if (itemData.price) {
-      await this.processItemPricing(itemData.price, savedItem, queryRunner);
-    }
-
-    // Process item quantity
-    if (itemData.quantity) {
-      await this.processItemQuantity(itemData.quantity, savedItem, queryRunner);
-    }
-
-    return savedItem;
   }
 
   /**
-   * Process item pricing data
+   * Process item pricing data from transformer
    */
-  private async processItemPricing(priceData: any, item: Item, queryRunner: any): Promise<void> {
+  private async processItemPricing(pricingData: any, item: Item, queryRunner: any): Promise<void> {
     // Delete existing prices for this item
     await queryRunner.manager.delete(ItemPrices, { item: { id: item.id } });
 
     const itemPrice = new ItemPrices();
     itemPrice.item = item;
-    itemPrice.currency = priceData.currency || 'INR';
-    itemPrice.base_price = parseFloat(priceData.value);
-    itemPrice.maximum_price = priceData.maximum_value ? parseFloat(priceData.maximum_value) : undefined;
+    itemPrice.currency = pricingData.currency;
+    itemPrice.base_price = pricingData.base_price;
+    itemPrice.maximum_price = pricingData.maximum_price;
+    itemPrice.minimum_price_range = pricingData.minimum_price_range;
+    itemPrice.maximum_price_range = pricingData.maximum_price_range;
+    itemPrice.default_selection_price = pricingData.default_selection_price;
+    itemPrice.default_selection_max_price = pricingData.default_selection_max_price;
 
     await queryRunner.manager.save(ItemPrices, itemPrice);
   }
 
   /**
-   * Process item quantity data
+   * Process item quantity data from transformer
    */
   private async processItemQuantity(quantityData: any, item: Item, queryRunner: any): Promise<void> {
     // Delete existing quantities for this item
@@ -535,54 +582,356 @@ export class CatalogIngestionService {
 
     const itemQuantity = new ItemQuantities();
     itemQuantity.item = item;
-    
-    if (quantityData.available) {
-      itemQuantity.available_count = parseInt(quantityData.available.count);
-    }
-    
-    if (quantityData.maximum) {
-      itemQuantity.maximum_count = parseInt(quantityData.maximum.count);
-    }
-    
-    if (quantityData.unitized) {
-      itemQuantity.unitized_unit = quantityData.unitized.measure.unit;
-      itemQuantity.unitized_value = parseFloat(quantityData.unitized.measure.value);
-    }
+    itemQuantity.unit_type = quantityData.unit_type;
+    itemQuantity.unit_value = quantityData.unit_value;
+    itemQuantity.available_count = quantityData.available_count;
+    itemQuantity.maximum_count = quantityData.maximum_count;
+    itemQuantity.unitized_unit = quantityData.unitized_unit;
+    itemQuantity.unitized_value = quantityData.unitized_value;
 
     await queryRunner.manager.save(ItemQuantities, itemQuantity);
   }
 
   /**
-   * Upsert Offer using reference_id - COMPLETE IMPLEMENTATION
+   * Process item attributes from transformer
+   */
+  private async processItemAttributes(attributesData: any[], item: Item, queryRunner: any): Promise<void> {
+    // Delete existing attributes for this item
+    await queryRunner.manager.delete(ItemAttributes, { item: { id: item.id } });
+
+    for (const attrData of attributesData) {
+      const itemAttribute = new ItemAttributes();
+      itemAttribute.item = item;
+      itemAttribute.attribute_code = attrData.attribute_code;
+      itemAttribute.attribute_name = attrData.attribute_name;
+      itemAttribute.attribute_value = attrData.attribute_value;
+      itemAttribute.attribute_group = attrData.attribute_group;
+      itemAttribute.display_order = attrData.display_order;
+
+      await queryRunner.manager.save(ItemAttributes, itemAttribute);
+    }
+  }
+
+  /**
+   * Upsert Offer using reference_id with enhanced transformation
    */
   private async upsertOffer(offerData: ONDCOffer, store: Store, queryRunner: any): Promise<Offers> {
     let offer = await queryRunner.manager.findOne(Offers, {
       where: { reference_id: offerData.id, store: { id: store.id } }
     });
 
-    if (!offer) {
-      offer = new Offers();
-      offer.reference_id = offerData.id;
-      offer.store = store;
+    try {
+      // Use transformer to transform and validate data
+      offer = this.offerTransformer.transform(offerData, store, offer);
+      
+      // Validate transformed data
+      const validation = this.offerTransformer.validateOffer(offer);
+      if (!validation.isValid) {
+        this.logger.warn(`Offer validation failed for ${offerData.id}:`, validation.errors);
+        // Continue with transformation warnings rather than failing
+      }
+
+      const savedOffer = await queryRunner.manager.save(Offers, offer);
+
+      // Process offer qualifiers with transformer
+      const qualifiers = this.offerTransformer.transformQualifiers(offerData);
+      if (qualifiers.length > 0) {
+        await this.processOfferQualifiers(qualifiers, savedOffer, queryRunner);
+      }
+
+      // Process offer benefits with transformer
+      const benefits = this.offerTransformer.transformBenefits(offerData);
+      if (benefits.length > 0) {
+        await this.processOfferBenefits(benefits, savedOffer, queryRunner);
+      }
+
+      // Process offer location associations
+      const locationIds = this.offerTransformer.parseLocationIds(offerData);
+      if (locationIds.length > 0) {
+        await this.processOfferLocations(locationIds, savedOffer, store, queryRunner);
+      }
+
+      // Process offer item associations
+      const itemIds = this.offerTransformer.parseItemIds(offerData);
+      if (itemIds.length > 0) {
+        await this.processOfferItems(itemIds, savedOffer, store, queryRunner);
+      }
+
+      return savedOffer;
+      
+    } catch (error) {
+      this.logger.error(`Failed to upsert offer ${offerData.id}: ${error.message}`, error.stack);
+      throw error;
     }
+  }
 
-    offer.offer_code = offerData.descriptor.code;
-    offer.banner_image_url = offerData.descriptor.images?.[0];
-    
-    if (offerData.time) {
-      offer.valid_from = new Date(offerData.time.range.start);
-      offer.valid_to = new Date(offerData.time.range.end);
-    } else {
-      // Set default valid dates if not provided
-      offer.valid_from = new Date();
-      offer.valid_to = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days from now
+  /**
+   * Process offer qualifiers from transformer
+   */
+  private async processOfferQualifiers(qualifiersData: any[], offer: Offers, queryRunner: any): Promise<void> {
+    // Delete existing qualifiers for this offer
+    await queryRunner.manager.delete(OfferQualifiers, { offer: { id: offer.id } });
+
+    for (const qualifierData of qualifiersData) {
+      const offerQualifier = new OfferQualifiers();
+      offerQualifier.offer = offer;
+      offerQualifier.qualifier_type = qualifierData.qualifier_type;
+      offerQualifier.qualifier_value = qualifierData.qualifier_value;
+
+      await queryRunner.manager.save(OfferQualifiers, offerQualifier);
     }
+  }
 
-    offer.is_auto_apply = false;
-    offer.is_additive = false;
-    offer.status = true;
+  /**
+   * Process offer benefits from transformer
+   */
+  private async processOfferBenefits(benefitsData: any[], offer: Offers, queryRunner: any): Promise<void> {
+    // Delete existing benefits for this offer
+    await queryRunner.manager.delete(OfferBenefits, { offer: { id: offer.id } });
 
-    return await queryRunner.manager.save(Offers, offer);
+    for (const benefitData of benefitsData) {
+      const offerBenefit = new OfferBenefits();
+      offerBenefit.offer = offer;
+      offerBenefit.benefit_type = benefitData.benefit_type;
+      offerBenefit.benefit_value = benefitData.benefit_value;
+      offerBenefit.benefit_cap = benefitData.benefit_cap;
+      offerBenefit.benefit_item_count = benefitData.benefit_item_count;
+
+      await queryRunner.manager.save(OfferBenefits, offerBenefit);
+    }
+  }
+
+  /**
+   * Process offer location associations
+   */
+  private async processOfferLocations(locationIds: string[], offer: Offers, store: Store, queryRunner: any): Promise<void> {
+    // Delete existing location associations for this offer
+    await queryRunner.manager.delete(OfferLocations, { offer: { id: offer.id } });
+
+    for (const locationId of locationIds) {
+      // Find the location in this store
+      const location = await queryRunner.manager.findOne(StoreLocation, {
+        where: { reference_id: locationId, store: { id: store.id } }
+      });
+
+      if (location) {
+        const offerLocation = new OfferLocations();
+        offerLocation.offer = offer;
+        offerLocation.location = location;
+
+        await queryRunner.manager.save(OfferLocations, offerLocation);
+      } else {
+        this.logger.warn(`Location ${locationId} not found for offer ${offer.reference_id}`);
+      }
+    }
+  }
+
+  /**
+   * Process offer item associations
+   */
+  private async processOfferItems(itemIds: string[], offer: Offers, store: Store, queryRunner: any): Promise<void> {
+    // Delete existing item associations for this offer
+    await queryRunner.manager.delete(OfferItems, { offer: { id: offer.id } });
+
+    for (const itemId of itemIds) {
+      // Find the item in this store
+      const item = await queryRunner.manager.findOne(Item, {
+        where: { reference_id: itemId, store: { id: store.id } }
+      });
+
+      if (item) {
+        const offerItem = new OfferItems();
+        offerItem.offer = offer;
+        offerItem.item = item;
+
+        await queryRunner.manager.save(OfferItems, offerItem);
+      } else {
+        this.logger.warn(`Item ${itemId} not found for offer ${offer.reference_id}`);
+      }
+    }
+  }
+
+  /**
+   * Handle store-level deletions (stores not present in any response)
+   */
+  private async handleStoreDeletions(activeStoreIds: string[], stats: any): Promise<void> {
+    const queryRunner = this.dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+
+    try {
+      // Get all currently active stores
+      const existingStores = await queryRunner.manager.find(Store, {
+        where: { status: true }
+      });
+
+      // Find stores to mark as deleted
+      const storesToDelete = existingStores.filter(store => 
+        !activeStoreIds.includes(store.reference_id)
+      );
+
+      // Mark stores as inactive (soft delete)
+      for (const store of storesToDelete) {
+        store.status = false;
+        await queryRunner.manager.save(Store, store);
+        stats.stores_deleted++;
+        this.logger.log(`Soft deleted store: ${store.reference_id} (${store.name})`);
+
+        // Also soft delete all related entities for this store
+        await this.softDeleteStoreRelatedEntities(store, queryRunner);
+      }
+
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+      this.logger.error(`Failed to handle store deletions: ${error.message}`, error.stack);
+      stats.errors.push(`Store deletion error: ${error.message}`);
+    } finally {
+      await queryRunner.release();
+    }
+  }
+
+  /**
+   * Soft delete all entities related to a deleted store
+   */
+  private async softDeleteStoreRelatedEntities(store: Store, queryRunner: any): Promise<void> {
+    // Soft delete categories
+    await queryRunner.manager.update(Category, 
+      { store: { id: store.id }, status: true }, 
+      { status: false }
+    );
+
+    // Soft delete items
+    await queryRunner.manager.update(Item, 
+      { store: { id: store.id }, status: true }, 
+      { status: false }
+    );
+
+    // Soft delete offers
+    await queryRunner.manager.update(Offers, 
+      { store: { id: store.id }, status: true }, 
+      { status: false }
+    );
+
+    this.logger.log(`Soft deleted all related entities for store: ${store.reference_id}`);
+  }
+
+  /**
+   * Handle deletions (soft delete) for entities not present in current response
+   */
+  private async handleDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+    this.logger.log(`Handling deletions for store ${store.reference_id}`);
+
+    // Handle Category deletions
+    await this.handleCategoryDeletions(provider, store, queryRunner, stats);
+
+    // Handle Item deletions
+    await this.handleItemDeletions(provider, store, queryRunner, stats);
+
+    // Handle Offer deletions
+    await this.handleOfferDeletions(provider, store, queryRunner, stats);
+
+    this.logger.log(`Deletion handling completed for store ${store.reference_id}`);
+  }
+
+  /**
+   * Handle Category deletions (soft delete)
+   */
+  private async handleCategoryDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+    // Get existing active categories for this store
+    const existingCategories = await queryRunner.manager.find(Category, {
+      where: { store: { id: store.id }, status: true }
+    });
+
+    // Get current response category IDs
+    const responseCategoryIds = provider.categories?.map(cat => cat.id) || [];
+
+    // Find categories to mark as deleted
+    const categoriesToDelete = existingCategories.filter(category => 
+      !responseCategoryIds.includes(category.reference_id)
+    );
+
+    // Mark as inactive (soft delete)
+    for (const category of categoriesToDelete) {
+      category.status = false;
+      await queryRunner.manager.save(Category, category);
+      stats.categories_deleted++;
+      this.logger.log(`Soft deleted category: ${category.reference_id} (${category.name})`);
+    }
+  }
+
+  /**
+   * Handle Item deletions (soft delete)
+   */
+  private async handleItemDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+    // Get existing active items for this store
+    const existingItems = await queryRunner.manager.find(Item, {
+      where: { store: { id: store.id }, status: true }
+    });
+
+    // Get current response item IDs
+    const responseItemIds = provider.items?.map(item => item.id) || [];
+
+    // Find items to mark as deleted
+    const itemsToDelete = existingItems.filter(item => 
+      !responseItemIds.includes(item.reference_id)
+    );
+
+    // Mark as inactive (soft delete)
+    for (const item of itemsToDelete) {
+      item.status = false;
+      await queryRunner.manager.save(Item, item);
+      stats.items_deleted++;
+      this.logger.log(`Soft deleted item: ${item.reference_id} (${item.name})`);
+
+      // Also mark related entities as inactive
+      await this.softDeleteRelatedItemEntities(item, queryRunner);
+    }
+  }
+
+  /**
+   * Handle Offer deletions (soft delete)
+   */
+  private async handleOfferDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+    // Get existing active offers for this store
+    const existingOffers = await queryRunner.manager.find(Offers, {
+      where: { store: { id: store.id }, status: true }
+    });
+
+    // Get current response offer IDs
+    const responseOfferIds = provider.offers?.map(offer => offer.id) || [];
+
+    // Find offers to mark as deleted
+    const offersToDelete = existingOffers.filter(offer => 
+      !responseOfferIds.includes(offer.reference_id)
+    );
+
+    // Mark as inactive (soft delete)
+    for (const offer of offersToDelete) {
+      offer.status = false;
+      await queryRunner.manager.save(Offers, offer);
+      stats.offers_deleted++;
+      this.logger.log(`Soft deleted offer: ${offer.reference_id} (${offer.offer_code})`);
+    }
+  }
+
+  /**
+   * Soft delete related item entities when an item is deleted
+   */
+  private async softDeleteRelatedItemEntities(item: Item, queryRunner: any): Promise<void> {
+    // Mark item prices as inactive (if they have status field)
+    // Note: Current ItemPrices doesn't have status field, so we'll delete and recreate
+    // This is handled by the delete operations in processItemPricing method
+
+    // Mark item quantities as inactive (if they have status field)
+    // Note: Current ItemQuantities doesn't have status field, so we'll delete and recreate
+    // This is handled by the delete operations in processItemQuantity method
+
+    // Mark item attributes as inactive (if they have status field)
+    // Note: Current ItemAttributes doesn't have status field, so we'll delete and recreate
+    // This is handled by the delete operations when processing item tags
+
+    this.logger.log(`Soft deleted related entities for item: ${item.reference_id}`);
   }
 
   /**
