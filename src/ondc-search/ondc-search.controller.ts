@@ -1,9 +1,15 @@
-import { Controller, Get, Query, Post, Body } from '@nestjs/common';
+import { Controller, Get, Query, Post, Body, Logger } from '@nestjs/common';
 import { OndcSearchService } from './ondc-search.service';
+import { CatalogIngestionService } from '../catalog-ingestion/catalog-ingestion.service';
 
 @Controller('ondc-search')
 export class OndcSearchController {
-  constructor(private readonly ondcSearchService: OndcSearchService) {}
+  private readonly logger = new Logger(OndcSearchController.name);
+
+  constructor(
+    private readonly ondcSearchService: OndcSearchService,
+    private readonly catalogIngestionService: CatalogIngestionService,
+  ) {}
 
   /**
    * Test endpoint for ONDC catalog refresh
@@ -59,6 +65,38 @@ export class OndcSearchController {
         message: 'Search failed',
         error: error.message,
         search_params: searchParams,
+      };
+    }
+  }
+
+  /**
+   * Complete catalog refresh with ingestion endpoint
+   */
+  @Post('catalog-refresh-and-ingest')
+  async catalogRefreshAndIngest(@Body() body: { city?: string }) {
+    try {
+      // Step 1: Perform ONDC search
+      this.logger.log('Starting catalog refresh and ingestion process');
+      const searchResult = await this.ondcSearchService.performCatalogRefresh(body.city);
+      
+      // Step 2: Ingest the results into database
+      const ingestionResult = await this.catalogIngestionService.ingestCatalogData(searchResult);
+      
+      return {
+        success: true,
+        message: 'Catalog refresh and ingestion completed successfully',
+        data: {
+          search_stats: {
+            providers_count: searchResult.length,
+          },
+          ingestion_stats: ingestionResult.stats,
+        },
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: 'Catalog refresh and ingestion failed',
+        error: error.message,
       };
     }
   }

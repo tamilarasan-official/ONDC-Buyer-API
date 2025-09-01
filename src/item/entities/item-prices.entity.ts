@@ -25,19 +25,19 @@ export class ItemPrices {
   base_price: number; // Base price of the item
 
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
-  maximum_price: number; // Maximum price (with all premium options)
+  maximum_price?: number; // Maximum price (with all premium options)
 
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
-  minimum_price_range: number; // Minimum possible price with customizations
+  minimum_price_range?: number; // Minimum possible price with customizations
 
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
-  maximum_price_range: number; // Maximum possible price with customizations
+  maximum_price_range?: number; // Maximum possible price with customizations
 
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
-  default_selection_price: number; // Price with default customizations
+  default_selection_price?: number; // Price with default customizations
 
   @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
-  default_selection_max_price: number; // Max price with default customizations
+  default_selection_max_price?: number; // Max price with default customizations
 
   @CreateDateColumn()
   created_at: Date;

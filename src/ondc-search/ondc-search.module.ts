@@ -3,6 +3,7 @@ import { HttpModule } from '@nestjs/axios';
 import { ConfigModule } from '@nestjs/config';
 import { OndcSearchService } from './ondc-search.service';
 import { OndcSearchController } from './ondc-search.controller';
+import { CatalogIngestionModule } from '../catalog-ingestion/catalog-ingestion.module';
 
 @Module({
   imports: [
@@ -11,6 +12,7 @@ import { OndcSearchController } from './ondc-search.controller';
       maxRedirects: 5,
     }),
     ConfigModule,
+    CatalogIngestionModule,
   ],
   providers: [OndcSearchService],
   exports: [OndcSearchService],

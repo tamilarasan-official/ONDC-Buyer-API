@@ -4,6 +4,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { CatalogIngestionModule } from './catalog-ingestion/catalog-ingestion.module';
 import { join } from 'path';
 
 import { MailerModule } from '@nestjs-modules/mailer';
@@ -79,8 +80,9 @@ import 'dotenv/config';
     VariantModule,
     OfferModule,
     OndcSearchModule,
+    CatalogIngestionModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [AppService, CatalogIngestionService],
 })
 export class AppModule { }
