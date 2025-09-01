@@ -16,6 +16,7 @@ import { StoreModule } from './store/store.module';
 import { ItemModule } from './item/item.module';
 import { VariantModule } from './variant/variant.module';
 import { OfferModule } from './offer/offer.module';
+import { OndcSearchModule } from './ondc-search/ondc-search.module';
 import 'dotenv/config';
 
 
@@ -77,6 +78,7 @@ import 'dotenv/config';
     ItemModule,
     VariantModule,
     OfferModule,
+    OndcSearchModule,
   ],
   controllers: [AppController],
   providers: [AppService],
