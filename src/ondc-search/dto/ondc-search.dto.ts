@@ -1,40 +1,28 @@
 import { IsOptional, IsString, IsObject } from 'class-validator';
 
 export class ONDCSearchRequestDto {
-  @IsString()
-  domain: string = 'ONDC:RET11'; // F&B domain
+  context: {
+    domain: string; // 'ONDC:RET10' for F&B
+    action: string; // 'search'
+    country: string; // 'IND'
+    city: string; // std:0452, std:080 etc
+    core_version: string; // '1.2.0'
+    bap_id: string;
+    bap_uri: string;
+    bpp_id: string;
+    transaction_id: string; // UUID
+    message_id: string; // UUID
+    timestamp: string; // ISO datetime
+    ttl: string; // 'PT30S'
+  };
 
-  @IsString()
-  country: string = 'IND';
-
-  @IsString()
-  city: string; // std:080 for Bangalore
-
-  @IsString()
-  action: string = 'search';
-
-  @IsString()
-  core_version: string = '1.2.0';
-
-  @IsString()
-  bap_id: string;
-
-  @IsString()
-  bap_uri: string;
-
-  @IsString()
-  transaction_id: string;
-
-  @IsString()
-  message_id: string;
-
-  @IsString()
-  timestamp: string;
-
-  @IsOptional()
-  @IsObject()
-  message?: {
-    intent?: {
+  message: {
+    intent: {
+      payment: {
+        '@ondc/org/buyer_app_finder_fee_type': string; // 'percent'
+        '@ondc/org/buyer_app_finder_fee_amount': string; // '3'
+      };
+      // Optional search filters
       fulfillment?: {
         end?: {
           location?: {
@@ -237,4 +225,63 @@ export interface Tag {
 export interface TagItem {
   code: string;
   value: string;
+}
+
+// New DTOs for ONDC protocol flow
+export class ONDCSearchAckDto {
+  context: {
+    domain: string;
+    country: string;
+    city: string;
+    action: string;
+    core_version: string;
+    bap_id: string;
+    bap_uri: string;
+    bpp_id: string;
+    bpp_uri: string;
+    transaction_id: string;
+    message_id: string;
+    timestamp: string;
+  };
+
+  message: {
+    ack: {
+      status: 'ACK' | 'NACK';
+      message_id: string;
+      error?: {
+        code: string;
+        message: string;
+      };
+    };
+  };
+}
+
+export class ONDCOnSearchResponseDto {
+  context: {
+    domain: string;
+    country: string;
+    city: string;
+    action: string;
+    core_version: string;
+    bap_id: string;
+    bap_uri: string;
+    bpp_id: string;
+    bpp_uri: string;
+    transaction_id: string;
+    message_id: string;
+    timestamp: string;
+  };
+
+  message: {
+    catalog: {
+      'bpp/descriptor': {
+        name: string;
+        symbol?: string;
+        short_desc?: string;
+        long_desc?: string;
+        images?: string[];
+      };
+      'bpp/providers': Provider[];
+    };
+  };
 }

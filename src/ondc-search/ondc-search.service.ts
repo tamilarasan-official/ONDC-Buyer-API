@@ -85,69 +85,91 @@ export class OndcSearchService {
     const timestamp = new Date().toISOString();
 
     const searchRequest: ONDCSearchRequestDto = {
-      domain: 'ONDC:RET11',
-      country: 'IND',
-      city: searchParams.city || 'std:080', // Default to Bangalore
-      action: 'search',
-      core_version: '1.2.0',
-      bap_id: 'buyer-app',
-      bap_uri: 'https://buyer-app.com',
-      transaction_id: transactionId,
-      message_id: messageId,
-      timestamp: timestamp,
+      context: {
+        domain: "ONDC:RET10", // F&B domain
+        action: "search",
+        country: "IND",
+        city: searchParams.city || "std:080",
+        core_version: "1.2.0",
+        bap_id: this.configService.get<string>('ONDC_BAP_ID') || 'devapi.tazty.in',
+        bap_uri: this.configService.get<string>('ONDC_BAP_URI') || 'https://devapi.tazty.in',
+        bpp_id: this.configService.get<string>('ONDC_BPP_ID') || 'ondcbeta.squadcube.in',
+        transaction_id: transactionId,
+        message_id: messageId,
+        timestamp: timestamp,
+        ttl: "PT30S"
+      },
+      message: {
+        intent: {
+          payment: {
+            "@ondc/org/buyer_app_finder_fee_type": "percent",
+            "@ondc/org/buyer_app_finder_fee_amount": "3"
+          }
+        }
+      }
     };
 
-    // Add message intent if search parameters provided
-    if (searchParams.gps || searchParams.area_code || searchParams.search_term || searchParams.category_id) {
-      searchRequest.message = {
-        intent: {}
+    // Add search filters if provided
+    if (searchParams.search_term) {
+      searchRequest.message.intent.item = {
+        descriptor: {
+          name: searchParams.search_term
+        }
       };
-
-      // Ensure intent is defined before adding properties
-      const intent = searchRequest.message.intent!;
-
-      // Add location intent
-      if (searchParams.gps || searchParams.area_code) {
-        intent.fulfillment = {
-          end: {
-            location: {
-              gps: searchParams.gps,
-              area_code: searchParams.area_code,
-            }
+    }
+    
+    if (searchParams.category_id) {
+      searchRequest.message.intent.category = {
+        id: searchParams.category_id
+      };
+    }
+    
+    if (searchParams.gps || searchParams.area_code) {
+      searchRequest.message.intent.fulfillment = {
+        end: {
+          location: {
+            gps: searchParams.gps,
+            area_code: searchParams.area_code
           }
-        };
-      }
-
-      // Add item search intent
-      if (searchParams.search_term) {
-        intent.item = {
-          descriptor: {
-            name: searchParams.search_term,
-          }
-        };
-      }
-
-      // Add category intent
-      if (searchParams.category_id) {
-        intent.category = {
-          id: searchParams.category_id,
-        };
-      }
+        }
+      };
     }
 
     return searchRequest;
   }
 
   /**
-   * Perform a complete catalog refresh search
+   * Perform a complete catalog refresh search - returns only acknowledgement
    */
-  async performCatalogRefresh(city: string = 'std:080'): Promise<ONDCSearchResponseDto[]> {
+  async performCatalogRefresh(city: string = 'std:080'): Promise<{ success: boolean; message_id: string; ack_status: string }> {
     this.logger.log(`Starting complete catalog refresh for city: ${city}`);
     
-    return this.performSearch({
-      city: city,
-      // No specific filters for complete catalog refresh
-    });
+    try {
+      // Step 1: Send SEARCH request (gets acknowledgement only)
+      const searchRequest = this.buildSearchRequest({ city });
+      const searchResponse = await this.httpService.axiosRef.post(this.ondcSearchUrl, searchRequest);
+      
+      // Step 2: Extract acknowledgement details
+      const ack = searchResponse.data.message?.ack;
+      const messageId = searchResponse.data.context?.message_id || 'unknown';
+      const ackStatus = ack?.status || 'unknown';
+      
+      this.logger.log(`Search request sent successfully. Message ID: ${messageId}, Status: ${ackStatus}`);
+      
+      return {
+        success: ackStatus === 'ACK',
+        message_id: messageId,
+        ack_status: ackStatus
+      };
+      
+    } catch (error) {
+      this.logger.error(`Search request failed: ${error.message}`, error.stack);
+      return {
+        success: false,
+        message_id: 'unknown',
+        ack_status: 'NACK'
+      };
+    }
   }
 
   /**

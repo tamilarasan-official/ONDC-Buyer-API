@@ -52,21 +52,20 @@ export class CatalogSyncService {
         this.logger.log(`📍 Processing city: ${city}`);
         
         try {
-          // Perform search for the city
-          const searchResults = await this.ondcSearchService.performCatalogRefresh(city);
-          this.logger.log(`🔍 Found ${searchResults.length} provider(s) for ${city}`);
-
-          if (searchResults.length > 0) {
-            // Ingest the catalog data
-            const ingestionResult = await this.catalogIngestionService.ingestCatalogData(searchResults);
-            
-            // Aggregate statistics
-            this.aggregateStats(totalStats, ingestionResult.stats);
-            
-            this.logger.log(`✅ City ${city} processed successfully`);
+          // Send search request for the city (returns acknowledgement only)
+          const searchResult = await this.ondcSearchService.performCatalogRefresh(city);
+          
+          if (searchResult.success) {
+            this.logger.log(`🔍 Search request sent successfully for ${city}. Message ID: ${searchResult.message_id}`);
+            this.logger.log(`📞 Waiting for multiple ON_SEARCH webhook calls for ${city}`);
+            totalStats.cities_processed++;
           } else {
-            this.logger.warn(`⚠️ No providers found for city: ${city}`);
+            this.logger.warn(`⚠️ Search request failed for city: ${city}. Status: ${searchResult.ack_status}`);
+            totalStats.city_errors.push(`${city}: Search failed - ${searchResult.ack_status}`);
           }
+          
+          // Aggregate search statistics
+          this.aggregateStats(totalStats, searchResult);
 
         } catch (cityError) {
           this.logger.error(`❌ Failed to process city ${city}: ${cityError.message}`, cityError.stack);
@@ -122,14 +121,20 @@ export class CatalogSyncService {
         this.logger.log(`📍 Incremental sync for city: ${city}`);
         
         try {
-          const searchResults = await this.ondcSearchService.performCatalogRefresh(city);
+          // Send search request for the city (returns acknowledgement only)
+          const searchResult = await this.ondcSearchService.performCatalogRefresh(city);
           
-          if (searchResults.length > 0) {
-            const ingestionResult = await this.catalogIngestionService.ingestCatalogData(searchResults);
-            this.aggregateStats(totalStats, ingestionResult.stats);
-            
-            this.logger.log(`✅ Incremental sync for ${city} completed`);
+          if (searchResult.success) {
+            this.logger.log(`🔍 Incremental search request sent for ${city}. Message ID: ${searchResult.message_id}`);
+            this.logger.log(`📞 Waiting for ON_SEARCH webhook calls for ${city}`);
+            totalStats.cities_processed++;
+          } else {
+            this.logger.warn(`⚠️ Incremental search failed for ${city}. Status: ${searchResult.ack_status}`);
+            totalStats.city_errors.push(`${city}: Search failed - ${searchResult.ack_status}`);
           }
+          
+          // Aggregate search statistics
+          this.aggregateStats(totalStats, searchResult);
 
         } catch (cityError) {
           this.logger.error(`❌ Incremental sync failed for ${city}: ${cityError.message}`);
@@ -169,14 +174,14 @@ export class CatalogSyncService {
 
     try {
       // Test with Bangalore only for health check
-      const searchResults = await this.ondcSearchService.performCatalogRefresh('std:080');
+      const searchResult = await this.ondcSearchService.performCatalogRefresh('std:080');
       
       const duration = Date.now() - startTime;
       
-      if (searchResults.length > 0) {
-        this.logger.log(`✅ HEALTH CHECK passed - ${searchResults.length} provider(s) found in ${duration}ms`);
+      if (searchResult.success) {
+        this.logger.log(`✅ HEALTH CHECK passed - Search request sent successfully in ${duration}ms. Message ID: ${searchResult.message_id}`);
       } else {
-        this.logger.warn(`⚠️ HEALTH CHECK warning - No providers found in ${duration}ms`);
+        this.logger.warn(`⚠️ HEALTH CHECK warning - Search request failed in ${duration}ms. Status: ${searchResult.ack_status}`);
       }
 
     } catch (error) {
@@ -202,12 +207,19 @@ export class CatalogSyncService {
       let totalStats = this.initializeStats();
 
       for (const city of targetCities) {
-        const searchResults = await this.ondcSearchService.performCatalogRefresh(city);
+        // Send search request for the city (returns acknowledgement only)
+        const searchResult = await this.ondcSearchService.performCatalogRefresh(city);
         
-        if (searchResults.length > 0) {
-          const ingestionResult = await this.catalogIngestionService.ingestCatalogData(searchResults);
-          this.aggregateStats(totalStats, ingestionResult.stats);
+        if (searchResult.success) {
+          this.logger.log(`🔍 Manual search request sent for ${city}. Message ID: ${searchResult.message_id}`);
+          totalStats.cities_processed++;
+        } else {
+          this.logger.warn(`⚠️ Manual search failed for ${city}. Status: ${searchResult.ack_status}`);
+          totalStats.city_errors.push(`${city}: Search failed - ${searchResult.ack_status}`);
         }
+        
+        // Aggregate search statistics
+        this.aggregateStats(totalStats, searchResult);
 
         await this.delay(1000);
       }
@@ -217,7 +229,7 @@ export class CatalogSyncService {
 
       return {
         success: true,
-        message: 'Manual full sync completed successfully',
+        message: 'Manual search requests sent successfully. Catalog data will be received via ON_SEARCH webhooks.',
         stats: totalStats,
         duration
       };
@@ -252,12 +264,19 @@ export class CatalogSyncService {
       let totalStats = this.initializeStats();
 
       for (const city of targetCities) {
-        const searchResults = await this.ondcSearchService.performCatalogRefresh(city);
+        // Send search request for the city (returns acknowledgement only)
+        const searchResult = await this.ondcSearchService.performCatalogRefresh(city);
         
-        if (searchResults.length > 0) {
-          const ingestionResult = await this.catalogIngestionService.ingestCatalogData(searchResults);
-          this.aggregateStats(totalStats, ingestionResult.stats);
+        if (searchResult.success) {
+          this.logger.log(`🔍 Manual incremental search sent for ${city}. Message ID: ${searchResult.message_id}`);
+          totalStats.cities_processed++;
+        } else {
+          this.logger.warn(`⚠️ Manual incremental search failed for ${city}. Status: ${searchResult.ack_status}`);
+          totalStats.city_errors.push(`${city}: Search failed - ${searchResult.ack_status}`);
         }
+        
+        // Aggregate search statistics
+        this.aggregateStats(totalStats, searchResult);
 
         await this.delay(500);
       }
@@ -267,7 +286,7 @@ export class CatalogSyncService {
 
       return {
         success: true,
-        message: 'Manual incremental sync completed successfully',
+        message: 'Manual incremental search requests sent successfully. Catalog data will be received via ON_SEARCH webhooks.',
         stats: totalStats,
         duration
       };
@@ -338,32 +357,21 @@ export class CatalogSyncService {
   private initializeStats() {
     return {
       cities_processed: 0,
-      total_providers: 0,
-      stores_upserted: 0,
-      categories_upserted: 0,
-      items_upserted: 0,
-      offers_upserted: 0,
-      stores_deleted: 0,
-      categories_deleted: 0,
-      items_deleted: 0,
-      offers_deleted: 0,
+      search_requests_sent: 0,
+      search_requests_failed: 0,
       city_errors: [] as string[],
-      total_errors: 0
+      total_errors: 0,
+      note: 'Catalog data statistics will be available via ON_SEARCH webhook processing'
     };
   }
 
-  private aggregateStats(totalStats: any, ingestionStats: any): void {
-    totalStats.cities_processed++;
-    totalStats.total_providers += ingestionStats.providers_processed || 0;
-    totalStats.stores_upserted += ingestionStats.stores_upserted || 0;
-    totalStats.categories_upserted += ingestionStats.categories_upserted || 0;
-    totalStats.items_upserted += ingestionStats.items_upserted || 0;
-    totalStats.offers_upserted += ingestionStats.offers_upserted || 0;
-    totalStats.stores_deleted += ingestionStats.stores_deleted || 0;
-    totalStats.categories_deleted += ingestionStats.categories_deleted || 0;
-    totalStats.items_deleted += ingestionStats.items_deleted || 0;
-    totalStats.offers_deleted += ingestionStats.offers_deleted || 0;
-    totalStats.total_errors += (ingestionStats.errors || []).length;
+  private aggregateStats(totalStats: any, searchResult: any): void {
+    if (searchResult.success) {
+      totalStats.search_requests_sent++;
+    } else {
+      totalStats.search_requests_failed++;
+    }
+    totalStats.total_errors = totalStats.city_errors.length;
   }
 
   private logSyncSummary(type: string, stats: any, duration: number): void {
@@ -372,19 +380,11 @@ export class CatalogSyncService {
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⏱️  Duration: ${(duration / 1000).toFixed(2)}s
 🏙️  Cities Processed: ${stats.cities_processed}
-🏪  Total Providers: ${stats.total_providers}
+📤 Search Requests Sent: ${stats.search_requests_sent}
+❌ Search Requests Failed: ${stats.search_requests_failed}
 
-📈 UPSERTED:
-   🏪 Stores: ${stats.stores_upserted}
-   📂 Categories: ${stats.categories_upserted}
-   📦 Items: ${stats.items_upserted}
-   🎁 Offers: ${stats.offers_upserted}
-
-🗑️  DELETED:
-   🏪 Stores: ${stats.stores_deleted}
-   📂 Categories: ${stats.categories_deleted}
-   📦 Items: ${stats.items_deleted}
-   🎁 Offers: ${stats.offers_deleted}
+📞 Note: Catalog data will be received via ON_SEARCH webhooks
+   Each successful search request will trigger multiple webhook calls
 
 ❌ Errors: ${stats.total_errors}
 ${stats.city_errors.length > 0 ? `🚨 City Errors: ${stats.city_errors.join(', ')}` : ''}
