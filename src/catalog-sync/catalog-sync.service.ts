@@ -341,14 +341,14 @@ export class CatalogSyncService {
   }
 
   private getTargetCities(): string[] {
-    const defaultCities = ['std:080', 'std:011', 'std:022', 'std:040', 'std:033', 'std:079'];
+    const defaultCities = ['std:0452'];
     return this.configService.get<string>('SYNC_TARGET_CITIES', defaultCities.join(','))
       .split(',')
       .map(city => city.trim());
   }
 
   private getPrimaryCities(): string[] {
-    const primaryCities = ['std:080', 'std:011', 'std:022'];
+    const primaryCities = ['std:0452'];
     return this.configService.get<string>('SYNC_PRIMARY_CITIES', primaryCities.join(','))
       .split(',')
       .map(city => city.trim());

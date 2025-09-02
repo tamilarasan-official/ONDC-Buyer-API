@@ -86,10 +86,10 @@ export class OndcSearchService {
 
     const searchRequest: ONDCSearchRequestDto = {
       context: {
-        domain: "ONDC:RET10", // F&B domain
+        domain: "ONDC:RET11", // F&B domain
         action: "search",
         country: "IND",
-        city: searchParams.city || "std:080",
+        city: searchParams.city || "std:0452",
         core_version: "1.2.0",
         bap_id: this.configService.get<string>('ONDC_BAP_ID') || 'devapi.tazty.in',
         bap_uri: this.configService.get<string>('ONDC_BAP_URI') || 'https://devapi.tazty.in',
@@ -141,7 +141,7 @@ export class OndcSearchService {
   /**
    * Perform a complete catalog refresh search - returns only acknowledgement
    */
-  async performCatalogRefresh(city: string = 'std:080'): Promise<{ success: boolean; message_id: string; ack_status: string }> {
+  async performCatalogRefresh(city: string = 'std:0452'): Promise<{ success: boolean; message_id: string; ack_status: string }> {
     this.logger.log(`Starting complete catalog refresh for city: ${city}`);
     
     try {
