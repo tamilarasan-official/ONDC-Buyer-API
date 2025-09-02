@@ -246,7 +246,10 @@ export class CatalogIngestionService {
       }
     }
 
-    // 8. Handle Deletions (Soft Delete)
+    // 8. Post-process customization parent_item relationships
+    await this.postProcessCustomizationParentItems(provider, store, queryRunner);
+
+    // 9. Handle Deletions (Soft Delete)
     await this.handleDeletions(provider, store, queryRunner, stats);
   }
 
@@ -1060,27 +1063,43 @@ export class CatalogIngestionService {
     // Delete existing customization groups for this item
     await queryRunner.manager.delete(ItemCustomizationGroups, { item: { id: item.id } });
 
-    if (!itemData.category_ids || !Array.isArray(itemData.category_ids)) {
+    // Only process for main items (type='item'), not customization items
+    if (item.type !== 'item') {
       return;
     }
 
-    for (const categoryIdWithSuffix of itemData.category_ids) {
-      const categoryId = categoryIdWithSuffix.split(':')[0];
-      
-      // Find categories that are customization groups (type='custom_group')
-      const category = await queryRunner.manager.findOne(Category, {
-        where: { reference_id: categoryId, store: { id: store.id }, type: 'custom_group' }
-      });
+    if (!itemData.tags || !Array.isArray(itemData.tags)) {
+      return;
+    }
 
-      if (category) {
-        const itemCustomizationGroup = new ItemCustomizationGroups();
-        itemCustomizationGroup.item = item;
-        itemCustomizationGroup.customization_group = category;
-        itemCustomizationGroup.is_mandatory = false; // Default
-        itemCustomizationGroup.sequence = 1; // Default
+    // ✅ CORRECT ONDC APPROACH: Find custom_group tag to get customization group IDs
+    const customGroupTag = itemData.tags.find(tag => tag.code === 'custom_group');
+    if (!customGroupTag || !Array.isArray(customGroupTag.list)) {
+      return; // This main item doesn't have customization groups
+    }
 
-        await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
-        this.logger.log(`Linked item ${item.reference_id} to customization group ${category.reference_id}`);
+    let sequence = 1;
+    for (const customGroupItem of customGroupTag.list) {
+      if (customGroupItem.code === 'id' && customGroupItem.value) {
+        const customizationGroupId = customGroupItem.value;
+        
+        // Find the customization group category (type='custom_group')
+        const category = await queryRunner.manager.findOne(Category, {
+          where: { reference_id: customizationGroupId, store: { id: store.id }, type: 'custom_group' }
+        });
+
+        if (category) {
+          const itemCustomizationGroup = new ItemCustomizationGroups();
+          itemCustomizationGroup.item = item;
+          itemCustomizationGroup.customization_group = category;
+          itemCustomizationGroup.is_mandatory = false; // Could be enhanced from category config
+          itemCustomizationGroup.sequence = sequence++;
+
+          await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
+          this.logger.log(`✅ Linked main item ${item.reference_id} to customization group ${category.reference_id}`);
+        } else {
+          this.logger.warn(`Customization group ${customizationGroupId} not found for item ${itemData.id}`);
+        }
       }
     }
   }
@@ -1097,28 +1116,48 @@ export class CatalogIngestionService {
     // Delete existing relationships for this customization
     await queryRunner.manager.delete(CustomizationRelationships, { parent_customization: { id: item.id } });
 
-    if (!itemData.category_ids || !Array.isArray(itemData.category_ids)) {
+    if (!itemData.tags || !Array.isArray(itemData.tags)) {
+      this.logger.warn(`No tags found for customization item ${itemData.id}`);
       return;
     }
 
-    for (const categoryIdWithSuffix of itemData.category_ids) {
-      const categoryId = categoryIdWithSuffix.split(':')[0];
-      
-      // Find the customization group category
-      const category = await queryRunner.manager.findOne(Category, {
-        where: { reference_id: categoryId, store: { id: store.id }, type: 'custom_group' }
-      });
-
-      if (category) {
-        const relationship = new CustomizationRelationships();
-        relationship.parent_customization = item;
-        relationship.child_customization_group = category;
-        relationship.is_default = false; // Default
-
-        await queryRunner.manager.save(CustomizationRelationships, relationship);
-        this.logger.log(`Created customization relationship: ${item.reference_id} -> ${category.reference_id}`);
-      }
+    // ✅ CORRECT ONDC APPROACH: Find parent tag to get parent customization group ID
+    const parentTag = itemData.tags.find(tag => tag.code === 'parent');
+    if (!parentTag || !Array.isArray(parentTag.list)) {
+      this.logger.warn(`No parent tag found for customization item ${itemData.id}`);
+      return;
     }
+
+    // Extract parent ID and default status from parent tag
+    const parentIdItem = parentTag.list.find(item => item.code === 'id');
+    const defaultItem = parentTag.list.find(item => item.code === 'default');
+    
+    if (!parentIdItem?.value) {
+      this.logger.warn(`No parent ID found in parent tag for customization item ${itemData.id}`);
+      return;
+    }
+
+    const parentCategoryId = parentIdItem.value;
+    const isDefault = defaultItem?.value === 'yes';
+
+    // Find the parent customization group (Category with type='custom_group')
+    const parentCategory = await queryRunner.manager.findOne(Category, {
+      where: { reference_id: parentCategoryId, store: { id: store.id }, type: 'custom_group' }
+    });
+
+    if (!parentCategory) {
+      this.logger.warn(`Parent customization group ${parentCategoryId} not found for item ${itemData.id}`);
+      return;
+    }
+
+    // ✅ Create the customization relationship
+    const relationship = new CustomizationRelationships();
+    relationship.parent_customization = item; // The customization item
+    relationship.child_customization_group = parentCategory; // The customization group it belongs to
+    relationship.is_default = isDefault; // Whether this is the default selection
+
+    await queryRunner.manager.save(CustomizationRelationships, relationship);
+    this.logger.log(`✅ Created customization relationship: ${item.reference_id} -> ${parentCategory.reference_id} (default: ${isDefault})`);
   }
 
   /**
@@ -1172,6 +1211,59 @@ export class CatalogIngestionService {
     if (itemData.quantity?.unitized?.measure) {
       this.logger.log(`Variant details - ${item.name}: ${itemData.quantity.unitized.measure.value} ${itemData.quantity.unitized.measure.unit}`);
     }
+  }
+
+  /**
+   * Post-process customization parent_item relationships
+   * This runs after all items are processed to link customization items to their parent main items
+   */
+  private async postProcessCustomizationParentItems(provider: Provider, store: Store, queryRunner: any): Promise<void> {
+    if (!provider.items) {
+      return;
+    }
+
+    this.logger.log(`Post-processing customization parent_item relationships for store ${store.reference_id}`);
+
+    // Get all customization items for this store
+    const customizationItems = await queryRunner.manager.find(Item, {
+      where: { 
+        store: { id: store.id }, 
+        type: 'customization',
+        status: true 
+      },
+      relations: ['customizationRelationships', 'customizationRelationships.child_customization_group']
+    });
+
+    for (const customizationItem of customizationItems) {
+      // Find which customization group this item belongs to
+      if (customizationItem.customizationRelationships && customizationItem.customizationRelationships.length > 0) {
+        const relationship = customizationItem.customizationRelationships[0]; // Take the first one
+        const customizationGroup = relationship.child_customization_group;
+
+        // Find main items that use this customization group
+        const mainItemsWithThisGroup = await queryRunner.manager
+          .createQueryBuilder(ItemCustomizationGroups, 'icg')
+          .leftJoinAndSelect('icg.item', 'item')
+          .where('icg.customization_group = :categoryId', { categoryId: customizationGroup.id })
+          .andWhere('item.type = :type', { type: 'item' })
+          .andWhere('item.status = :status', { status: true })
+          .getMany();
+
+        // Link the customization item to its parent main items
+        for (const itemCustomizationGroup of mainItemsWithThisGroup) {
+          const parentItem = itemCustomizationGroup.item;
+          
+          // Set the parent_item relationship
+          customizationItem.parent_item = parentItem;
+          await queryRunner.manager.save(Item, customizationItem);
+          
+          this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id}`);
+          break; // Only link to the first main item found to avoid multiple parent_item assignments
+        }
+      }
+    }
+
+    this.logger.log(`Completed post-processing customization parent_item relationships for store ${store.reference_id}`);
   }
 
   /**
