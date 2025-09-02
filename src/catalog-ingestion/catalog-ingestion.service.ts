@@ -545,6 +545,24 @@ export class CatalogIngestionService {
         await this.processItemAttributes(attributes, savedItem, queryRunner);
       }
 
+      // Process item-category relationships
+      await this.processItemCategories(itemData, savedItem, store, queryRunner);
+
+      // Process item timing information
+      await this.processItemTimings(itemData, savedItem, queryRunner);
+
+      // Process item location and fulfillment relationships
+      await this.processItemLocationFulfillment(itemData, savedItem, store, queryRunner);
+
+      // Process item customization groups
+      await this.processItemCustomizationGroups(itemData, savedItem, store, queryRunner);
+
+      // Process customization relationships for customization items
+      await this.processCustomizationRelationships(itemData, savedItem, store, queryRunner);
+
+      // Process item variants if available
+      await this.processItemVariants(itemData, savedItem, store, queryRunner);
+
       return savedItem;
       
     } catch (error) {
@@ -932,6 +950,228 @@ export class CatalogIngestionService {
     // This is handled by the delete operations when processing item tags
 
     this.logger.log(`Soft deleted related entities for item: ${item.reference_id}`);
+  }
+
+  /**
+   * Process item-category relationships
+   */
+  private async processItemCategories(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+    // Delete existing item-category relationships
+    await queryRunner.manager.delete(ItemCategories, { item: { id: item.id } });
+
+    if (!itemData.category_ids || !Array.isArray(itemData.category_ids)) {
+      this.logger.warn(`No category_ids found for item ${itemData.id}`);
+      return;
+    }
+
+    for (const categoryIdWithSuffix of itemData.category_ids) {
+      // Parse category ID (remove suffix like ":1")
+      const categoryId = categoryIdWithSuffix.split(':')[0];
+      
+      // Find the category in this store
+      const category = await queryRunner.manager.findOne(Category, {
+        where: { reference_id: categoryId, store: { id: store.id } }
+      });
+
+      if (category) {
+        // Set the primary category relationship if this is the first one
+        if (!item.category) {
+          item.category = category;
+          await queryRunner.manager.save(Item, item);
+        }
+
+        // Create ItemCategories relationship
+        const itemCategory = new ItemCategories();
+        itemCategory.item = item;
+        itemCategory.category = category;
+        itemCategory.is_default = !item.category || item.category.id === category.id;
+
+        await queryRunner.manager.save(ItemCategories, itemCategory);
+        
+        this.logger.log(`Linked item ${item.reference_id} to category ${category.reference_id}`);
+      } else {
+        this.logger.warn(`Category ${categoryId} not found for item ${itemData.id}`);
+      }
+    }
+  }
+
+  /**
+   * Process item timing information
+   */
+  private async processItemTimings(itemData: ONDCItem, item: Item, queryRunner: any): Promise<void> {
+    // Delete existing timings for this item
+    await queryRunner.manager.delete(ItemTimings, { item: { id: item.id } });
+
+    if (itemData.time?.timestamp) {
+      const itemTiming = new ItemTimings();
+      itemTiming.item = item;
+      itemTiming.day_from = 1; // Default to all days
+      itemTiming.day_to = 7;
+      itemTiming.time_from = '0600'; // Default availability hours
+      itemTiming.time_to = '2200';
+
+      await queryRunner.manager.save(ItemTimings, itemTiming);
+      this.logger.log(`Added timing for item ${item.reference_id}`);
+    }
+  }
+
+  /**
+   * Process item location and fulfillment relationships
+   */
+  private async processItemLocationFulfillment(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+    // Set item location relationship
+    if (itemData.location_id) {
+      const location = await queryRunner.manager.findOne(StoreLocation, {
+        where: { reference_id: itemData.location_id, store: { id: store.id } }
+      });
+      
+      if (location) {
+        item.location = location;
+        this.logger.log(`Linked item ${item.reference_id} to location ${location.reference_id}`);
+      } else {
+        this.logger.warn(`Location ${itemData.location_id} not found for item ${item.reference_id}`);
+      }
+    }
+
+    // Set item fulfillment relationship
+    if (itemData.fulfillment_id) {
+      const fulfillment = await queryRunner.manager.findOne(StoreFulfillment, {
+        where: { reference_id: itemData.fulfillment_id, store: { id: store.id } }
+      });
+      
+      if (fulfillment) {
+        item.fulfillment = fulfillment;
+        this.logger.log(`Linked item ${item.reference_id} to fulfillment ${fulfillment.reference_id}`);
+      } else {
+        this.logger.warn(`Fulfillment ${itemData.fulfillment_id} not found for item ${item.reference_id}`);
+      }
+    }
+
+    // Save the updated item with location/fulfillment links
+    if (item.location || item.fulfillment) {
+      await queryRunner.manager.save(Item, item);
+    }
+  }
+
+  /**
+   * Process item customization groups
+   */
+  private async processItemCustomizationGroups(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+    // Delete existing customization groups for this item
+    await queryRunner.manager.delete(ItemCustomizationGroups, { item: { id: item.id } });
+
+    if (!itemData.category_ids || !Array.isArray(itemData.category_ids)) {
+      return;
+    }
+
+    for (const categoryIdWithSuffix of itemData.category_ids) {
+      const categoryId = categoryIdWithSuffix.split(':')[0];
+      
+      // Find categories that are customization groups (type='custom_group')
+      const category = await queryRunner.manager.findOne(Category, {
+        where: { reference_id: categoryId, store: { id: store.id }, type: 'custom_group' }
+      });
+
+      if (category) {
+        const itemCustomizationGroup = new ItemCustomizationGroups();
+        itemCustomizationGroup.item = item;
+        itemCustomizationGroup.customization_group = category;
+        itemCustomizationGroup.is_mandatory = false; // Default
+        itemCustomizationGroup.sequence = 1; // Default
+
+        await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
+        this.logger.log(`Linked item ${item.reference_id} to customization group ${category.reference_id}`);
+      }
+    }
+  }
+
+  /**
+   * Process customization relationships for customization items
+   */
+  private async processCustomizationRelationships(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+    // Only process if this is a customization item
+    if (item.type !== 'customization') {
+      return;
+    }
+
+    // Delete existing relationships for this customization
+    await queryRunner.manager.delete(CustomizationRelationships, { parent_customization: { id: item.id } });
+
+    if (!itemData.category_ids || !Array.isArray(itemData.category_ids)) {
+      return;
+    }
+
+    for (const categoryIdWithSuffix of itemData.category_ids) {
+      const categoryId = categoryIdWithSuffix.split(':')[0];
+      
+      // Find the customization group category
+      const category = await queryRunner.manager.findOne(Category, {
+        where: { reference_id: categoryId, store: { id: store.id }, type: 'custom_group' }
+      });
+
+      if (category) {
+        const relationship = new CustomizationRelationships();
+        relationship.parent_customization = item;
+        relationship.child_customization_group = category;
+        relationship.is_default = false; // Default
+
+        await queryRunner.manager.save(CustomizationRelationships, relationship);
+        this.logger.log(`Created customization relationship: ${item.reference_id} -> ${category.reference_id}`);
+      }
+    }
+  }
+
+  /**
+   * Process item variants using ONDC parent_item_id approach
+   */
+  private async processItemVariants(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+    // Delete existing item variants
+    await queryRunner.manager.delete(ItemVariants, { item: { id: item.id } });
+
+    // Check if this item has a parent_item_id (meaning it's a variant)
+    if (!itemData.parent_item_id) {
+      return; // Not a variant item
+    }
+
+    // Find the variant group (which is stored as a Category with type='variant_group')
+    const variantGroup = await queryRunner.manager.findOne(Category, {
+      where: { reference_id: itemData.parent_item_id, store: { id: store.id }, type: 'variant_group' }
+    });
+
+    if (!variantGroup) {
+      this.logger.warn(`Variant group ${itemData.parent_item_id} not found for item ${itemData.id}`);
+      return;
+    }
+
+    // Create VariantGroups entity from the Category
+    let variantGroupEntity = await queryRunner.manager.findOne(VariantGroups, {
+      where: { reference_id: itemData.parent_item_id, store: { id: store.id } }
+    });
+
+    if (!variantGroupEntity) {
+      variantGroupEntity = new VariantGroups();
+      variantGroupEntity.reference_id = itemData.parent_item_id;
+      variantGroupEntity.store = store;
+      variantGroupEntity.name = variantGroup.name;
+      variantGroupEntity.description = variantGroup.description || `Variant group for ${variantGroup.name}`;
+      
+      variantGroupEntity = await queryRunner.manager.save(VariantGroups, variantGroupEntity);
+      this.logger.log(`Created variant group entity: ${variantGroupEntity.reference_id}`);
+    }
+
+    // Create item variant relationship
+    const itemVariant = new ItemVariants();
+    itemVariant.item = item;
+    itemVariant.variant_group = variantGroupEntity;
+    itemVariant.is_default = false; // Could be enhanced to detect default variant
+
+    await queryRunner.manager.save(ItemVariants, itemVariant);
+    this.logger.log(`Linked variant item ${item.reference_id} to variant group ${variantGroupEntity.reference_id}`);
+    
+    // Log the variant details for debugging
+    if (itemData.quantity?.unitized?.measure) {
+      this.logger.log(`Variant details - ${item.name}: ${itemData.quantity.unitized.measure.value} ${itemData.quantity.unitized.measure.unit}`);
+    }
   }
 
   /**

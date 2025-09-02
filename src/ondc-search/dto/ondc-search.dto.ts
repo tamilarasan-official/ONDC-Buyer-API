@@ -154,12 +154,14 @@ export interface Category {
 
 export interface Item {
   id: string;
+  parent_item_id?: string; // For variant items linking to variant group
   time?: {
     label: string;
     timestamp: string;
   };
   descriptor: {
     name: string;
+    code?: string;
     symbol?: string;
     short_desc?: string;
     long_desc?: string;

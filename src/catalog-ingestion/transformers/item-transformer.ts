@@ -43,8 +43,8 @@ export class ItemTransformer extends BaseTransformer {
       // Parse tax information from tags
       this.extractTaxInformation(itemData.tags || [], item);
       
-      // Parse category information
-      item.code = this.sanitizeString(itemData.category_id, 255);
+      // Parse item code from descriptor.code or fallback to item ID
+      item.code = this.sanitizeString(itemData.descriptor.code || itemData.id, 255);
       
       // Parse timestamp
       if (itemData.time?.timestamp) {
