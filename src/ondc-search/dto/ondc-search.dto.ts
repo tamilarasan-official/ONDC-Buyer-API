@@ -2,10 +2,10 @@ import { IsOptional, IsString, IsObject } from 'class-validator';
 
 export class ONDCSearchRequestDto {
   context: {
-    domain: string; // 'ONDC:RET10' for F&B
+    domain: string; // 'ONDC:RET11' for F&B
     action: string; // 'search'
     country: string; // 'IND'
-    city: string; // std:0452, std:080 etc
+    city: string; // std:0452, std:044 etc
     core_version: string; // '1.2.0'
     bap_id: string;
     bap_uri: string;
