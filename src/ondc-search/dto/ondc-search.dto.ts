@@ -67,7 +67,9 @@ export class ONDCSearchResponseDto {
         short_desc?: string;
         long_desc?: string;
         images?: string[];
+        tags?: Tag[];
       };
+      'bpp/fulfillments'?: Fulfillment[];
       'bpp/providers': Provider[];
     };
   };
@@ -280,7 +282,9 @@ export class ONDCOnSearchResponseDto {
         short_desc?: string;
         long_desc?: string;
         images?: string[];
+        tags?: Tag[];
       };
+      'bpp/fulfillments'?: Fulfillment[];
       'bpp/providers': Provider[];
     };
   };

@@ -82,7 +82,7 @@ export class OndcSearchController {
       this.logger.log(`Received catalog data from ONDC. Message ID: ${catalogData.context?.message_id}`);
       
       // Process the catalog data using existing perfect ingestion service (NO CHANGES TO INGESTION LOGIC)
-      const result = await this.catalogIngestionService.ingestCatalogData([catalogData as any]);
+      const result = await this.catalogIngestionService.ingestCatalogData([catalogData]);
       
       this.logger.log(`Catalog data processed successfully. Message ID: ${catalogData.context?.message_id}`);
       
