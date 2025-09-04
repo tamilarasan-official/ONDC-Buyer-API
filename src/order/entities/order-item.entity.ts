@@ -34,6 +34,9 @@ export class OrderItem {
   @Column({ type: "json", nullable: true })
   variants: any; // Store selected variants
 
+  @Column({ type: "text", nullable: true })
+  special_instructions: string; // Special instructions for this item
+
   @CreateDateColumn()
   created_at: Date;
 }

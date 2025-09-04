@@ -1,0 +1,654 @@
+import { Controller, Get, Post, Put, Delete, Query, UseGuards, Req, Param, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
+import { BuyerService } from './buyer.service';
+import { JwtAuthGuard } from '../authentication/jwt-auth.guard';
+import { HomeResponseDto } from './dto/home-response.dto';
+import { SearchRequestDto } from './dto/search-request.dto';
+import { SearchResponseDto } from './dto/search-response.dto';
+import { RestaurantDetailsResponseDto } from './dto/restaurant-details.dto';
+import { MenuRequestDto } from './dto/menu-request.dto';
+import { MenuResponseDto } from './dto/menu-response.dto';
+import { AddToCartDto, UpdateCartItemDto, RemoveFromCartDto, ApplyOfferDto } from './dto/cart-request.dto';
+import { CartResponseDto, AddToCartResponseDto, UpdateCartResponseDto, RemoveFromCartResponseDto, ApplyOfferResponseDto } from './dto/cart-response.dto';
+import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
+import { CreateOrderResponseDto, OrderResponseDto, OrderListResponseDto, PaymentResponseDto, VerifyPaymentResponseDto } from './dto/order-response.dto';
+import { CartService } from './cart.service';
+import { OrderService } from './order.service';
+
+@ApiTags('Buyer App APIs')
+@Controller('api/buyer')
+export class BuyerController {
+  constructor(
+    private readonly buyerService: BuyerService,
+    private readonly cartService: CartService,
+    private readonly orderService: OrderService
+  ) {}
+
+  @Get('home')
+  @ApiOperation({
+    summary: 'Get home page data',
+    description: 'Retrieve home page data including featured restaurants, popular categories, trending items, and active offers. Uses location-based filtering with Haversine formula for distance calculation.',
+  })
+  @ApiQuery({
+    name: 'lat',
+    required: false,
+    type: String,
+    description: 'Device latitude for location-based filtering',
+    example: '12.9716'
+  })
+  @ApiQuery({
+    name: 'lng',
+    required: false,
+    type: String,
+    description: 'Device longitude for location-based filtering',
+    example: '77.5946'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Home page data retrieved successfully',
+    type: HomeResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid parameters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Invalid latitude or longitude values' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Internal server error' },
+        error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' }
+      }
+    }
+  })
+  async getHomeData(
+    @Query('lat') deviceLat?: string,
+    @Query('lng') deviceLng?: string,
+    @Req() req?: any
+  ) {
+    const userId = req?.user?.id;
+    const lat = deviceLat ? parseFloat(deviceLat) : undefined;
+    const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+
+    return this.buyerService.getHomeData(userId, lat, lng);
+  }
+
+  @Get('search')
+  @ApiOperation({
+    summary: 'Search restaurants, items, and categories',
+    description: 'Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Search completed successfully',
+    type: SearchResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid search parameters',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Invalid search parameters' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Internal server error' },
+        error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' }
+      }
+    }
+  })
+  async search(
+    @Query() searchParams: SearchRequestDto,
+    @Req() req?: any
+  ) {
+    const userId = req?.user?.id;
+    return this.buyerService.search(searchParams, userId);
+  }
+
+  @Get('restaurants/:id')
+  @ApiOperation({
+    summary: 'Get restaurant details',
+    description: 'Get detailed information about a specific restaurant including menu, offers, timings, locations, and statistics.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Restaurant ID',
+    example: 1,
+    type: 'number'
+  })
+  @ApiQuery({
+    name: 'lat',
+    required: false,
+    type: String,
+    description: 'Device latitude for distance calculation',
+    example: '12.9716'
+  })
+  @ApiQuery({
+    name: 'lng',
+    required: false,
+    type: String,
+    description: 'Device longitude for distance calculation',
+    example: '77.5946'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Restaurant details retrieved successfully',
+    type: RestaurantDetailsResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Restaurant not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Restaurant not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Internal server error' },
+        error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' }
+      }
+    }
+  })
+  async getRestaurantDetails(
+    @Param('id') restaurantId: string,
+    @Query('lat') deviceLat?: string,
+    @Query('lng') deviceLng?: string,
+    @Req() req?: any
+  ) {
+    const userId = req?.user?.id;
+    const lat = deviceLat ? parseFloat(deviceLat) : undefined;
+    const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+
+    return this.buyerService.getRestaurantDetails(parseInt(restaurantId), userId, lat, lng);
+  }
+
+  @Get('restaurants/:id/menu')
+  @ApiOperation({
+    summary: 'Get restaurant menu',
+    description: 'Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Restaurant ID',
+    example: 1,
+    type: 'number'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Menu retrieved successfully',
+    type: MenuResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Restaurant not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Restaurant not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'Internal server error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Internal server error' },
+        error: { type: 'string', example: 'INTERNAL_SERVER_ERROR' }
+      }
+    }
+  })
+  async getRestaurantMenu(
+    @Param('id') restaurantId: string,
+    @Query() menuParams: MenuRequestDto
+  ) {
+    return this.buyerService.getRestaurantMenu(parseInt(restaurantId), menuParams);
+  }
+
+  @Get('cart')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get user cart',
+    description: 'Retrieve the current user\'s active cart with all items, pricing, and summary.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cart retrieved successfully',
+    type: CartResponseDto
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token required',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'UNAUTHORIZED' }
+      }
+    }
+  })
+  async getCart(@Req() req: any) {
+    const userId = req.user.id;
+    return this.cartService.getCart(userId);
+  }
+
+  @Post('cart/add')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Add item to cart',
+    description: 'Add an item to the user\'s cart with quantity, customizations, and variants.',
+  })
+  @ApiBody({ type: AddToCartDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Item added to cart successfully',
+    type: AddToCartResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Invalid item or insufficient quantity',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Insufficient quantity available' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Item not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Item not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async addToCart(@Req() req: any, @Body() addToCartDto: AddToCartDto) {
+    const userId = req.user.id;
+    return this.cartService.addToCart(userId, addToCartDto);
+  }
+
+  @Put('cart/update')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Update cart item',
+    description: 'Update quantity, customizations, or variants of an existing cart item.',
+  })
+  @ApiBody({ type: UpdateCartItemDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Cart item updated successfully',
+    type: UpdateCartResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Cart item not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Cart item not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async updateCartItem(@Req() req: any, @Body() updateCartItemDto: UpdateCartItemDto) {
+    const userId = req.user.id;
+    return this.cartService.updateCartItem(userId, updateCartItemDto);
+  }
+
+  @Delete('cart/remove')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Remove item from cart',
+    description: 'Remove a specific item from the user\'s cart.',
+  })
+  @ApiBody({ type: RemoveFromCartDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Item removed from cart successfully',
+    type: RemoveFromCartResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Cart item not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Cart item not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async removeFromCart(@Req() req: any, @Body() removeFromCartDto: RemoveFromCartDto) {
+    const userId = req.user.id;
+    return this.cartService.removeFromCart(userId, removeFromCartDto);
+  }
+
+  @Delete('cart/clear')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Clear cart',
+    description: 'Remove all items from the user\'s cart.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Cart cleared successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Cart cleared successfully' }
+      }
+    }
+  })
+  async clearCart(@Req() req: any) {
+    const userId = req.user.id;
+    return this.cartService.clearCart(userId);
+  }
+
+  @Post('cart/apply-offer')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Apply offer to cart',
+    description: 'Apply a discount offer to the user\'s cart using offer code or offer ID.',
+  })
+  @ApiBody({ type: ApplyOfferDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Offer applied successfully',
+    type: ApplyOfferResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Cart is empty or offer not applicable',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Cart is empty' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Offer not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Offer not found or not applicable' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async applyOffer(@Req() req: any, @Body() applyOfferDto: ApplyOfferDto) {
+    const userId = req.user.id;
+    return this.cartService.applyOffer(userId, applyOfferDto);
+  }
+
+  @Post('orders')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create order from cart',
+    description: 'Create a new order from the user\'s active cart with delivery address and payment method.',
+  })
+  @ApiBody({ type: CreateOrderDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Order created successfully',
+    type: CreateOrderResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Cart is empty or invalid data',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Cart is empty' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Delivery address not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Delivery address not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async createOrder(@Req() req: any, @Body() createOrderDto: CreateOrderDto) {
+    const userId = req.user.id;
+    return this.orderService.createOrder(userId, createOrderDto);
+  }
+
+  @Get('orders')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get user orders',
+    description: 'Retrieve paginated list of user\'s orders with tracking information.',
+  })
+  @ApiQuery({
+    name: 'page',
+    description: 'Page number',
+    example: 1,
+    required: false,
+    type: 'number'
+  })
+  @ApiQuery({
+    name: 'limit',
+    description: 'Number of orders per page',
+    example: 10,
+    required: false,
+    type: 'number'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Orders retrieved successfully',
+    type: OrderListResponseDto
+  })
+  async getUserOrders(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string
+  ) {
+    const userId = req.user.id;
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 10;
+    return this.orderService.getUserOrders(userId, pageNum, limitNum);
+  }
+
+  @Get('orders/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Get order details',
+    description: 'Retrieve detailed information about a specific order including items, tracking, and payment status.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Order ID',
+    example: 1,
+    type: 'number'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Order retrieved successfully',
+    type: OrderResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Order not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Order not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  async getOrderById(@Req() req: any, @Param('id') orderId: string) {
+    const userId = req.user.id;
+    return this.orderService.getOrderById(parseInt(orderId), userId);
+  }
+
+  @Post('orders/:id/cancel')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Cancel order',
+    description: 'Cancel a pending or confirmed order. Refunds will be processed for paid orders.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Order ID',
+    example: 1,
+    type: 'number'
+  })
+  @ApiBody({ type: CancelOrderDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Order cancelled successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Order cancelled successfully' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Order cannot be cancelled',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Order cannot be cancelled' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  async cancelOrder(@Req() req: any, @Param('id') orderId: string, @Body() cancelOrderDto: CancelOrderDto) {
+    const userId = req.user.id;
+    return this.orderService.cancelOrder(userId, parseInt(orderId), cancelOrderDto);
+  }
+
+  @Post('payments/create')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Create payment for order',
+    description: 'Create a Razorpay payment order for online payment processing.',
+  })
+  @ApiBody({ type: CreatePaymentDto })
+  @ApiResponse({
+    status: 201,
+    description: 'Payment initiated successfully',
+    type: PaymentResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Order already paid or invalid data',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Order is already paid' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  async createPayment(@Req() req: any, @Body() createPaymentDto: CreatePaymentDto) {
+    const userId = req.user.id;
+    return this.orderService.createPayment(userId, createPaymentDto);
+  }
+
+  @Post('payments/verify')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Verify payment',
+    description: 'Verify Razorpay payment signature and update order status.',
+  })
+  @ApiBody({ type: VerifyPaymentDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment verified successfully',
+    type: VerifyPaymentResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid payment signature',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Invalid payment signature' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  async verifyPayment(@Req() req: any, @Body() verifyPaymentDto: VerifyPaymentDto) {
+    const userId = req.user.id;
+    return this.orderService.verifyPayment(userId, verifyPaymentDto);
+  }
+}
