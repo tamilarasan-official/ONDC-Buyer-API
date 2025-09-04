@@ -20,6 +20,7 @@ import { VariantModule } from './variant/variant.module';
 import { OfferModule } from './offer/offer.module';
 import { OndcSearchModule } from './ondc-search/ondc-search.module';
 import { CatalogSyncModule } from './catalog-sync/catalog-sync.module';
+import { BuyerModule } from './buyer/buyer.module';
 import 'dotenv/config';
 
 
@@ -85,6 +86,7 @@ import 'dotenv/config';
     OndcSearchModule,
     CatalogIngestionModule,
     CatalogSyncModule,
+    BuyerModule,
   ],
   controllers: [AppController],
   providers: [AppService],
