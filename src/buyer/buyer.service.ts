@@ -111,15 +111,30 @@ export class BuyerService {
    * Get featured restaurants within radius
    */
   private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number) {
-    const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radiusKm);
-    const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radiusKm);
-
-    const restaurants = await this.storeRepository
+    this.logger.log(`🔍 Getting featured restaurants for location: ${userLat}, ${userLng} within ${radiusKm}km`);
+    
+    // First, let's check if we have any stores at all
+    const totalStores = await this.storeRepository.count();
+    this.logger.log(`📊 Total stores in database: ${totalStores}`);
+    
+    // Check active stores
+    const activeStores = await this.storeRepository.count({ where: { status: true } });
+    this.logger.log(`📊 Active stores: ${activeStores}`);
+    
+    // Check stores with locations
+    const storesWithLocations = await this.storeRepository
       .createQueryBuilder('s')
-      .leftJoinAndSelect('s.locations', 'sl')
-      .leftJoinAndSelect('s.offers', 'o')
+      .leftJoin('s.locations', 'sl')
       .where('s.status = :status', { status: true })
-      .andWhere(distanceFilter)
+      .andWhere('sl.id IS NOT NULL')
+      .getCount();
+    this.logger.log(`📊 Stores with locations: ${storesWithLocations}`);
+
+    // Get all stores with their locations (no distance filter first)
+    const allStores = await this.storeRepository
+      .createQueryBuilder('s')
+      .leftJoin('s.locations', 'sl')
+      .where('s.status = :status', { status: true })
       .select([
         's.id',
         's.name',
@@ -129,30 +144,59 @@ export class BuyerService {
         'sl.gps_lat',
         'sl.gps_lng',
         'sl.address_city',
-        'sl.address_locality',
-        distanceQuery
+        'sl.address_locality'
       ])
-      .orderBy('distance', 'ASC')
-      .limit(10)
       .getRawMany();
-
-    return restaurants.map(restaurant => ({
-      id: restaurant.s_id,
-      name: restaurant.s_name,
-      description: restaurant.s_description,
-      logo_url: restaurant.s_logo_url,
-      fssai_license: restaurant.s_fssai_license_no,
-      location: {
-        lat: restaurant.sl_gps_lat,
-        lng: restaurant.sl_gps_lng,
-        city: restaurant.sl_address_city,
-        locality: restaurant.sl_address_locality
-      },
-      distance: Math.round(restaurant.distance * 100) / 100, // Round to 2 decimal places
-      rating: 4.5, // TODO: Calculate from reviews
-      delivery_time: '25-30 mins', // TODO: Calculate from store timings
-      offers_count: restaurant.o_count || 0
-    }));
+      
+    this.logger.log(`📊 All active stores with location data: ${allStores.length}`);
+    
+    // Log the first few stores for debugging
+    allStores.slice(0, 3).forEach((store, index) => {
+      this.logger.log(`📊 Store ${index + 1}: ID=${store.s_id}, Name=${store.s_name}, Lat=${store.sl_gps_lat}, Lng=${store.sl_gps_lng}`);
+    });
+    
+    // Filter by distance
+    const filteredStores = allStores.filter(store => {
+      if (!store.sl_gps_lat || !store.sl_gps_lng) {
+        this.logger.log(`⚠️ Store ${store.s_id} has no location data`);
+        return false;
+      }
+      
+      const distance = this.locationService.calculateDistance(
+        userLat, userLng,
+        store.sl_gps_lat, store.sl_gps_lng
+      );
+      
+      this.logger.log(`➡️ Store ${store.s_id} distance: ${distance.toFixed(2)}km`);
+      return distance <= radiusKm;
+    });
+    
+    this.logger.log(`📊 Stores within ${radiusKm}km: ${filteredStores.length}`);
+    
+    return filteredStores.map(store => {
+      const distance = this.locationService.calculateDistance(
+        userLat, userLng,
+        store.sl_gps_lat, store.sl_gps_lng
+      );
+      
+      return {
+        id: store.s_id,
+        name: store.s_name,
+        description: store.s_description,
+        logo_url: store.s_logo_url,
+        fssai_license: store.s_fssai_license_no,
+        location: {
+          lat: store.sl_gps_lat,
+          lng: store.sl_gps_lng,
+          city: store.sl_address_city,
+          locality: store.sl_address_locality
+        },
+        distance: Math.round(distance * 100) / 100,
+        rating: 4.5,
+        delivery_time: '25-30 mins',
+        offers_count: 0 // Will be calculated separately
+      };
+    });
   }
 
   /**
@@ -194,9 +238,9 @@ export class BuyerService {
 
     const items = await this.itemRepository
       .createQueryBuilder('i')
-      .leftJoinAndSelect('i.store', 's')
-      .leftJoinAndSelect('s.locations', 'sl')
-      .leftJoinAndSelect('i.prices', 'p')
+      .leftJoin('i.store', 's')
+      .leftJoin('s.locations', 'sl')
+      .leftJoin('i.prices', 'p')
       .where('i.status = :status', { status: true })
       .andWhere('i.type = :type', { type: 'item' })
       .andWhere(distanceFilter)
@@ -240,7 +284,7 @@ export class BuyerService {
     const now = new Date();
     const offers = await this.offersRepository
       .createQueryBuilder('o')
-      .leftJoinAndSelect('o.store', 's')
+      .leftJoin('o.store', 's')
       .where('o.status = :status', { status: true })
       .andWhere('o.valid_from <= :now', { now })
       .andWhere('o.valid_to >= :now', { now })
@@ -369,9 +413,9 @@ export class BuyerService {
 
     let queryBuilder = this.storeRepository
       .createQueryBuilder('s')
-      .leftJoinAndSelect('s.locations', 'sl')
-      .leftJoinAndSelect('s.offers', 'o')
-      .leftJoinAndSelect('s.items', 'i')
+      .leftJoin('s.locations', 'sl')
+      .leftJoin('s.offers', 'o')
+      .leftJoin('s.items', 'i')
       .where('s.status = :status', { status: true })
       .andWhere(distanceFilter);
 
@@ -458,10 +502,10 @@ export class BuyerService {
 
     let queryBuilder = this.itemRepository
       .createQueryBuilder('i')
-      .leftJoinAndSelect('i.store', 's')
-      .leftJoinAndSelect('s.locations', 'sl')
-      .leftJoinAndSelect('i.prices', 'p')
-      .leftJoinAndSelect('i.category', 'c')
+      .leftJoin('i.store', 's')
+      .leftJoin('s.locations', 'sl')
+      .leftJoin('i.prices', 'p')
+      .leftJoin('i.category', 'c')
       .where('i.status = :status', { status: true })
       .andWhere('i.type = :type', { type: 'item' })
       .andWhere(distanceFilter);
