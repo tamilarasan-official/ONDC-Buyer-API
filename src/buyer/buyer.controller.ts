@@ -14,6 +14,8 @@ import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDt
 import { CreateOrderResponseDto, OrderResponseDto, OrderListResponseDto, PaymentResponseDto, VerifyPaymentResponseDto } from './dto/order-response.dto';
 import { CartService } from './cart.service';
 import { OrderService } from './order.service';
+import { NotificationService } from './notification.service';
+import { ReviewService } from './review.service';
 
 @ApiTags('Buyer App APIs')
 @Controller('api/buyer')
@@ -21,7 +23,9 @@ export class BuyerController {
   constructor(
     private readonly buyerService: BuyerService,
     private readonly cartService: CartService,
-    private readonly orderService: OrderService
+    private readonly orderService: OrderService,
+    private readonly notificationService: NotificationService,
+    private readonly reviewService: ReviewService
   ) {}
 
   @Get('home')
@@ -650,5 +654,295 @@ export class BuyerController {
   async verifyPayment(@Req() req: any, @Body() verifyPaymentDto: VerifyPaymentDto) {
     const userId = req.user.id;
     return this.orderService.verifyPayment(userId, verifyPaymentDto);
+  }
+
+  // ==================== NOTIFICATION ENDPOINTS ====================
+
+  @Get('notifications')
+  @ApiOperation({
+    summary: 'Get user notifications',
+    description: 'Retrieve user notifications with pagination and filtering options'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notifications retrieved successfully'
+  })
+  async getNotifications(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('type') type?: string,
+    @Query('unread_only') unreadOnly?: string
+  ) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
+    const unreadOnlyBool = unreadOnly === 'true';
+    
+    return this.notificationService.getUserNotifications(userId, pageNum, limitNum, type, unreadOnlyBool);
+  }
+
+  @Put('notifications/:id/read')
+  @ApiOperation({
+    summary: 'Mark notification as read',
+    description: 'Mark a specific notification as read'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notification marked as read'
+  })
+  async markNotificationAsRead(@Req() req: any, @Param('id') notificationId: string) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.markAsRead(parseInt(notificationId), userId);
+  }
+
+  @Put('notifications/read-all')
+  @ApiOperation({
+    summary: 'Mark all notifications as read',
+    description: 'Mark all unread notifications as read for the user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All notifications marked as read'
+  })
+  async markAllNotificationsAsRead(@Req() req: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.markAllAsRead(userId);
+  }
+
+  @Delete('notifications/:id')
+  @ApiOperation({
+    summary: 'Delete notification',
+    description: 'Delete a specific notification'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notification deleted successfully'
+  })
+  async deleteNotification(@Req() req: any, @Param('id') notificationId: string) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.deleteNotification(parseInt(notificationId), userId);
+  }
+
+  @Get('notification-preferences')
+  @ApiOperation({
+    summary: 'Get notification preferences',
+    description: 'Get user notification preferences'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notification preferences retrieved successfully'
+  })
+  async getNotificationPreferences(@Req() req: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.getNotificationPreferences(userId);
+  }
+
+  @Put('notification-preferences')
+  @ApiOperation({
+    summary: 'Update notification preferences',
+    description: 'Update user notification preferences'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Notification preferences updated successfully'
+  })
+  async updateNotificationPreferences(@Req() req: any, @Body() preferences: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.updateNotificationPreferences(userId, preferences);
+  }
+
+  @Post('push-tokens')
+  @ApiOperation({
+    summary: 'Register device token',
+    description: 'Register device token for push notifications'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Device token registered successfully'
+  })
+  async registerDeviceToken(@Req() req: any, @Body() tokenData: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.registerDeviceToken(userId, tokenData.device_token, tokenData.platform);
+  }
+
+  @Delete('push-tokens/:token')
+  @ApiOperation({
+    summary: 'Unregister device token',
+    description: 'Unregister device token for push notifications'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Device token unregistered successfully'
+  })
+  async unregisterDeviceToken(@Req() req: any, @Param('token') deviceToken: string) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.notificationService.unregisterDeviceToken(userId, deviceToken);
+  }
+
+  // ==================== REVIEW ENDPOINTS ====================
+
+  @Post('reviews/restaurant')
+  @ApiOperation({
+    summary: 'Create restaurant review',
+    description: 'Create a review for a restaurant based on a delivered order'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Restaurant review created successfully'
+  })
+  async createRestaurantReview(@Req() req: any, @Body() createReviewDto: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.createRestaurantReview(userId, createReviewDto);
+  }
+
+  @Post('reviews/item')
+  @ApiOperation({
+    summary: 'Create item review',
+    description: 'Create a review for a specific item based on a delivered order'
+  })
+  @ApiResponse({
+    status: 201,
+    description: 'Item review created successfully'
+  })
+  async createItemReview(@Req() req: any, @Body() createReviewDto: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.createItemReview(userId, createReviewDto);
+  }
+
+  @Get('reviews/restaurant/:restaurantId')
+  @ApiOperation({
+    summary: 'Get restaurant reviews',
+    description: 'Get all reviews for a specific restaurant with pagination'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Restaurant reviews retrieved successfully'
+  })
+  async getRestaurantReviews(
+    @Param('restaurantId') restaurantId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort_by') sortBy?: string,
+    @Query('sort_order') sortOrder?: string
+  ) {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
+    const sortOrderEnum = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+    
+    return this.reviewService.getRestaurantReviews(
+      parseInt(restaurantId), 
+      pageNum, 
+      limitNum, 
+      sortBy || 'created_at', 
+      sortOrderEnum
+    );
+  }
+
+  @Get('reviews/item/:itemId')
+  @ApiOperation({
+    summary: 'Get item reviews',
+    description: 'Get all reviews for a specific item with pagination'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Item reviews retrieved successfully'
+  })
+  async getItemReviews(
+    @Param('itemId') itemId: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('sort_by') sortBy?: string,
+    @Query('sort_order') sortOrder?: string
+  ) {
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
+    const sortOrderEnum = sortOrder === 'ASC' ? 'ASC' : 'DESC';
+    
+    return this.reviewService.getItemReviews(
+      parseInt(itemId), 
+      pageNum, 
+      limitNum, 
+      sortBy || 'created_at', 
+      sortOrderEnum
+    );
+  }
+
+  @Get('reviews/my')
+  @ApiOperation({
+    summary: 'Get user reviews',
+    description: 'Get all reviews created by the current user with pagination'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'User reviews retrieved successfully'
+  })
+  async getUserReviews(
+    @Req() req: any,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('type') type?: string
+  ) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
+    
+    return this.reviewService.getUserReviews(userId, pageNum, limitNum, type as 'restaurant' | 'item');
+  }
+
+  @Put('reviews/restaurant/:reviewId')
+  @ApiOperation({
+    summary: 'Update restaurant review',
+    description: 'Update a restaurant review created by the current user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Restaurant review updated successfully'
+  })
+  async updateRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.updateRestaurantReview(parseInt(reviewId), userId, updateReviewDto);
+  }
+
+  @Put('reviews/item/:reviewId')
+  @ApiOperation({
+    summary: 'Update item review',
+    description: 'Update an item review created by the current user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Item review updated successfully'
+  })
+  async updateItemReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.updateItemReview(parseInt(reviewId), userId, updateReviewDto);
+  }
+
+  @Delete('reviews/restaurant/:reviewId')
+  @ApiOperation({
+    summary: 'Delete restaurant review',
+    description: 'Delete a restaurant review created by the current user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Restaurant review deleted successfully'
+  })
+  async deleteRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.deleteRestaurantReview(parseInt(reviewId), userId);
+  }
+
+  @Delete('reviews/item/:reviewId')
+  @ApiOperation({
+    summary: 'Delete item review',
+    description: 'Delete an item review created by the current user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Item review deleted successfully'
+  })
+  async deleteItemReview(@Req() req: any, @Param('reviewId') reviewId: string) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    return this.reviewService.deleteItemReview(parseInt(reviewId), userId);
   }
 }

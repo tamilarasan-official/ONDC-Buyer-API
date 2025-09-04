@@ -27,8 +27,23 @@ export class RestaurantReview {
   @Column({ type: "int" })
   rating: number; // 1-5 stars
 
+  @Column({ type: "varchar", length: 255, nullable: true })
+  title: string; // Review title
+
   @Column({ type: "text", nullable: true })
   comment: string;
+
+  @Column({ type: "int", nullable: true })
+  food_quality: number; // 1-5 stars
+
+  @Column({ type: "int", nullable: true })
+  delivery_time: number; // 1-5 stars
+
+  @Column({ type: "int", nullable: true })
+  packaging: number; // 1-5 stars
+
+  @Column({ type: "int", nullable: true })
+  value_for_money: number; // 1-5 stars
 
   @Column({ type: "json", nullable: true })
   images: string[]; // Review images

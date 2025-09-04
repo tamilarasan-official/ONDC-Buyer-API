@@ -12,6 +12,7 @@ import { User } from '../user/entities/user.entity';
 import { Store } from '../store/entities/store.entity';
 import { Item } from '../item/entities/item.entity';
 import { RazorpayService } from './razorpay.service';
+import { NotificationService } from './notification.service';
 import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
 
 @Injectable()
@@ -40,6 +41,7 @@ export class OrderService {
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
     private readonly razorpayService: RazorpayService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -435,7 +437,34 @@ export class OrderService {
       timestamp: new Date()
     });
 
-    return await this.orderTrackingRepository.save(tracking);
+    const savedTracking = await this.orderTrackingRepository.save(tracking);
+
+    // Create notification for order status update
+    try {
+      const order = await this.orderRepository.findOne({
+        where: { id: orderId },
+        relations: ['user', 'store'],
+      });
+
+      if (order && order.user) {
+        await this.notificationService.createOrderNotification(
+          order.user.id,
+          orderId,
+          status,
+          message,
+          {
+            order_number: order.order_number,
+            restaurant_name: order.store?.name,
+            estimated_time: this.calculateEstimatedDeliveryTime(),
+          }
+        );
+      }
+    } catch (notificationError) {
+      this.logger.error(`Failed to create notification for order tracking: ${notificationError.message}`, notificationError.stack);
+      // Don't throw error - notification failure shouldn't break order tracking
+    }
+
+    return savedTracking;
   }
 
   /**

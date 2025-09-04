@@ -5,6 +5,8 @@ import { BuyerService } from './buyer.service';
 import { CartService } from './cart.service';
 import { OrderService } from './order.service';
 import { RazorpayService } from './razorpay.service';
+import { NotificationService } from './notification.service';
+import { ReviewService } from './review.service';
 import { LocationService } from '../shared/services/location.service';
 
 // Import entities
@@ -30,6 +32,9 @@ import { Order } from '../order/entities/order.entity';
 import { OrderItem } from '../order/entities/order-item.entity';
 import { OrderTracking } from '../order/entities/order-tracking.entity';
 import { Payment } from '../payment/entities/payment.entity';
+import { Notification } from '../notification/entities/notification.entity';
+import { RestaurantReview } from '../review/entities/restaurant-review.entity';
+import { ItemReview } from '../review/entities/item-review.entity';
 
 @Module({
   imports: [
@@ -56,10 +61,13 @@ import { Payment } from '../payment/entities/payment.entity';
       OrderItem,
       OrderTracking,
       Payment,
+      Notification,
+      RestaurantReview,
+      ItemReview,
     ]),
   ],
   controllers: [BuyerController],
-  providers: [BuyerService, CartService, OrderService, RazorpayService, LocationService],
-  exports: [BuyerService, CartService, OrderService, RazorpayService, LocationService],
+  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService],
+  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService],
 })
 export class BuyerModule {}
