@@ -8,6 +8,8 @@ import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
 import { ReviewService } from './review.service';
 import { LocationService } from '../shared/services/location.service';
+import { FCMService } from './fcm.service';
+import { SharedNotificationModule } from '../shared/notification.module';
 
 // Import entities
 import { Store } from '../store/entities/store.entity';
@@ -35,6 +37,7 @@ import { Payment } from '../payment/entities/payment.entity';
 import { Notification } from '../notification/entities/notification.entity';
 import { RestaurantReview } from '../review/entities/restaurant-review.entity';
 import { ItemReview } from '../review/entities/item-review.entity';
+import { UserDeviceToken } from '../user/entities/user-device-token.entity';
 
 @Module({
   imports: [
@@ -64,10 +67,12 @@ import { ItemReview } from '../review/entities/item-review.entity';
       Notification,
       RestaurantReview,
       ItemReview,
+      UserDeviceToken,
     ]),
+    SharedNotificationModule,
   ],
   controllers: [BuyerController],
-  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService],
-  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService],
+  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService, FCMService],
+  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService, FCMService],
 })
 export class BuyerModule {}

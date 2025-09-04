@@ -3,7 +3,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Notification } from '../notification/entities/notification.entity';
 import { User } from '../user/entities/user.entity';
+import { UserDeviceToken } from '../user/entities/user-device-token.entity';
 import { Order } from '../order/entities/order.entity';
+import { FCMService, FCMNotificationPayload, FCMNotificationOptions } from './fcm.service';
 
 export interface CreateNotificationDto {
   user_id: number;
@@ -32,7 +34,15 @@ export class NotificationService {
     private readonly notificationRepository: Repository<Notification>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
+    @InjectRepository(UserDeviceToken)
+    private readonly userDeviceTokenRepository: Repository<UserDeviceToken>,
+    private readonly fcmService: FCMService,
   ) {}
+
+  // Expose FCM service for external access
+  get fcm(): FCMService {
+    return this.fcmService;
+  }
 
   /**
    * Create a new notification
@@ -224,41 +234,6 @@ export class NotificationService {
     });
   }
 
-  /**
-   * Create promotional notification
-   */
-  async createPromotionalNotification(
-    userId: number,
-    title: string,
-    message: string,
-    offerData?: any
-  ): Promise<Notification> {
-    return this.createNotification({
-      user_id: userId,
-      title,
-      message,
-      type: 'promotion',
-      data: offerData,
-    });
-  }
-
-  /**
-   * Create system notification
-   */
-  async createSystemNotification(
-    userId: number,
-    title: string,
-    message: string,
-    systemData?: any
-  ): Promise<Notification> {
-    return this.createNotification({
-      user_id: userId,
-      title,
-      message,
-      type: 'system',
-      data: systemData,
-    });
-  }
 
   /**
    * Create review reminder notification
@@ -277,6 +252,110 @@ export class NotificationService {
         order_id: orderId,
         restaurant_name: restaurantName,
       },
+    });
+  }
+
+  /**
+   * Create OTP notification
+   */
+  async createOTPNotification(
+    userId: number,
+    phoneNumber: number,
+    otp: string
+  ): Promise<Notification> {
+    return this.createNotification({
+      user_id: userId,
+      title: 'OTP for Login',
+      message: `Your OTP is ${otp}. Valid for 5 minutes.`,
+      type: 'system',
+      data: {
+        phone_number: phoneNumber,
+        otp: otp,
+        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+      },
+    });
+  }
+
+  /**
+   * Create payment success notification
+   */
+  async createPaymentSuccessNotification(
+    userId: number,
+    orderId: number,
+    amount: number,
+    paymentMethod: string
+  ): Promise<Notification> {
+    return this.createNotification({
+      user_id: userId,
+      title: 'Payment Successful',
+      message: `Payment of ₹${amount} via ${paymentMethod} completed successfully`,
+      type: 'order',
+      data: {
+        order_id: orderId,
+        amount: amount,
+        payment_method: paymentMethod,
+        status: 'paid',
+      },
+    });
+  }
+
+  /**
+   * Create payment failed notification
+   */
+  async createPaymentFailedNotification(
+    userId: number,
+    orderId: number,
+    amount: number,
+    paymentMethod: string,
+    reason?: string
+  ): Promise<Notification> {
+    return this.createNotification({
+      user_id: userId,
+      title: 'Payment Failed',
+      message: `Payment of ₹${amount} via ${paymentMethod} failed. ${reason || 'Please try again.'}`,
+      type: 'order',
+      data: {
+        order_id: orderId,
+        amount: amount,
+        payment_method: paymentMethod,
+        status: 'failed',
+        reason: reason,
+      },
+    });
+  }
+
+  /**
+   * Create promotional notification
+   */
+  async createPromotionalNotification(
+    userId: number,
+    title: string,
+    message: string,
+    offerData?: any
+  ): Promise<Notification> {
+    return this.createNotification({
+      user_id: userId,
+      title,
+      message,
+      type: 'promotion',
+      data: offerData || {},
+    });
+  }
+
+  /**
+   * Create system maintenance notification
+   */
+  async createSystemMaintenanceNotification(
+    userId: number,
+    message: string,
+    maintenanceData?: any
+  ): Promise<Notification> {
+    return this.createNotification({
+      user_id: userId,
+      title: 'System Maintenance',
+      message,
+      type: 'system',
+      data: maintenanceData || {},
     });
   }
 
@@ -319,21 +398,79 @@ export class NotificationService {
     };
   }
 
-  /**
-   * Register device token for push notifications
-   */
-  async registerDeviceToken(userId: number, deviceToken: string, platform: string): Promise<void> {
-    // TODO: Implement device token registration
-    // This would typically be stored in a user_devices table
-    this.logger.log(`Device token registered for user ${userId}: ${deviceToken} (${platform})`);
-  }
 
   /**
    * Unregister device token
    */
   async unregisterDeviceToken(userId: number, deviceToken: string): Promise<void> {
-    // TODO: Implement device token unregistration
-    this.logger.log(`Device token unregistered for user ${userId}: ${deviceToken}`);
+    try {
+      await this.userDeviceTokenRepository.delete({
+        user: { id: userId },
+        token: deviceToken,
+      });
+      this.logger.log(`Device token unregistered for user ${userId}: ${deviceToken}`);
+    } catch (error) {
+      this.logger.error(`Failed to unregister device token: ${error.message}`, error.stack);
+      throw new Error('Failed to unregister device token');
+    }
+  }
+
+  /**
+   * Register device token for push notifications
+   */
+  async registerDeviceToken(userId: number, deviceToken: string, platform: string): Promise<void> {
+    try {
+      // Validate token with FCM
+      const isValid = await this.fcmService.validateToken(deviceToken);
+      if (!isValid) {
+        throw new Error('Invalid device token');
+      }
+
+      // Check if token already exists
+      const existingToken = await this.userDeviceTokenRepository.findOne({
+        where: {
+          user: { id: userId },
+          token: deviceToken,
+        },
+      });
+
+      if (existingToken) {
+        // Update existing token
+        existingToken.is_active = true;
+        existingToken.platform = platform;
+        existingToken.updated_at = new Date();
+        await this.userDeviceTokenRepository.save(existingToken);
+        this.logger.log(`Device token updated for user ${userId}: ${deviceToken}`);
+      } else {
+        // Create new token
+        const newToken = this.userDeviceTokenRepository.create({
+          user: { id: userId },
+          token: deviceToken,
+          platform,
+          is_active: true,
+        });
+        await this.userDeviceTokenRepository.save(newToken);
+        this.logger.log(`Device token registered for user ${userId}: ${deviceToken}`);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to register device token: ${error.message}`, error.stack);
+      throw new Error('Failed to register device token');
+    }
+  }
+
+  /**
+   * Remove invalid device tokens
+   */
+  private async removeInvalidTokens(tokens: string[]): Promise<void> {
+    try {
+      await this.userDeviceTokenRepository.update(
+        { token: { $in: tokens } as any },
+        { is_active: false }
+      );
+      this.logger.log(`Marked ${tokens.length} invalid tokens as inactive`);
+    } catch (error) {
+      this.logger.error(`Failed to remove invalid tokens: ${error.message}`, error.stack);
+    }
   }
 
   /**
@@ -359,11 +496,72 @@ export class NotificationService {
   }
 
   /**
-   * Send push notification (placeholder)
+   * Send push notification via FCM
    */
   private async sendPushNotification(notification: Notification): Promise<void> {
-    // TODO: Implement Firebase Cloud Messaging or similar
-    this.logger.log(`Push notification sent for notification ${notification.id}`);
+    try {
+      // Get user's device tokens
+      const user = await this.userRepository.findOne({
+        where: { id: notification.user?.id },
+        relations: ['device_tokens'],
+      });
+
+      if (!user || !user.device_tokens || user.device_tokens.length === 0) {
+        this.logger.warn(`No device tokens found for user ${notification.user?.id}`);
+        return;
+      }
+
+      // Check user's push notification preferences
+      const preferences = await this.getNotificationPreferences(notification.user?.id);
+      if (!preferences.push_notifications) {
+        this.logger.log(`Push notifications disabled for user ${notification.user?.id}`);
+        return;
+      }
+
+      const payload: FCMNotificationPayload = {
+        title: notification.title,
+        body: notification.message,
+        data: {
+          notification_id: notification.id.toString(),
+          type: notification.type,
+          ...notification.data,
+        },
+      };
+
+      const options: FCMNotificationOptions = {
+        priority: 'high',
+        timeToLive: 3600000, // 1 hour
+        collapseKey: `notification_${notification.type}`,
+      };
+
+      // Send to all user's device tokens
+      const tokens = user.device_tokens
+        .filter(dt => dt.is_active)
+        .map(dt => dt.token);
+      
+      if (tokens.length === 0) {
+        this.logger.warn(`No active device tokens found for user ${notification.user?.id}`);
+        return;
+      }
+
+      const result = await this.fcmService.sendToMultipleDevices(tokens, payload, options);
+
+      this.logger.log(`Push notification sent to user ${notification.user?.id}: ${result.successCount} success, ${result.failureCount} failures`);
+
+      // Handle failed tokens (remove invalid tokens)
+      if (result.failureCount > 0) {
+        const failedTokens = result.results
+          .filter(r => !r.success)
+          .map(r => r.token);
+        
+        this.logger.warn(`Failed to send push notifications to tokens: ${failedTokens.join(', ')}`);
+        
+        // Remove invalid tokens from database
+        await this.removeInvalidTokens(failedTokens);
+      }
+    } catch (error) {
+      this.logger.error(`Failed to send push notification: ${error.message}`, error.stack);
+    }
   }
 
   /**

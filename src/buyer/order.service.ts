@@ -338,6 +338,18 @@ export class OrderService {
       // Create tracking entry
       await this.createOrderTracking(payment.order.id, 'confirmed', 'Payment successful, order confirmed');
 
+      // Create payment success notification
+      try {
+        await this.notificationService.createPaymentSuccessNotification(
+          userId,
+          payment.order.id,
+          payment.amount / 100, // Convert from paise to rupees
+          payment.payment_method
+        );
+      } catch (notificationError) {
+        this.logger.error(`Failed to create payment success notification: ${notificationError.message}`, notificationError.stack);
+      }
+
       return {
         success: true,
         message: 'Payment verified successfully',
@@ -346,6 +358,27 @@ export class OrderService {
       };
     } catch (error) {
       this.logger.error(`❌ Error verifying payment: ${error.message}`, error.stack);
+      
+      // Create payment failure notification if we have payment info
+      try {
+        const payment = await this.paymentRepository.findOne({
+          where: { payment_id: verifyPaymentDto.razorpay_order_id },
+          relations: ['order']
+        });
+        
+        if (payment) {
+          await this.notificationService.createPaymentFailedNotification(
+            userId,
+            payment.order.id,
+            payment.amount / 100, // Convert from paise to rupees
+            payment.payment_method,
+            error.message
+          );
+        }
+      } catch (notificationError) {
+        this.logger.error(`Failed to create payment failure notification: ${notificationError.message}`, notificationError.stack);
+      }
+      
       throw error;
     }
   }

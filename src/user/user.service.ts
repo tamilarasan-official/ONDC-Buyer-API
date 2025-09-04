@@ -11,6 +11,7 @@ import { LoginDto } from "src/authentication/dto/login.dto";
 import { UserOtp } from "./entities/user-otp.entity";
 import { GenerateOtpDto } from "src/authentication/dto/generate-otp.dto";
 import { UserAddress } from "./entities/user-address.entity";
+import { NotificationService } from "../buyer/notification.service";
 
 @Injectable()
 export class UserService {
@@ -22,7 +23,9 @@ export class UserService {
     private readonly userOtpRepository: Repository<UserOtp>,
 
     @InjectRepository(UserAddress)
-    private readonly userAddressRepository: Repository<UserAddress>
+    private readonly userAddressRepository: Repository<UserAddress>,
+    
+    private readonly notificationService: NotificationService
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
@@ -40,6 +43,18 @@ export class UserService {
       user.otp = this.userOtpRepository.create({ otp, user });
 
       await this.userOtpRepository.save(user.otp);
+
+      // Create OTP notification
+      try {
+        await this.notificationService.createOTPNotification(
+          user.id,
+          generateOtpDto.phone_number,
+          otp.toString()
+        );
+      } catch (notificationError) {
+        console.error('Failed to create OTP notification:', notificationError.message);
+        // Don't throw error as OTP generation should still succeed
+      }
 
       return user;
     } catch (error) {

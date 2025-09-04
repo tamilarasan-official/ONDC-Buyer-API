@@ -10,6 +10,7 @@ import {
 } from "typeorm";
 import { UserOtp } from "./user-otp.entity";
 import { UserAddress } from "./user-address.entity";
+import { UserDeviceToken } from "./user-device-token.entity";
 
 @Entity()
 export class User {
@@ -40,6 +41,12 @@ export class User {
     nullable: true,
   })
   addresses: UserAddress[];
+
+  @OneToMany(() => UserDeviceToken, (deviceToken) => deviceToken.user, {
+    cascade: true,
+    nullable: true,
+  })
+  device_tokens: UserDeviceToken[];
 
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   created_at: Date;

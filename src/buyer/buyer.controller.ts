@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Query, UseGuards, Req, Param, Body } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, UseGuards, Req, Param, Body, UnauthorizedException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { BuyerService } from './buyer.service';
 import { JwtAuthGuard } from '../authentication/jwt-auth.guard';
@@ -20,6 +20,7 @@ import { ReviewService } from './review.service';
 @ApiTags('Buyer App APIs')
 @Controller('api/buyer')
 export class BuyerController {
+  private readonly logger = new Logger(BuyerController.name);
   constructor(
     private readonly buyerService: BuyerService,
     private readonly cartService: CartService,
@@ -763,7 +764,37 @@ export class BuyerController {
   })
   async registerDeviceToken(@Req() req: any, @Body() tokenData: any) {
     const userId = req.user?.id || 1; // TODO: Get from JWT token
-    return this.notificationService.registerDeviceToken(userId, tokenData.device_token, tokenData.platform);
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    try {
+      // Validate token with FCM
+      const isValid = await this.notificationService.fcm.validateToken(tokenData.device_token);
+      if (!isValid) {
+        throw new BadRequestException('Invalid device token');
+      }
+
+      // Register token in database
+      await this.notificationService.registerDeviceToken(
+        userId,
+        tokenData.device_token,
+        tokenData.platform
+      );
+
+      return {
+        success: true,
+        message: 'Device token registered successfully',
+        data: {
+          device_token: tokenData.device_token,
+          platform: tokenData.platform,
+          registered_at: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      this.logger.error(`Failed to register device token: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to register device token');
+    }
   }
 
   @Delete('push-tokens/:token')
@@ -778,6 +809,40 @@ export class BuyerController {
   async unregisterDeviceToken(@Req() req: any, @Param('token') deviceToken: string) {
     const userId = req.user?.id || 1; // TODO: Get from JWT token
     return this.notificationService.unregisterDeviceToken(userId, deviceToken);
+  }
+
+  @Post('test-push-notification')
+  @ApiOperation({
+    summary: 'Test push notification (for development)',
+    description: 'Send a test push notification to the authenticated user'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Test notification sent successfully'
+  })
+  async testPushNotification(@Req() req: any, @Body() body: { message?: string }) {
+    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    if (!userId) {
+      throw new UnauthorizedException('User not authenticated');
+    }
+
+    try {
+      await this.notificationService.createNotification({
+        user_id: userId,
+        title: 'Test Notification',
+        message: body.message || 'This is a test push notification',
+        type: 'system',
+        data: { test: true },
+      });
+
+      return {
+        success: true,
+        message: 'Test notification sent successfully',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to send test notification: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to send test notification');
+    }
   }
 
   // ==================== REVIEW ENDPOINTS ====================
