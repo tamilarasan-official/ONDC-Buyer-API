@@ -29,6 +29,14 @@ export class FCMService {
 
   private initializeFirebase() {
     try {
+      // Check if Firebase is already initialized
+      const existingApp = admin.apps.find(app => app !== null);
+      if (existingApp) {
+        this.app = existingApp;
+        this.logger.log('Using existing Firebase Admin SDK instance');
+        return;
+      }
+
       // Initialize Firebase Admin SDK
       const serviceAccount = {
         type: 'service_account',
