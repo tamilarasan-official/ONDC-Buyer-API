@@ -351,3 +351,100 @@ export class SearchResponseDto {
   })
   data: SearchDataDto;
 }
+
+// Search Suggestions Response DTOs
+export class SearchSuggestionDto {
+  @ApiProperty({
+    description: 'Suggestion ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Suggestion name',
+    example: 'Burger'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Suggestion type',
+    example: 'dish',
+    enum: ['dish', 'restaurant', 'category']
+  })
+  type: 'dish' | 'restaurant' | 'category';
+
+  @ApiProperty({
+    description: 'Suggestion description',
+    example: 'Delicious burgers'
+  })
+  description: string;
+
+  @ApiProperty({
+    description: 'Suggestion icon URL',
+    example: 'https://example.com/burger-icon.jpg'
+  })
+  icon: string;
+
+  @ApiProperty({
+    description: 'Suggestion image URL',
+    example: 'https://example.com/burger-image.jpg'
+  })
+  image: string;
+
+  @ApiProperty({
+    description: 'Number of restaurants serving this suggestion',
+    example: 15,
+    type: 'number'
+  })
+  restaurant_count: number;
+
+  @ApiProperty({
+    description: 'Number of items matching this suggestion',
+    example: 25,
+    type: 'number'
+  })
+  item_count: number;
+}
+
+export class SearchSuggestionsDataDto {
+  @ApiProperty({
+    description: 'Original search query',
+    example: 'burgl'
+  })
+  query: string;
+
+  @ApiProperty({
+    description: 'List of search suggestions',
+    type: [SearchSuggestionDto]
+  })
+  suggestions: SearchSuggestionDto[];
+
+  @ApiProperty({
+    description: 'Total number of suggestions found',
+    example: 8,
+    type: 'number'
+  })
+  total_suggestions: number;
+}
+
+export class SearchSuggestionsResponseDto {
+  @ApiProperty({
+    description: 'Success status',
+    example: true,
+    type: 'boolean'
+  })
+  success: boolean;
+
+  @ApiProperty({
+    description: 'Response message',
+    example: 'Search suggestions retrieved successfully'
+  })
+  message: string;
+
+  @ApiProperty({
+    description: 'Search suggestions data',
+    type: SearchSuggestionsDataDto
+  })
+  data: SearchSuggestionsDataDto;
+}

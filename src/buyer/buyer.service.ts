@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LocationService } from '../shared/services/location.service';
@@ -7,7 +7,7 @@ import { StoreLocation } from '../store/entities/store-location.entity';
 import { Category } from '../category/entities/category.entity';
 import { Item } from '../item/entities/item.entity';
 import { Offers } from '../offer/entities/offers.entity';
-import { SearchRequestDto } from './dto/search-request.dto';
+import { SearchRequestDto, SearchSuggestionsRequestDto } from './dto/search-request.dto';
 import { StoreTimings } from '../store/entities/store-timings.entity';
 import { StoreConfigs } from '../store/entities/store-configs.entity';
 import { ItemPrices } from '../item/entities/item-prices.entity';
@@ -64,145 +64,169 @@ export class BuyerService {
   ) {}
 
   /**
-   * Get home page data with location-based filtering
+   * Get home page data with nearby restaurants, trending items, and promotional banner
    */
   async getHomeData(userId?: number, deviceLat?: number, deviceLng?: number, vegMode?: boolean) {
+    this.logger.log(`🏠 Getting home page data for user: ${userId || 'guest'}`);
+    this.logger.log(`📍 Input location - deviceLat: ${deviceLat}, deviceLng: ${deviceLng}`);
+
     try {
       // Get user location
-      const userLocation = userId 
-        ? await this.locationService.getUserLocation(userId, deviceLat, deviceLng)
-        : { lat: deviceLat || 12.9716, lng: deviceLng || 77.5946, source: 'device_location' };
+      let userLocation;
+      if (userId) {
+        this.logger.log(`🔍 Fetching location for authenticated user: ${userId}`);
+        userLocation = await this.locationService.getUserLocation(userId, deviceLat, deviceLng);
+        this.logger.log(`📍 User location from service: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
+      } else {
+        this.logger.log(`🔍 Using device location for guest user`);
+        userLocation = { 
+          lat: deviceLat || 12.9716, 
+          lng: deviceLng || 77.5946, 
+          source: 'device_location' as const 
+        };
+        this.logger.log(`📍 Guest location: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
+      }
 
-      this.logger.log(`📍 User location: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
+      // Define search radius
+      const radiusKm = 10; // 10km radius
+      this.logger.log(`🔍 Search radius: ${radiusKm}km`);
 
-      // Get nearby restaurants (within 10km radius) - KEEP UNCHANGED but add vegMode
-      const nearbyRestaurants = await this.getFeaturedRestaurants(
-        userLocation.lat, 
-        userLocation.lng, 
-        10,
-        vegMode
-      );
+      // Get all data in parallel
+      this.logger.log(`🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`);
+      const [nearbyRestaurants, whatsOnYourMind, promotionalBanner] = await Promise.all([
+        this.getFeaturedRestaurants(userLocation.lat, userLocation.lng, radiusKm, vegMode),
+        this.getWhatsOnYourMind(),
+        this.getPromotionalBanner()
+      ]);
 
-      // MODIFY: Get "What's On Your Mind?" dishes instead of categories
-      const whatsOnYourMind = await this.getWhatsOnYourMind();
+      this.logger.log(`📊 Results - Restaurants: ${nearbyRestaurants.length}, Dishes: ${whatsOnYourMind.length}`);
 
-      // ADD: Get promotional banner data
-      const promotionalBanner = await this.getPromotionalBanner();
+      const data = {
+        nearby_restaurants: nearbyRestaurants,
+        whats_on_your_mind: whatsOnYourMind,
+        promotional_banner: promotionalBanner
+      };
 
+      this.logger.log(`✅ Home page data retrieved successfully`);
+      
       return {
         success: true,
         message: 'Home page data retrieved successfully',
-        data: {
-          nearby_restaurants: nearbyRestaurants,
-          whats_on_your_mind: whatsOnYourMind,
-          promotional_banner: promotionalBanner,
-        }
+        data
       };
+
     } catch (error) {
-      this.logger.error(`❌ Error getting home data: ${error.message}`, error.stack);
-      throw error;
+      this.logger.error(`❌ Error getting home page data: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to retrieve home page data');
     }
   }
 
   /**
-   * Get nearby restaurants within radius
+   * Get nearby restaurants (was getFeaturedRestaurants)
    */
   private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean) {
-    this.logger.log(`🔍 Getting nearby restaurants for location: ${userLat}, ${userLng} within ${radiusKm}km`);
-    
-    // First, let's check if we have any stores at all
-    const totalStores = await this.storeRepository.count();
-    this.logger.log(`📊 Total stores in database: ${totalStores}`);
-    
-    // Check active stores
-    const activeStores = await this.storeRepository.count({ where: { status: true } });
-    this.logger.log(`📊 Active stores: ${activeStores}`);
-    
-    // Check stores with locations
-    const storesWithLocations = await this.storeRepository
-      .createQueryBuilder('s')
-      .leftJoin('s.locations', 'sl')
-      .where('s.status = :status', { status: true })
-      .andWhere('sl.id IS NOT NULL')
-      .getCount();
-    this.logger.log(`📊 Stores with locations: ${storesWithLocations}`);
+    try {
+      this.logger.log(`🔍 Getting nearby restaurants within ${radiusKm}km of ${userLat}, ${userLng}`);
+      this.logger.log(`🥬 Veg mode: ${vegMode ? 'enabled' : 'disabled'}`);
 
-    // Get all stores with their locations (no distance filter first)
-    const allStores = await this.storeRepository
-      .createQueryBuilder('s')
-      .leftJoin('s.locations', 'sl')
-      .where('s.status = :status', { status: true })
-      .select([
-        's.id',
-        's.name',
-        's.description',
-        's.logo_url',
-        's.fssai_license_no',
-        'sl.gps_lat',
-        'sl.gps_lng',
-        'sl.address_city',
-        'sl.address_locality'
-      ])
-      .getRawMany();
+      // First, let's check total stores in database
+      const totalStores = await this.storeRepository.count();
+      this.logger.log(`📊 Total stores in database: ${totalStores}`);
+
+      const activeStores = await this.storeRepository.count({ where: { status: true } });
+      this.logger.log(`📊 Active stores: ${activeStores}`);
+
+      const storesWithLocations = await this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.locations', 'sl')
+        .where('s.status = :status', { status: true })
+        .andWhere('sl.gps_lat IS NOT NULL')
+        .andWhere('sl.gps_lng IS NOT NULL')
+        .getCount();
+      this.logger.log(`📊 Stores with locations: ${storesWithLocations}`);
+
+      const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radiusKm);
+      const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radiusKm);
       
-    this.logger.log(`📊 All active stores with location data: ${allStores.length}`);
-    
-    // Log the first few stores for debugging
-    allStores.slice(0, 3).forEach((store, index) => {
-      this.logger.log(`📊 Store ${index + 1}: ID=${store.s_id}, Name=${store.s_name}, Lat=${store.sl_gps_lat}, Lng=${store.sl_gps_lng}`);
-    });
-    
-    // Filter by distance
-    const filteredStores = allStores.filter(store => {
-      if (!store.sl_gps_lat || !store.sl_gps_lng) {
-        this.logger.log(`⚠️ Store ${store.s_id} has no location data`);
-        return false;
+      this.logger.log(`🔍 Distance filter: ${distanceFilter}`);
+      this.logger.log(`🔍 Distance subquery: ${distanceSubquery}`);
+
+      const queryBuilder = this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.locations', 'sl')
+        .where('s.status = :status', { status: true })
+        .andWhere(distanceFilter)
+        .select([
+          's.id',
+          's.name',
+          's.description',
+          's.logo_url',
+          's.fssai_license_no',
+          'sl.gps_lat',
+          'sl.gps_lng',
+          'sl.address_city',
+          'sl.address_locality',
+          distanceSubquery
+        ])
+        .orderBy('distance', 'ASC')
+        .limit(20);
+
+      this.logger.log(`🔍 Executing restaurant query...`);
+      const stores = await queryBuilder.getRawMany();
+      this.logger.log(`🏪 Found ${stores.length} nearby restaurants`);
+
+      if (stores.length === 0) {
+        this.logger.warn(`⚠️ No restaurants found within ${radiusKm}km of ${userLat}, ${userLng}`);
+        return [];
       }
-      
-      const distance = this.locationService.calculateDistance(
-        userLat, userLng,
-        store.sl_gps_lat, store.sl_gps_lng
+
+      this.logger.log(`🔍 Processing ${stores.length} restaurants...`);
+      // Calculate ratings, open status, and delivery times for each restaurant
+      const storesWithRatings = await Promise.all(
+        stores.map(async (store, index) => {
+          this.logger.log(`🔍 Processing restaurant ${index + 1}/${stores.length}: ${store.s_name} (ID: ${store.s_id})`);
+          
+          const distance = store.distance;
+          this.logger.log(`📍 Distance: ${distance}km`);
+          
+          // Get rating data
+          const ratingData = await this.calculateRestaurantRating(store.s_id);
+          this.logger.log(`⭐ Rating: ${ratingData.rating} (${ratingData.reviewCount} reviews)`);
+          
+          // Check if store is open
+          const storeOpenData = await this.isStoreOpen(store.s_id);
+          this.logger.log(`🕐 Store open: ${storeOpenData.isOpen}`);
+          
+          // Calculate delivery time
+          const deliveryTime = this.calculateDeliveryTime(distance, store.s_id);
+          this.logger.log(`🚚 Delivery time: ${deliveryTime}`);
+
+          return {
+            id: store.s_id,
+            name: store.s_name,
+            description: store.s_description,
+            logo_url: store.s_logo_url,
+            fssai_license: store.s_fssai_license_no,
+            location: {
+              lat: store.sl_gps_lat,
+              lng: store.sl_gps_lng,
+              city: store.sl_address_city,
+              locality: store.sl_address_locality
+            },
+            distance: Math.round(distance * 100) / 100,
+            rating: ratingData.rating,
+            delivery_time: deliveryTime,
+            offers_count: 0 // Will be calculated separately
+          };
+        })
       );
       
-      this.logger.log(`➡️ Store ${store.s_id} distance: ${distance.toFixed(2)}km`);
-      return distance <= radiusKm;
-    });
-    
-    this.logger.log(`📊 Stores within ${radiusKm}km: ${filteredStores.length}`);
-    
-    // Calculate ratings and store status for all stores in parallel
-    const storesWithRatings = await Promise.all(
-      filteredStores.map(async (store) => {
-        const distance = this.locationService.calculateDistance(
-          userLat, userLng,
-          store.sl_gps_lat, store.sl_gps_lng
-        );
-        
-        const ratingData = await this.calculateRestaurantRating(store.s_id);
-        const storeStatus = await this.isStoreOpen(store.s_id);
-        const deliveryTime = this.calculateDeliveryTime(distance, store.s_id);
-        
-        return {
-          id: store.s_id,
-          name: store.s_name,
-          description: store.s_description,
-          logo_url: store.s_logo_url,
-          fssai_license: store.s_fssai_license_no,
-          location: {
-            lat: store.sl_gps_lat,
-            lng: store.sl_gps_lng,
-            city: store.sl_address_city,
-            locality: store.sl_address_locality
-          },
-          distance: Math.round(distance * 100) / 100,
-          rating: ratingData.rating,
-          delivery_time: deliveryTime,
-          offers_count: 0 // Will be calculated separately
-        };
-      })
-    );
-    
-    return storesWithRatings;
+      this.logger.log(`✅ Successfully processed ${storesWithRatings.length} restaurants`);
+      return storesWithRatings;
+    } catch (error) {
+      this.logger.error(`❌ Error getting nearby restaurants: ${error.message}`, error.stack);
+      return [];
+    }
   }
 
   /**
@@ -231,114 +255,142 @@ export class BuyerService {
   }
 
   /**
-   * ADD: Get promotional banner data
+   * Get promotional banner data
    */
   private async getPromotionalBanner() {
     return {
       title: "Craving Something Delicious?",
       subtitle: "Get your favorite meals delivered hot & fast—right to your doorstep.",
       cta_button: "Order Now!",
-      image_url: "/images/promotional-thali.jpg", // Traditional Indian thali image
-      background_color: "#14b8a6" // Teal color from image
+      image_url: "/images/promotional-thali.jpg",
+      background_color: "#14b8a6"
     };
   }
 
   /**
-   * Get trending items within radius
+   * Get trending items near user location
    */
   private async getTrendingItems(userLat: number, userLng: number, radiusKm: number) {
-    const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radiusKm);
-    const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radiusKm);
+    try {
+      this.logger.log(`🔥 Getting trending items within ${radiusKm}km of ${userLat}, ${userLng}`);
 
-    const items = await this.itemRepository
-      .createQueryBuilder('i')
-      .leftJoin('i.store', 's')
-      .leftJoin('s.locations', 'sl')
-      .leftJoin('i.prices', 'p')
-      .where('i.status = :status', { status: true })
-      .andWhere('i.type = :type', { type: 'item' })
-      .andWhere(distanceFilter)
-      .select([
-        'i.id',
-        'i.name',
-        'i.short_desc',
-        'i.images',
-        's.name as store_name',
-        's.logo_url as store_logo',
-        'p.base_price',
-        'p.currency',
-        distanceQuery
-      ])
-      .orderBy('distance', 'ASC')
-      .limit(12)
-      .getRawMany();
+      const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radiusKm);
 
-    // Calculate ratings for all items in parallel
-    const itemsWithRatings = await Promise.all(
-      items.map(async (item) => {
-        const ratingData = await this.calculateItemRating(item.i_id);
-        
-        return {
-          id: item.i_id,
-          name: item.i_name,
-          description: item.i_short_desc,
-          images: item.i_images || [],
-          store: {
-            name: item.s_name,
-            logo_url: item.s_logo_url
-          },
-          price: {
-            amount: item.p_base_price,
-            currency: item.p_currency
-          },
-          distance: Math.round(item.distance * 100) / 100,
-          rating: ratingData.rating
-        };
-      })
-    );
-    
-    return itemsWithRatings;
+      const queryBuilder = this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoin('i.store', 's')
+        .leftJoin('s.locations', 'sl')
+        .leftJoin('i.prices', 'p')
+        .where('i.status = :status', { status: true })
+        .andWhere('s.status = :status', { status: true })
+        .andWhere(`(${distanceSubquery}) <= :radius`, { 
+          userLat, 
+          userLng, 
+          radius: radiusKm 
+        })
+        .select([
+          'i.id',
+          'i.name', 
+          'i.short_desc',
+          'i.images',
+          's.id',
+          's.name',
+          's.logo_url',
+          'p.base_price',
+          'p.currency',
+          `(${distanceSubquery}) as distance`
+        ])
+        .orderBy('distance', 'ASC')
+        .addOrderBy('i.is_recommended', 'DESC')
+        .limit(20);
+
+      const items = await queryBuilder.getRawMany();
+
+      this.logger.log(`📱 Found ${items.length} trending items`);
+
+      // Calculate ratings for each item
+      const itemsWithRatings = await Promise.all(
+        items.map(async (item) => {
+          const distance = parseFloat(item.distance);
+          
+          // Get rating data
+          const ratingData = await this.calculateItemRating(item.i_id);
+
+          return {
+            id: item.i_id,
+            name: item.i_name,
+            description: item.i_short_desc,
+            images: item.i_images ? JSON.parse(item.i_images) : [],
+            store: {
+              name: item.s_name,
+              logo_url: item.s_logo_url
+            },
+            price: {
+              amount: parseFloat(item.p_base_price) || 0,
+              currency: item.p_currency || 'INR'
+            },
+            distance: Math.round(distance * 100) / 100,
+            rating: ratingData.rating
+          };
+        })
+      );
+
+      return itemsWithRatings;
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting trending items: ${error.message}`, error.stack);
+      return [];
+    }
   }
 
   /**
    * Get active offers
    */
   private async getActiveOffers() {
-    const now = new Date();
-    const offers = await this.offersRepository
-      .createQueryBuilder('o')
-      .leftJoin('o.store', 's')
-      .where('o.status = :status', { status: true })
-      .andWhere('o.valid_from <= :now', { now })
-      .andWhere('o.valid_to >= :now', { now })
-      .select([
-        'o.id',
-        'o.name',
-        'o.description',
-        'o.banner_image_url',
-        'o.offer_code',
-        's.name as store_name'
-      ])
-      .orderBy('o.created_at', 'DESC')
-      .limit(5)
-      .getRawMany();
+    try {
+      this.logger.log(`🎁 Getting active offers`);
 
-    return offers.map(offer => ({
-      id: offer.o_id,
-      name: offer.o_name,
-      description: offer.o_description,
-      banner_image_url: offer.o_banner_image_url,
-      offer_code: offer.o_offer_code,
-      store_name: offer.s_name
-    }));
+      const offers = await this.offersRepository
+        .createQueryBuilder('o')
+        .leftJoin('o.store', 's')
+        .where('o.status = :status', { status: true })
+        .andWhere('s.status = :status', { status: true })
+        .andWhere('o.valid_from <= :now', { now: new Date() })
+        .andWhere('o.valid_to >= :now', { now: new Date() })
+        .select([
+          'o.id',
+          'o.name',
+          'o.description',
+          'o.offer_code',
+          'o.banner_image_url',
+          's.name'
+        ])
+        .orderBy('o.created_at', 'DESC')
+        .limit(10)
+        .getMany();
+
+      this.logger.log(`🎯 Found ${offers.length} active offers`);
+
+      return offers.map(offer => ({
+        id: offer.id,
+        name: offer.name,
+        description: offer.description,
+        offer_code: offer.offer_code,
+        banner_image_url: offer.banner_image_url,
+        restaurant_name: offer.store?.name
+      }));
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting active offers: ${error.message}`, error.stack);
+      return [];
+    }
   }
 
   /**
-   * Search restaurants, items, and categories with location-based filtering
+   * Search functionality with enhanced filters
    */
   async search(searchParams: SearchRequestDto, userId?: number) {
     try {
-      // Set default values
       const {
         query = '',
         lat,
@@ -349,6 +401,9 @@ export class BuyerService {
         type = 'all',
         sort_by = 'distance',
         sort_order = 'asc',
+        dietary_preference,
+        min_price,
+        max_price,
         page = 1,
         limit = 20
       } = searchParams;
@@ -370,7 +425,8 @@ export class BuyerService {
       if (type === 'all' || type === 'restaurant') {
         results.restaurants = await this.searchRestaurants(
           query, userLocation.lat, userLocation.lng, radius, 
-          category_id, store_id, sort_by, sort_order, page, limit
+          category_id, store_id, sort_by, sort_order, page, limit,
+          dietary_preference, min_price, max_price
         );
       }
 
@@ -378,7 +434,8 @@ export class BuyerService {
       if (type === 'all' || type === 'item') {
         results.items = await this.searchItems(
           query, userLocation.lat, userLocation.lng, radius,
-          category_id, store_id, sort_by, sort_order, page, limit
+          category_id, store_id, sort_by, sort_order, page, limit,
+          dietary_preference, min_price, max_price
         );
       }
 
@@ -417,407 +474,525 @@ export class BuyerService {
           }
         }
       };
+
     } catch (error) {
-      this.logger.error(`❌ Search failed: ${error.message}`, error.stack);
-      throw error;
+      this.logger.error(`❌ Search error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Search failed');
     }
   }
 
   /**
-   * Search restaurants with location-based filtering
+   * Search restaurants with enhanced filters
    */
   private async searchRestaurants(
     query: string, userLat: number, userLng: number, radius: number,
     categoryId?: number, storeId?: number, sortBy: string = 'distance',
-    sortOrder: string = 'asc', page: number = 1, limit: number = 20
+    sortOrder: string = 'asc', page: number = 1, limit: number = 20,
+    dietaryPreference?: string, minPrice?: number, maxPrice?: number
   ) {
-    const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
-    const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radius);
+    try {
+      const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
 
-    let queryBuilder = this.storeRepository
-      .createQueryBuilder('s')
-      .leftJoin('s.locations', 'sl')
-      .leftJoin('s.offers', 'o')
-      .leftJoin('s.items', 'i')
-      .where('s.status = :status', { status: true })
-      .andWhere(distanceFilter);
+      let queryBuilder = this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.locations', 'sl')
+        .leftJoin('s.items', 'i')
+        .leftJoin('i.prices', 'p')
+        .leftJoin('i.attributes', 'a')
+        .where('s.status = :status', { status: true })
+        .andWhere(`(${distanceSubquery}) <= :radius`, { 
+          userLat, 
+          userLng, 
+          radius 
+        });
 
-    // Add search query filter
-    if (query) {
-      queryBuilder = queryBuilder.andWhere(
-        '(LOWER(s.name) LIKE LOWER(:query) OR LOWER(s.description) LIKE LOWER(:query))',
-        { query: `%${query}%` }
+      // Apply search query
+      if (query) {
+        queryBuilder = queryBuilder.andWhere(
+          '(LOWER(s.name) LIKE LOWER(:query) OR LOWER(s.description) LIKE LOWER(:query))',
+          { query: `%${query}%` }
+        );
+      }
+
+      // Apply category filter
+      if (categoryId) {
+        queryBuilder = queryBuilder
+          .leftJoin('i.item_categories', 'ic')
+          .andWhere('ic.category_id = :categoryId', { categoryId });
+      }
+
+      // Apply store filter
+      if (storeId) {
+        queryBuilder = queryBuilder.andWhere('s.id = :storeId', { storeId });
+      }
+
+      // Apply dietary preference filter
+      if (dietaryPreference) {
+        queryBuilder = queryBuilder.andWhere('a.attribute_code = :attrCode', { attrCode: 'veg_nonveg' });
+        queryBuilder = queryBuilder.andWhere('a.attribute_value = :dietary', { dietary: dietaryPreference });
+      }
+
+      // Apply price filters
+      if (minPrice) {
+        queryBuilder = queryBuilder.andWhere('p.base_price >= :minPrice', { minPrice });
+      }
+      if (maxPrice) {
+        queryBuilder = queryBuilder.andWhere('p.base_price <= :maxPrice', { maxPrice });
+      }
+
+      queryBuilder = queryBuilder
+        .select([
+          's.id',
+          's.name',
+          's.description',
+          's.logo_url',
+          's.fssai_license_no',
+          'sl.gps_lat',
+          'sl.gps_lng',
+          'sl.address_city',
+          'sl.address_locality',
+          `(${distanceSubquery}) as distance`
+        ])
+        .groupBy('s.id, sl.id');
+
+      // Apply sorting
+      if (sortBy === 'distance') {
+        queryBuilder = queryBuilder.orderBy('distance', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+      } else if (sortBy === 'name') {
+        queryBuilder = queryBuilder.orderBy('s.name', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+      } else if (sortBy === 'best_sellers') {
+        queryBuilder = queryBuilder.orderBy('s.name', 'ASC'); // TODO: Add order count logic
+      } else if (sortBy === 'highly_ordered') {
+        queryBuilder = queryBuilder.orderBy('s.name', 'ASC'); // TODO: Add popularity logic
+      }
+
+      // Apply pagination
+      const offset = (page - 1) * limit;
+      queryBuilder = queryBuilder.offset(offset).limit(limit);
+
+      const restaurants = await queryBuilder.getRawMany();
+
+      // Calculate ratings and additional data for each restaurant
+      const restaurantsWithData = await Promise.all(
+        restaurants.map(async (restaurant) => {
+          const distance = parseFloat(restaurant.distance);
+          
+          // Get rating data
+          const ratingData = await this.calculateRestaurantRating(restaurant.s_id);
+          
+          // Check if store is open
+          const storeOpenData = await this.isStoreOpen(restaurant.s_id);
+          
+          // Calculate delivery time
+          const deliveryTime = this.calculateDeliveryTime(distance, restaurant.s_id);
+
+          // Count items in this restaurant
+          const itemsCount = await this.itemRepository
+            .createQueryBuilder('i')
+            .where('i.store_id = :storeId', { storeId: restaurant.s_id })
+            .andWhere('i.status = :status', { status: true })
+            .getCount();
+
+          return {
+            id: restaurant.s_id,
+            name: restaurant.s_name,
+            description: restaurant.s_description,
+            logo_url: restaurant.s_logo_url,
+            fssai_license: restaurant.s_fssai_license_no,
+            location: {
+              lat: restaurant.sl_gps_lat,
+              lng: restaurant.sl_gps_lng,
+              city: restaurant.sl_address_city,
+              locality: restaurant.sl_address_locality
+            },
+            distance: Math.round(distance * 100) / 100,
+            rating: ratingData.rating,
+            delivery_time: deliveryTime,
+            offers_count: 0,
+            items_count: itemsCount,
+            is_open: storeOpenData.isOpen
+          };
+        })
       );
+
+      return restaurantsWithData;
+
+    } catch (error) {
+      this.logger.error(`❌ Error searching restaurants: ${error.message}`, error.stack);
+      return [];
     }
-
-    // Add category filter
-    if (categoryId) {
-      queryBuilder = queryBuilder.andWhere('i.category_id = :categoryId', { categoryId });
-    }
-
-    // Add store filter
-    if (storeId) {
-      queryBuilder = queryBuilder.andWhere('s.id = :storeId', { storeId });
-    }
-
-    // Add sorting
-    if (sortBy === 'distance') {
-      queryBuilder = queryBuilder.orderBy('distance', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sortBy === 'rating') {
-      queryBuilder = queryBuilder.orderBy('s.rating', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sortBy === 'name') {
-      queryBuilder = queryBuilder.orderBy('s.name', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    }
-
-    // Add pagination
-    const skip = (page - 1) * limit;
-    queryBuilder = queryBuilder.skip(skip).limit(limit);
-
-    const restaurants = await queryBuilder
-      .select([
-        's.id',
-        's.name',
-        's.description',
-        's.logo_url',
-        's.fssai_license_no',
-        'sl.gps_lat',
-        'sl.gps_lng',
-        'sl.address_city',
-        'sl.address_locality',
-        distanceQuery,
-        'COUNT(DISTINCT i.id) as items_count',
-        'COUNT(DISTINCT o.id) as offers_count'
-      ])
-      .groupBy('s.id, sl.id')
-      .getRawMany();
-
-    // Calculate ratings and store status for all restaurants in parallel
-    const restaurantsWithRatings = await Promise.all(
-      restaurants.map(async (restaurant) => {
-        const ratingData = await this.calculateRestaurantRating(restaurant.s_id);
-        const storeStatus = await this.isStoreOpen(restaurant.s_id);
-        const deliveryTime = this.calculateDeliveryTime(restaurant.distance, restaurant.s_id);
-        
-        return {
-          id: restaurant.s_id,
-          name: restaurant.s_name,
-          description: restaurant.s_description,
-          logo_url: restaurant.s_logo_url,
-          fssai_license: restaurant.s_fssai_license_no,
-          location: {
-            lat: restaurant.sl_gps_lat,
-            lng: restaurant.sl_gps_lng,
-            city: restaurant.sl_address_city,
-            locality: restaurant.sl_address_locality
-          },
-          distance: Math.round(restaurant.distance * 100) / 100,
-          rating: ratingData.rating,
-          delivery_time: deliveryTime,
-          offers_count: parseInt(restaurant.offers_count) || 0,
-          items_count: parseInt(restaurant.items_count) || 0,
-          is_open: storeStatus.isOpen
-        };
-      })
-    );
-    
-    return restaurantsWithRatings;
   }
 
   /**
-   * Search items with location-based filtering
+   * Search items with enhanced filters
    */
   private async searchItems(
     query: string, userLat: number, userLng: number, radius: number,
     categoryId?: number, storeId?: number, sortBy: string = 'distance',
-    sortOrder: string = 'asc', page: number = 1, limit: number = 20
+    sortOrder: string = 'asc', page: number = 1, limit: number = 20,
+    dietaryPreference?: string, minPrice?: number, maxPrice?: number
   ) {
-    const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
-    const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radius);
+    try {
+      const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
 
-    let queryBuilder = this.itemRepository
-      .createQueryBuilder('i')
-      .leftJoin('i.store', 's')
-      .leftJoin('s.locations', 'sl')
-      .leftJoin('i.prices', 'p')
-      .leftJoin('i.quantities', 'q')
-      .leftJoin('i.category', 'c')
-      .where('i.status = :status', { status: true })
-      .andWhere('i.type = :type', { type: 'item' })
-      .andWhere(distanceFilter);
+      let queryBuilder = this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoin('i.store', 's')
+        .leftJoin('s.locations', 'sl')
+        .leftJoin('i.prices', 'p')
+        .leftJoin('i.quantities', 'q')
+        .leftJoin('i.attributes', 'a')
+        .leftJoin('i.item_categories', 'ic')
+        .leftJoin('ic.category', 'c')
+        .where('i.status = :status', { status: true })
+        .andWhere('s.status = :status', { status: true })
+        .andWhere(`(${distanceSubquery}) <= :radius`, { 
+          userLat, 
+          userLng, 
+          radius 
+        });
 
-    // Add search query filter
-    if (query) {
-      queryBuilder = queryBuilder.andWhere(
-        '(LOWER(i.name) LIKE LOWER(:query) OR LOWER(i.short_desc) LIKE LOWER(:query) OR LOWER(i.long_desc) LIKE LOWER(:query))',
-        { query: `%${query}%` }
+      // Apply search query
+      if (query) {
+        queryBuilder = queryBuilder.andWhere(
+          '(LOWER(i.name) LIKE LOWER(:query) OR LOWER(i.short_desc) LIKE LOWER(:query) OR LOWER(c.name) LIKE LOWER(:query))',
+          { query: `%${query}%` }
+        );
+      }
+
+      // Apply category filter
+      if (categoryId) {
+        queryBuilder = queryBuilder.andWhere('ic.category_id = :categoryId', { categoryId });
+      }
+
+      // Apply store filter
+      if (storeId) {
+        queryBuilder = queryBuilder.andWhere('i.store_id = :storeId', { storeId });
+      }
+
+      // Apply dietary preference filter
+      if (dietaryPreference) {
+        queryBuilder = queryBuilder.andWhere('a.attribute_code = :attrCode', { attrCode: 'veg_nonveg' });
+        queryBuilder = queryBuilder.andWhere('a.attribute_value = :dietary', { dietary: dietaryPreference });
+      }
+
+      // Apply price filters
+      if (minPrice) {
+        queryBuilder = queryBuilder.andWhere('p.base_price >= :minPrice', { minPrice });
+      }
+      if (maxPrice) {
+        queryBuilder = queryBuilder.andWhere('p.base_price <= :maxPrice', { maxPrice });
+      }
+
+      queryBuilder = queryBuilder
+        .select([
+          'i.id',
+          'i.name',
+          'i.short_desc',
+          'i.images',
+          's.id',
+          's.name',
+          's.logo_url',
+          'p.base_price',
+          'p.currency',
+          'c.id',
+          'c.name',
+          'q.available_count',
+          `(${distanceSubquery}) as distance`
+        ]);
+
+      // Apply sorting
+      if (sortBy === 'distance') {
+        queryBuilder = queryBuilder.orderBy('distance', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+      } else if (sortBy === 'price') {
+        queryBuilder = queryBuilder.orderBy('p.base_price', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+      } else if (sortBy === 'name') {
+        queryBuilder = queryBuilder.orderBy('i.name', sortOrder.toUpperCase() as 'ASC' | 'DESC');
+      } else if (sortBy === 'best_sellers') {
+        queryBuilder = queryBuilder.orderBy('i.is_recommended', 'DESC');
+      } else if (sortBy === 'highly_ordered') {
+        queryBuilder = queryBuilder.orderBy('i.name', 'ASC'); // TODO: Add order count logic
+      }
+
+      // Apply pagination
+      const offset = (page - 1) * limit;
+      queryBuilder = queryBuilder.offset(offset).limit(limit);
+
+      const items = await queryBuilder.getRawMany();
+
+      // Calculate ratings for each item
+      const itemsWithData = await Promise.all(
+        items.map(async (item) => {
+          const distance = parseFloat(item.distance);
+          
+          // Get rating data
+          const ratingData = await this.calculateItemRating(item.i_id);
+
+          return {
+            id: item.i_id,
+            name: item.i_name,
+            description: item.i_short_desc,
+            images: item.i_images ? JSON.parse(item.i_images) : [],
+            price: {
+              amount: parseFloat(item.p_base_price) || 0,
+              currency: item.p_currency || 'INR'
+            },
+            store: {
+              id: item.s_id,
+              name: item.s_name,
+              logo_url: item.s_logo_url
+            },
+            distance: Math.round(distance * 100) / 100,
+            rating: ratingData.rating,
+            category: {
+              id: item.c_id,
+              name: item.c_name
+            },
+            is_available: (item.q_available_count || 0) > 0
+          };
+        })
       );
+
+      return itemsWithData;
+
+    } catch (error) {
+      this.logger.error(`❌ Error searching items: ${error.message}`, error.stack);
+      return [];
     }
-
-    // Add category filter
-    if (categoryId) {
-      queryBuilder = queryBuilder.andWhere('i.category_id = :categoryId', { categoryId });
-    }
-
-    // Add store filter
-    if (storeId) {
-      queryBuilder = queryBuilder.andWhere('i.store_id = :storeId', { storeId });
-    }
-
-    // Add sorting
-    if (sortBy === 'distance') {
-      queryBuilder = queryBuilder.orderBy('distance', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sortBy === 'rating') {
-      queryBuilder = queryBuilder.orderBy('i.rating', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sortBy === 'price') {
-      queryBuilder = queryBuilder.orderBy('p.base_price', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sortBy === 'name') {
-      queryBuilder = queryBuilder.orderBy('i.name', sortOrder.toUpperCase() as 'ASC' | 'DESC');
-    }
-
-    // Add pagination
-    const skip = (page - 1) * limit;
-    queryBuilder = queryBuilder.skip(skip).limit(limit);
-
-    const items = await queryBuilder
-      .select([
-        'i.id',
-        'i.name',
-        'i.short_desc',
-        'i.images',
-        's.id as store_id',
-        's.name as store_name',
-        's.logo_url as store_logo',
-        'p.base_price',
-        'p.currency',
-        'q.available_count',
-        'c.id as category_id',
-        'c.name as category_name',
-        distanceQuery
-      ])
-      .getRawMany();
-
-    // Calculate ratings for all items in parallel
-    const itemsWithRatings = await Promise.all(
-      items.map(async (item) => {
-        const ratingData = await this.calculateItemRating(item.i_id);
-        
-        return {
-          id: item.i_id,
-          name: item.i_name,
-          description: item.i_short_desc,
-          images: item.i_images || [],
-          price: {
-            amount: item.p_base_price,
-            currency: item.p_currency
-          },
-          store: {
-            id: item.store_id,
-            name: item.store_name,
-            logo_url: item.store_logo
-          },
-          distance: Math.round(item.distance * 100) / 100,
-          rating: ratingData.rating,
-          category: {
-            id: item.category_id,
-            name: item.category_name
-          },
-          is_available: (item.q_available_count || 0) > 0
-        };
-      })
-    );
-    
-    return itemsWithRatings;
   }
 
   /**
    * Search categories
    */
   private async searchCategories(query: string, categoryId?: number, limit: number = 20) {
-    let queryBuilder = this.categoryRepository
-      .createQueryBuilder('c')
-      .leftJoin('c.items', 'i')
-      .leftJoin('c.store', 's')
-      .where('c.status = :status', { status: true })
-      .andWhere('c.type = :type', { type: 'custom_menu' });
+    try {
+      let queryBuilder = this.categoryRepository
+        .createQueryBuilder('c')
+        .where('c.status = :status', { status: true });
 
-    // Add search query filter
-    if (query) {
-      queryBuilder = queryBuilder.andWhere(
-        '(LOWER(c.name) LIKE LOWER(:query) OR LOWER(c.description) LIKE LOWER(:query))',
-        { query: `%${query}%` }
+      // Apply search query
+      if (query) {
+        queryBuilder = queryBuilder.andWhere(
+          '(LOWER(c.name) LIKE LOWER(:query) OR LOWER(c.description) LIKE LOWER(:query))',
+          { query: `%${query}%` }
+        );
+      }
+
+      // Apply category filter
+      if (categoryId) {
+        queryBuilder = queryBuilder.andWhere('c.id = :categoryId', { categoryId });
+      }
+
+      const categories = await queryBuilder
+        .select([
+          'c.id',
+          'c.name',
+          'c.description',
+          'c.icon'
+        ])
+        .orderBy('c.name', 'ASC')
+        .limit(limit)
+        .getMany();
+
+      // Get counts for each category
+      const categoriesWithCounts = await Promise.all(
+        categories.map(async (category) => {
+          // Count items in this category
+          const itemCount = await this.itemRepository
+            .createQueryBuilder('i')
+            .leftJoin('i.item_categories', 'ic')
+            .where('ic.category_id = :categoryId', { categoryId: category.id })
+            .andWhere('i.status = :status', { status: true })
+            .getCount();
+
+          // Count restaurants serving this category
+          const restaurantCount = await this.storeRepository
+            .createQueryBuilder('s')
+            .leftJoin('s.items', 'i')
+            .leftJoin('i.item_categories', 'ic')
+            .where('ic.category_id = :categoryId', { categoryId: category.id })
+            .andWhere('s.status = :status', { status: true })
+            .getCount();
+
+          return {
+            id: category.id,
+            name: category.name,
+            description: category.description,
+            icon: category.icon,
+            item_count: itemCount,
+            restaurant_count: restaurantCount
+          };
+        })
       );
+
+      return categoriesWithCounts;
+
+    } catch (error) {
+      this.logger.error(`❌ Error searching categories: ${error.message}`, error.stack);
+      return [];
     }
-
-    // Add category filter
-    if (categoryId) {
-      queryBuilder = queryBuilder.andWhere('c.id = :categoryId', { categoryId });
-    }
-
-    const categories = await queryBuilder
-      .select([
-        'c.id',
-        'c.name',
-        'c.description',
-        'c.icon',
-        'COUNT(DISTINCT i.id) as item_count',
-        'COUNT(DISTINCT s.id) as restaurant_count'
-      ])
-      .groupBy('c.id')
-      .orderBy('item_count', 'DESC')
-      .limit(limit)
-      .getRawMany();
-
-    return categories.map(category => ({
-      id: category.c_id,
-      name: category.c_name,
-      description: category.c_description,
-      icon: category.c_icon,
-      item_count: parseInt(category.item_count) || 0,
-      restaurant_count: parseInt(category.restaurant_count) || 0
-    }));
   }
 
   /**
-   * Get restaurant details with menu, offers, and timings
+   * Get restaurant details
    */
   async getRestaurantDetails(restaurantId: number, userId?: number, deviceLat?: number, deviceLng?: number) {
     try {
-      this.logger.log(`🏪 Getting restaurant details for ID: ${restaurantId}`);
-
-      // Get restaurant with all related data
-      const restaurant = await this.storeRepository
-        .createQueryBuilder('s')
-        .leftJoinAndSelect('s.locations', 'sl')
-        .leftJoinAndSelect('s.timings', 'st')
-        .leftJoinAndSelect('s.configs', 'sc')
-        .leftJoinAndSelect('s.offers', 'o')
-        .leftJoinAndSelect('s.items', 'i')
-        .leftJoinAndSelect('s.categories', 'c')
-        .where('s.id = :id', { id: restaurantId })
-        .andWhere('s.status = :status', { status: true })
-        .getOne();
-
-      if (!restaurant) {
-        throw new Error(`Restaurant with ID ${restaurantId} not found`);
-      }
+      this.logger.log(`🏪 Getting details for restaurant ID: ${restaurantId}`);
 
       // Get user location for distance calculation
       const userLocation = userId 
         ? await this.locationService.getUserLocation(userId, deviceLat, deviceLng)
         : { lat: deviceLat || 12.9716, lng: deviceLng || 77.5946, source: 'device_location' };
 
-      // Calculate distance to nearest location
-      let nearestDistance = Infinity;
-      let nearestLocation: StoreLocation | null = null;
-      
-      for (const location of restaurant.locations) {
-        const distance = this.locationService.calculateDistance(
-          userLocation.lat, userLocation.lng,
-          location.gps_lat, location.gps_lng
-        );
-        if (distance < nearestDistance) {
-          nearestDistance = distance;
-          nearestLocation = location;
-        }
+      // Get restaurant basic info
+      const restaurant = await this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoinAndSelect('s.locations', 'sl')
+        .leftJoinAndSelect('s.timings', 'st')
+        .leftJoinAndSelect('s.offers', 'o')
+        .leftJoinAndSelect('s.configs', 'sc')
+        .where('s.id = :id', { id: restaurantId })
+        .andWhere('s.status = :status', { status: true })
+        .getOne();
+
+      if (!restaurant) {
+        throw new Error('Restaurant not found');
       }
 
-      // Get active offers
-      const now = new Date();
-      const activeOffers = restaurant.offers.filter(offer => 
-        offer.status && 
-        offer.valid_from <= now && 
-        offer.valid_to >= now
-      );
+      // Calculate distance if location data is available
+      let distance = 0;
+      if (restaurant.locations && restaurant.locations.length > 0) {
+        const storeLocation = restaurant.locations[0];
+        distance = this.locationService.calculateDistance(
+          userLocation.lat,
+          userLocation.lng,
+          storeLocation.gps_lat,
+          storeLocation.gps_lng
+        );
+      }
 
-      // Calculate real rating data
+      // Get rating data
       const ratingData = await this.calculateRestaurantRating(restaurant.id);
+      
+      // Check if store is open
+      const storeOpenData = await this.isStoreOpen(restaurant.id);
 
-      // Get restaurant statistics
-      const stats = {
-        total_items: restaurant.items.filter(item => item.status && item.type === 'item').length,
-        total_categories: restaurant.categories.filter(cat => cat.status && cat.type === 'custom_menu').length,
-        active_offers: activeOffers.length,
-        average_rating: ratingData.rating,
-        total_reviews: ratingData.reviewCount
+      // Calculate delivery time
+      const deliveryTime = this.calculateDeliveryTime(distance, restaurant.id);
+
+      // Get item counts
+      const itemCount = await this.itemRepository
+        .createQueryBuilder('i')
+        .where('i.store_id = :storeId', { storeId: restaurant.id })
+        .andWhere('i.status = :status', { status: true })
+        .getCount();
+
+      // Get category counts
+      const categoryCount = await this.categoryRepository
+        .createQueryBuilder('c')
+        .leftJoin('c.item_categories', 'ic')
+        .leftJoin('ic.item', 'i')
+        .where('i.store_id = :storeId', { storeId: restaurant.id })
+        .andWhere('c.status = :status', { status: true })
+        .getCount();
+
+      // Get active offers count
+      const offersCount = await this.offersRepository
+        .createQueryBuilder('o')
+        .where('o.store_id = :storeId', { storeId: restaurant.id })
+        .andWhere('o.status = :status', { status: true })
+        .andWhere('o.valid_from <= :now', { now: new Date() })
+        .andWhere('o.valid_to >= :now', { now: new Date() })
+        .getCount();
+
+      // Format response
+      const restaurantDetails = {
+        id: restaurant.id,
+        name: restaurant.name,
+        description: restaurant.description,
+        logo_url: restaurant.logo_url,
+        fssai_license: restaurant.fssai_license_no,
+        gst_number: restaurant.gst_number,
+        locations: restaurant.locations?.map(location => ({
+          id: location.id,
+          lat: location.gps_lat,
+          lng: location.gps_lng,
+          locality: location.address_locality,
+          street: location.address_street,
+          city: location.address_city,
+          area_code: location.address_area_code,
+          state: location.address_state,
+          delivery_radius: location.delivery_radius_km
+        })) || [],
+        timings: restaurant.timings?.map(timing => ({
+          day: timing.day_from,
+          open_time: timing.time_from,
+          close_time: timing.time_to,
+          is_open: this.isDayOpen(timing.day_from, timing.time_from, timing.time_to)
+        })) || [],
+        offers: restaurant.offers?.filter(offer => 
+          offer.status && 
+          new Date(offer.valid_from) <= new Date() && 
+          new Date(offer.valid_to) >= new Date()
+        ).map(offer => ({
+          id: offer.id,
+          name: offer.name,
+          description: offer.description,
+          offer_code: offer.offer_code,
+          banner_image_url: offer.banner_image_url,
+          valid_from: offer.valid_from.toISOString(),
+          valid_to: offer.valid_to.toISOString()
+        })) || [],
+        stats: {
+          total_items: itemCount,
+          total_categories: categoryCount,
+          active_offers: offersCount,
+          average_rating: ratingData.rating,
+          total_reviews: ratingData.reviewCount
+        },
+        is_open: storeOpenData.isOpen,
+        delivery_time: deliveryTime,
+        min_order_value: restaurant.configs?.[0]?.min_order_value || 0,
+        delivery_fee: 30.00 // TODO: Calculate based on distance and store config
       };
 
-      // Get store configs for min order value and delivery fee
-      const storeConfig = restaurant.configs?.[0];
-      const minOrderValue = storeConfig?.min_order_value || 199.00;
-      const deliveryFee = 30.00; // TODO: Calculate based on distance
-
-      // Check if restaurant is currently open
-      const storeStatus = await this.isStoreOpen(restaurant.id);
-      const isOpen = storeStatus.isOpen;
+      this.logger.log(`✅ Restaurant details retrieved successfully`);
 
       return {
         success: true,
         message: 'Restaurant details retrieved successfully',
-        data: {
-          id: restaurant.id,
-          name: restaurant.name,
-          description: restaurant.description,
-          logo_url: restaurant.logo_url,
-          fssai_license: restaurant.fssai_license_no,
-          gst_number: restaurant.gst_number,
-          locations: restaurant.locations.map(location => ({
-            id: location.id,
-            lat: location.gps_lat,
-            lng: location.gps_lng,
-            locality: location.address_locality,
-            street: location.address_street,
-            city: location.address_city,
-            area_code: location.address_area_code,
-            state: location.address_state,
-            delivery_radius: location.delivery_radius_km
-          })),
-          timings: restaurant.timings.map(timing => ({
-            day: timing.day_from,
-            open_time: timing.time_from,
-            close_time: timing.time_to,
-            is_open: this.isDayOpen(timing.day_from, timing.time_from, timing.time_to)
-          })),
-          offers: activeOffers.map(offer => ({
-            id: offer.id,
-            name: offer.name,
-            description: offer.description,
-            offer_code: offer.offer_code,
-            banner_image_url: offer.banner_image_url,
-            valid_from: offer.valid_from.toISOString(),
-            valid_to: offer.valid_to.toISOString()
-          })),
-          stats,
-          is_open: isOpen,
-          delivery_time: this.calculateDeliveryTime(nearestDistance),
-          min_order_value: minOrderValue,
-          delivery_fee: deliveryFee
-        }
+        data: restaurantDetails
       };
+
     } catch (error) {
       this.logger.error(`❌ Error getting restaurant details: ${error.message}`, error.stack);
-      throw error;
+      throw new InternalServerErrorException('Failed to retrieve restaurant details');
     }
   }
 
   /**
-   * Check if restaurant is currently open
+   * Check if restaurant is open based on current time and day
    */
   private checkRestaurantOpen(timings: StoreTimings[]): boolean {
-    const now = new Date();
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Convert Sunday from 0 to 7
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // Convert to HHMM format
+    if (!timings || timings.length === 0) return false;
 
-    for (const timing of timings) {
-      if (timing.day_from <= currentDay && timing.day_to >= currentDay) {
-        const openTime = parseInt(timing.time_from);
-        const closeTime = parseInt(timing.time_to);
-        
-        if (currentTime >= openTime && currentTime <= closeTime) {
-          return true;
-        }
-      }
+    const now = new Date();
+    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+
+    const todayTiming = timings.find(timing => timing.day_from <= currentDay && timing.day_to >= currentDay);
+    if (!todayTiming) return false;
+
+    const openTime = parseInt(todayTiming.time_from);
+    const closeTime = parseInt(todayTiming.time_to);
+
+    // Handle cases where closing time is next day (e.g., 2300 to 0200)
+    if (closeTime < openTime) {
+      return currentTime >= openTime || currentTime <= closeTime;
     }
-    return false;
+
+    return currentTime >= openTime && currentTime <= closeTime;
   }
 
   /**
@@ -825,63 +1000,73 @@ export class BuyerService {
    */
   private isDayOpen(day: number, openTime: string, closeTime: string): boolean {
     const now = new Date();
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay();
-    const currentTime = now.getHours() * 100 + now.getMinutes();
+    const currentDay = now.getDay();
     
-    if (day === currentDay) {
-      const open = parseInt(openTime);
-      const close = parseInt(closeTime);
-      return currentTime >= open && currentTime <= close;
+    if (day !== currentDay) return false;
+    
+    const currentTime = now.getHours() * 100 + now.getMinutes();
+    const open = parseInt(openTime);
+    const close = parseInt(closeTime);
+    
+    if (close < open) {
+      return currentTime >= open || currentTime <= close;
     }
-    return true; // Assume open if not current day
+    
+    return currentTime >= open && currentTime <= close;
   }
 
-
   /**
-   * Get restaurant menu with categories and items
+   * Get restaurant menu
    */
   async getRestaurantMenu(restaurantId: number, menuParams: any) {
     try {
-      this.logger.log(`🍽️ Getting menu for restaurant ID: ${restaurantId}`);
+      this.logger.log(`📜 Getting menu for restaurant ID: ${restaurantId}`);
 
       // Get restaurant basic info
-      const restaurant = await this.storeRepository.findOne({
-        where: { id: restaurantId, status: true },
-        select: ['id', 'name']
-      });
+      const restaurant = await this.storeRepository
+        .createQueryBuilder('s')
+        .where('s.id = :id', { id: restaurantId })
+        .andWhere('s.status = :status', { status: true })
+        .select(['s.id', 's.name'])
+        .getOne();
 
       if (!restaurant) {
-        throw new Error(`Restaurant with ID ${restaurantId} not found`);
+        throw new Error('Restaurant not found');
       }
 
-      // Get categories with items
+      // Get menu categories with items
       const categories = await this.getMenuCategories(restaurantId, menuParams);
 
       // Calculate totals
-      const totalItems = categories.reduce((sum, cat) => sum + cat.items.length, 0);
+      const totalItems = categories.reduce((total, category) => total + category.items.length, 0);
       const totalCategories = categories.length;
+
+      const menuData = {
+        restaurant_id: restaurant.id,
+        restaurant_name: restaurant.name,
+        categories,
+        total_items: totalItems,
+        total_categories: totalCategories,
+        applied_filters: {
+          category_id: menuParams.category_id,
+          search: menuParams.search,
+          min_price: menuParams.min_price,
+          max_price: menuParams.max_price,
+          dietary_preference: menuParams.dietary_preference
+        }
+      };
+
+      this.logger.log(`✅ Menu retrieved successfully - ${totalCategories} categories, ${totalItems} items`);
 
       return {
         success: true,
         message: 'Menu retrieved successfully',
-        data: {
-          restaurant_id: restaurant.id,
-          restaurant_name: restaurant.name,
-          categories,
-          total_items: totalItems,
-          total_categories: totalCategories,
-          applied_filters: {
-            category_id: menuParams.category_id,
-            search: menuParams.search,
-            min_price: menuParams.min_price,
-            max_price: menuParams.max_price,
-            dietary_preference: menuParams.dietary_preference
-          }
-        }
+        data: menuData
       };
+
     } catch (error) {
       this.logger.error(`❌ Error getting restaurant menu: ${error.message}`, error.stack);
-      throw error;
+      throw new InternalServerErrorException('Failed to retrieve restaurant menu');
     }
   }
 
@@ -889,378 +1074,351 @@ export class BuyerService {
    * Get menu categories with items
    */
   private async getMenuCategories(restaurantId: number, menuParams: any) {
-    const {
-      category_id,
-      search,
-      sort_by = 'name',
-      sort_order = 'asc',
-      min_price,
-      max_price,
-      dietary_preference,
-      include_customizations = true,
-      include_variants = true
-    } = menuParams;
+    try {
+      let categoryQuery = this.categoryRepository
+        .createQueryBuilder('c')
+        .leftJoin('c.item_categories', 'ic')
+        .leftJoin('ic.item', 'i')
+        .where('i.store_id = :restaurantId', { restaurantId })
+        .andWhere('c.status = :status', { status: true })
+        .andWhere('i.status = :status', { status: true });
 
-    // Build category query
-    let categoryQuery = this.categoryRepository
-      .createQueryBuilder('c')
-      .leftJoin('c.items', 'i')
-      .where('c.store_id = :restaurantId', { restaurantId })
-      .andWhere('c.status = :status', { status: true })
-      .andWhere('c.type = :type', { type: 'custom_menu' });
+      // Apply category filter
+      if (menuParams.category_id) {
+        categoryQuery = categoryQuery.andWhere('c.id = :categoryId', { categoryId: menuParams.category_id });
+      }
 
-    // Filter by specific category
-    if (category_id) {
-      categoryQuery = categoryQuery.andWhere('c.id = :categoryId', { categoryId: category_id });
+      const categories = await categoryQuery
+        .select([
+          'c.id',
+          'c.name',
+          'c.description',
+          'c.icon',
+          'c.display_rank'
+        ])
+        .groupBy('c.id')
+        .orderBy('c.display_rank', 'ASC')
+        .addOrderBy('c.name', 'ASC')
+        .getMany();
+
+      // Get items for each category
+      const categoriesWithItems = await Promise.all(
+        categories.map(async (category) => {
+          const items = await this.getMenuItems(restaurantId, category.id, menuParams);
+          
+          return {
+            id: category.id,
+            name: category.name,
+            description: category.description,
+            icon: category.icon,
+            display_rank: category.display_rank,
+            item_count: items.length,
+            items
+          };
+        })
+      );
+
+      // Filter out empty categories if search or filters are applied
+      return categoriesWithItems.filter(category => category.items.length > 0);
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting menu categories: ${error.message}`, error.stack);
+      return [];
     }
-
-    // Get categories
-    const categories = await categoryQuery
-      .select([
-        'c.id',
-        'c.name',
-        'c.description',
-        'c.icon',
-        'c.display_rank',
-        'COUNT(i.id) as item_count'
-      ])
-      .groupBy('c.id')
-      .orderBy('c.display_rank', 'ASC')
-      .addOrderBy('c.name', 'ASC')
-      .getRawMany();
-
-    // Get items for each category
-    const categoriesWithItems = await Promise.all(
-      categories.map(async (category) => {
-        const items = await this.getMenuItems(
-          restaurantId,
-          category.c_id,
-          { search, sort_by, sort_order, min_price, max_price, dietary_preference, include_customizations, include_variants }
-        );
-
-        return {
-          id: category.c_id,
-          name: category.c_name,
-          description: category.c_description,
-          icon: category.c_icon,
-          display_rank: category.c_display_rank,
-          item_count: parseInt(category.item_count) || 0,
-          items
-        };
-      })
-    );
-
-    return categoriesWithItems;
   }
 
   /**
    * Get menu items for a category
    */
   private async getMenuItems(restaurantId: number, categoryId: number, params: any) {
-    const {
-      search,
-      sort_by = 'name',
-      sort_order = 'asc',
-      min_price,
-      max_price,
-      dietary_preference,
-      include_customizations = true,
-      include_variants = true
-    } = params;
+    try {
+      let itemQuery = this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoin('i.item_categories', 'ic')
+        .leftJoin('i.prices', 'p')
+        .leftJoin('i.quantities', 'q')
+        .leftJoin('i.attributes', 'a')
+        .where('i.store_id = :restaurantId', { restaurantId })
+        .andWhere('ic.category_id = :categoryId', { categoryId })
+        .andWhere('i.status = :status', { status: true });
 
-    // Build item query
-    let itemQuery = this.itemRepository
-      .createQueryBuilder('i')
-      .leftJoinAndSelect('i.prices', 'p')
-      .leftJoinAndSelect('i.quantities', 'q')
-      .leftJoinAndSelect('i.attributes', 'a')
-      .where('i.store_id = :restaurantId', { restaurantId })
-      .andWhere('i.category_id = :categoryId', { categoryId })
-      .andWhere('i.status = :status', { status: true })
-      .andWhere('i.type = :type', { type: 'item' });
-
-    // Add search filter
-    if (search) {
-      itemQuery = itemQuery.andWhere(
-        '(LOWER(i.name) LIKE LOWER(:search) OR LOWER(i.short_desc) LIKE LOWER(:search) OR LOWER(i.long_desc) LIKE LOWER(:search))',
-        { search: `%${search}%` }
-      );
-    }
-
-    // Add price filters
-    if (min_price !== undefined) {
-      itemQuery = itemQuery.andWhere('p.base_price >= :minPrice', { minPrice: min_price });
-    }
-    if (max_price !== undefined) {
-      itemQuery = itemQuery.andWhere('p.base_price <= :maxPrice', { maxPrice: max_price });
-    }
-
-    // Add dietary preference filter
-    if (dietary_preference) {
-      itemQuery = itemQuery.andWhere('a.attribute_code = :dietaryCode', { dietaryCode: 'veg_nonveg' });
-      if (dietary_preference === 'veg') {
-        itemQuery = itemQuery.andWhere('a.attribute_value = :dietaryValue', { dietaryValue: 'veg' });
-      } else if (dietary_preference === 'non-veg') {
-        itemQuery = itemQuery.andWhere('a.attribute_value = :dietaryValue', { dietaryValue: 'non-veg' });
-      } else if (dietary_preference === 'vegan') {
-        itemQuery = itemQuery.andWhere('a.attribute_value = :dietaryValue', { dietaryValue: 'vegan' });
+      // Apply search filter
+      if (params.search) {
+        itemQuery = itemQuery.andWhere(
+          '(LOWER(i.name) LIKE LOWER(:search) OR LOWER(i.short_desc) LIKE LOWER(:search))',
+          { search: `%${params.search}%` }
+        );
       }
+
+      // Apply price filters
+      if (params.min_price) {
+        itemQuery = itemQuery.andWhere('p.base_price >= :minPrice', { minPrice: params.min_price });
+      }
+      if (params.max_price) {
+        itemQuery = itemQuery.andWhere('p.base_price <= :maxPrice', { maxPrice: params.max_price });
+      }
+
+      // Apply dietary preference filter
+      if (params.dietary_preference) {
+        itemQuery = itemQuery.andWhere('a.attribute_code = :attrCode', { attrCode: 'veg_nonveg' });
+        itemQuery = itemQuery.andWhere('a.attribute_value = :dietary', { dietary: params.dietary_preference });
+      }
+
+      const items = await itemQuery
+        .select([
+          'i.id',
+          'i.name',
+          'i.short_desc',
+          'i.long_desc',
+          'i.images',
+          'i.is_recommended',
+          'i.tax_rate',
+          'i.tax_type',
+          'i.hsn_code',
+          'p.base_price',
+          'p.currency',
+          'p.maximum_price',
+          'p.minimum_price_range',
+          'p.maximum_price_range',
+          'q.unit_type',
+          'q.unit_value',
+          'q.available_count',
+          'q.maximum_count'
+        ])
+        .orderBy('i.is_recommended', 'DESC')
+        .addOrderBy('i.name', 'ASC')
+        .getRawMany();
+
+      // Process items and add additional data
+      const processedItems = await Promise.all(
+        items.map(async (item) => {
+          // Get rating data
+          const ratingData = await this.calculateItemRating(item.i_id);
+
+          // Get attributes
+          const attributes = await this.itemAttributesRepository
+            .createQueryBuilder('a')
+            .where('a.item_id = :itemId', { itemId: item.i_id })
+            .select([
+              'a.attribute_code',
+              'a.attribute_name',
+              'a.attribute_value',
+              'a.attribute_group'
+            ])
+            .getMany();
+
+          // Get customizations if requested
+          let customizations: any[] = [];
+          if (params.include_customizations) {
+            customizations = await this.getItemCustomizations(item.i_id);
+          }
+
+          // Get variants if requested
+          let variants: any[] = [];
+          if (params.include_variants) {
+            variants = await this.getItemVariants(item.i_id);
+          }
+
+          return {
+            id: item.i_id,
+            name: item.i_name,
+            short_desc: item.i_short_desc,
+            long_desc: item.i_long_desc,
+            images: item.i_images ? JSON.parse(item.i_images) : [],
+            price: {
+              base_price: parseFloat(item.p_base_price) || 0,
+              currency: item.p_currency || 'INR',
+              maximum_price: parseFloat(item.p_maximum_price) || null,
+              minimum_price_range: parseFloat(item.p_minimum_price_range) || null,
+              maximum_price_range: parseFloat(item.p_maximum_price_range) || null
+            },
+            quantity: {
+              unit_type: item.q_unit_type || 'unit',
+              unit_value: parseFloat(item.q_unit_value) || 1,
+              available_count: parseInt(item.q_available_count) || 0,
+              maximum_count: parseInt(item.q_maximum_count) || 99
+            },
+            attributes: attributes.map(attr => ({
+              attribute_code: attr.attribute_code,
+              attribute_name: attr.attribute_name,
+              attribute_value: attr.attribute_value,
+              attribute_group: attr.attribute_group
+            })),
+            customizations,
+            variants,
+            rating: ratingData.rating,
+            is_available: (parseInt(item.q_available_count) || 0) > 0,
+            is_recommended: item.i_is_recommended || false,
+            tax_rate: parseFloat(item.i_tax_rate) || null,
+            tax_type: item.i_tax_type || null,
+            hsn_code: item.i_hsn_code || null
+          };
+        })
+      );
+
+      return processedItems;
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting menu items: ${error.message}`, error.stack);
+      return [];
     }
-
-    // Add sorting
-    if (sort_by === 'name') {
-      itemQuery = itemQuery.orderBy('i.name', sort_order.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sort_by === 'price') {
-      itemQuery = itemQuery.orderBy('p.base_price', sort_order.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sort_by === 'rating') {
-      itemQuery = itemQuery.orderBy('i.rating', sort_order.toUpperCase() as 'ASC' | 'DESC');
-    } else if (sort_by === 'popularity') {
-      itemQuery = itemQuery.orderBy('i.is_recommended', 'DESC').addOrderBy('i.name', 'ASC');
-    }
-
-    const items = await itemQuery.getMany();
-
-    // Process items with customizations and variants
-    const processedItems = await Promise.all(
-      items.map(async (item) => {
-        // Calculate real rating for this item
-        const ratingData = await this.calculateItemRating(item.id);
-        
-        const itemData = {
-          id: item.id,
-          name: item.name,
-          short_desc: item.short_desc,
-          long_desc: item.long_desc,
-          images: item.images || [],
-          price: item.prices?.[0] ? {
-            base_price: item.prices[0].base_price,
-            currency: item.prices[0].currency,
-            maximum_price: item.prices[0].maximum_price,
-            minimum_price_range: item.prices[0].minimum_price_range,
-            maximum_price_range: item.prices[0].maximum_price_range
-          } : {
-            base_price: 0,
-            currency: 'INR'
-          },
-          quantity: item.quantities?.[0] ? {
-            unit_type: item.quantities[0].unit_type,
-            unit_value: item.quantities[0].unit_value,
-            available_count: item.quantities[0].available_count,
-            maximum_count: item.quantities[0].maximum_count
-          } : {
-            unit_type: 'unit',
-            unit_value: 1,
-            available_count: 0,
-            maximum_count: 10
-          },
-          attributes: item.attributes?.map(attr => ({
-            attribute_code: attr.attribute_code,
-            attribute_name: attr.attribute_name,
-            attribute_value: attr.attribute_value,
-            attribute_group: attr.attribute_group
-          })) || [],
-          rating: ratingData.rating,
-          is_available: item.quantities?.[0]?.available_count > 0,
-          is_recommended: item.is_recommended,
-          tax_rate: item.tax_rate,
-          tax_type: item.tax_type,
-          hsn_code: item.hsn_code
-        };
-
-        // Add customizations if requested
-        if (include_customizations) {
-          itemData['customizations'] = await this.getItemCustomizations(item.id);
-        }
-
-        // Add variants if requested
-        if (include_variants) {
-          itemData['variants'] = await this.getItemVariants(item.id);
-        }
-
-        return itemData;
-      })
-    );
-
-    return processedItems;
   }
 
   /**
    * Get item customizations
    */
   private async getItemCustomizations(itemId: number) {
-    const customizations = await this.itemCustomizationGroupsRepository
-      .createQueryBuilder('icg')
-      .leftJoinAndSelect('icg.customization_group', 'cg')
-      .leftJoinAndSelect('cg.customizationRelationships', 'cr')
-      .leftJoinAndSelect('cr.parent_customization', 'pc')
-      .where('icg.item_id = :itemId', { itemId })
-      .orderBy('icg.sequence', 'ASC')
-      .getMany();
+    try {
+      const customizations = await this.itemCustomizationGroupsRepository
+        .createQueryBuilder('icg')
+        .leftJoinAndSelect('icg.customization_group', 'cg')
+        .leftJoinAndSelect('cg.configs', 'cc')
+        .where('icg.item_id = :itemId', { itemId })
+        .orderBy('icg.sequence', 'ASC')
+        .getMany();
 
-    return customizations.map(customization => ({
-      id: customization.customization_group.id,
-      name: customization.customization_group.name,
-      description: customization.customization_group.description,
-      min_selections: customization.min_selections || customization.customization_group.configs?.[0]?.min_selections || 1,
-      max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
-      input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
-      is_mandatory: customization.is_mandatory,
-      sequence: customization.sequence || 1,
-      options: customization.customization_group.customizationRelationships?.map(rel => ({
-        id: rel.parent_customization.id,
-        name: rel.parent_customization.name,
-        price: 0, // TODO: Get from item prices
-        is_default: rel.is_default
-      })) || []
-    }));
+      // TODO: Get customization options for each group
+      return customizations.map(customization => ({
+        id: customization.customization_group.id,
+        name: customization.customization_group.name,
+        description: customization.customization_group.description,
+        min_selections: customization.min_selections || customization.customization_group.configs?.[0]?.min_selections || 0,
+        max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
+        input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
+        is_mandatory: customization.is_mandatory,
+        sequence: customization.sequence,
+        options: [] // TODO: Implement option fetching
+      }));
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting item customizations: ${error.message}`, error.stack);
+      return [];
+    }
   }
 
   /**
    * Get item variants
    */
   private async getItemVariants(itemId: number) {
-    const variants = await this.itemVariantsRepository
-      .createQueryBuilder('iv')
-      .leftJoinAndSelect('iv.variant_group', 'vg')
-      .where('iv.item_id = :itemId', { itemId })
-      .orderBy('vg.id', 'ASC')
-      .getMany();
+    try {
+      const variants = await this.itemVariantsRepository
+        .createQueryBuilder('iv')
+        .leftJoinAndSelect('iv.variant_group', 'vg')
+        .where('iv.item_id = :itemId', { itemId })
+        .getMany();
 
-    // Group variants by variant group
-    const variantGroups = new Map();
-    
-    variants.forEach(variant => {
-      const groupId = variant.variant_group.id;
-      if (!variantGroups.has(groupId)) {
-        variantGroups.set(groupId, {
-          id: variant.variant_group.id,
-          name: variant.variant_group.name,
-          description: variant.variant_group.description,
-          variants: []
-        });
-      }
-      
-      variantGroups.get(groupId).variants.push({
-        id: variant.id,
-        name: variant.variant_group.name, // TODO: Get variant name from item
-        price: 0, // TODO: Get from item prices
-        is_default: variant.is_default
-      });
-    });
+      // TODO: Get variant options for each group
+      return variants.map(variant => ({
+        id: variant.variant_group.id,
+        name: variant.variant_group.name,
+        description: variant.variant_group.description,
+        variants: [] // TODO: Implement variant option fetching with prices
+      }));
 
-    return Array.from(variantGroups.values());
+    } catch (error) {
+      this.logger.error(`❌ Error getting item variants: ${error.message}`, error.stack);
+      return [];
+    }
   }
 
   /**
-   * Calculate average rating for a restaurant
+   * Calculate restaurant rating from reviews
    */
   private async calculateRestaurantRating(storeId: number): Promise<{ rating: number; reviewCount: number }> {
     try {
       const result = await this.restaurantReviewRepository
-        .createQueryBuilder('review')
-        .select('AVG(review.rating)', 'averageRating')
-        .addSelect('COUNT(review.id)', 'reviewCount')
-        .where('review.store.id = :storeId', { storeId })
+        .createQueryBuilder('rr')
+        .select('AVG(rr.rating)', 'avgRating')
+        .addSelect('COUNT(rr.id)', 'reviewCount')
+        .where('rr.store_id = :storeId', { storeId })
         .getRawOne();
 
       return {
-        rating: result.averageRating ? parseFloat(result.averageRating) : 0,
+        rating: parseFloat(result.avgRating) || 0,
         reviewCount: parseInt(result.reviewCount) || 0
       };
     } catch (error) {
-      this.logger.warn(`Failed to calculate rating for store ${storeId}: ${error.message}`);
+      this.logger.warn(`Failed to calculate restaurant rating for store ${storeId}: ${error.message}`);
       return { rating: 0, reviewCount: 0 };
     }
   }
 
   /**
-   * Calculate average rating for an item
+   * Calculate item rating from reviews
    */
   private async calculateItemRating(itemId: number): Promise<{ rating: number; reviewCount: number }> {
     try {
       const result = await this.itemReviewRepository
-        .createQueryBuilder('review')
-        .select('AVG(review.rating)', 'averageRating')
-        .addSelect('COUNT(review.id)', 'reviewCount')
-        .where('review.item.id = :itemId', { itemId })
+        .createQueryBuilder('ir')
+        .select('AVG(ir.rating)', 'avgRating')
+        .addSelect('COUNT(ir.id)', 'reviewCount')
+        .where('ir.item_id = :itemId', { itemId })
         .getRawOne();
 
       return {
-        rating: result.averageRating ? parseFloat(result.averageRating) : 0,
+        rating: parseFloat(result.avgRating) || 0,
         reviewCount: parseInt(result.reviewCount) || 0
       };
     } catch (error) {
-      this.logger.warn(`Failed to calculate rating for item ${itemId}: ${error.message}`);
+      this.logger.warn(`Failed to calculate item rating for item ${itemId}: ${error.message}`);
       return { rating: 0, reviewCount: 0 };
     }
   }
 
   /**
-   * Check if restaurant is currently open based on store timings
+   * Check if store is currently open
    */
   private async isStoreOpen(storeId: number): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
     try {
       const now = new Date();
-      const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Convert Sunday from 0 to 7
-      const currentTime = now.getHours() * 100 + now.getMinutes(); // Convert to HHMM format
+      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
-      // Check for close timings (holidays, maintenance)
-      const closeTimings = await this.storeRepository
+      // Check regular timings
+      const todayTiming = await this.storeTimingsRepository
+        .createQueryBuilder('st')
+        .where('st.store_id = :storeId', { storeId })
+        .andWhere('st.day_from <= :day AND st.day_to >= :day', { day: currentDay })
+        .getOne();
+
+      if (!todayTiming) {
+        return { isOpen: false };
+      }
+
+      const openTime = parseInt(todayTiming.time_from);
+      const closeTime = parseInt(todayTiming.time_to);
+
+      // Check if currently within operating hours
+      let isWithinHours = false;
+      if (closeTime < openTime) {
+        // Handle overnight operations (e.g., 2300 to 0200)
+        isWithinHours = currentTime >= openTime || currentTime <= closeTime;
+      } else {
+        isWithinHours = currentTime >= openTime && currentTime <= closeTime;
+      }
+
+      if (!isWithinHours) {
+        return { isOpen: false, nextOpenTime: todayTiming.time_from };
+      }
+
+      // Check for special closures (holidays, maintenance, etc.)
+      const specialClosure = await this.storeRepository
         .createQueryBuilder('s')
         .leftJoin('s.closeTimings', 'sct')
         .where('s.id = :storeId', { storeId })
         .andWhere('sct.close_start_datetime <= :now', { now })
         .andWhere('sct.close_end_datetime >= :now', { now })
-        .getCount();
+        .getOne();
 
-      if (closeTimings > 0) {
+      if (specialClosure) {
         return { isOpen: false };
       }
 
-      // Check regular store timings
-      const storeTimings = await this.storeTimingsRepository
-        .createQueryBuilder('st')
-        .leftJoin('st.store', 's')
-        .where('s.id = :storeId', { storeId })
-        .andWhere('st.type = :type', { type: 'Order' })
-        .andWhere('st.day_from <= :currentDay', { currentDay })
-        .andWhere('st.day_to >= :currentDay', { currentDay })
-        .getMany();
+      return { isOpen: true };
 
-      for (const timing of storeTimings) {
-        const openTime = parseInt(timing.time_from);
-        const closeTime = parseInt(timing.time_to);
-
-        if (currentTime >= openTime && currentTime <= closeTime) {
-          return { isOpen: true };
-        }
-      }
-
-      // Find next opening time
-      const nextTiming = await this.storeTimingsRepository
-        .createQueryBuilder('st')
-        .leftJoin('st.store', 's')
-        .where('s.id = :storeId', { storeId })
-        .andWhere('st.type = :type', { type: 'Order' })
-        .andWhere('(st.day_from > :currentDay OR (st.day_from = :currentDay AND st.time_from > :currentTime))', {
-          currentDay,
-          currentTime
-        })
-        .orderBy('st.day_from', 'ASC')
-        .addOrderBy('st.time_from', 'ASC')
-        .getOne();
-
-      if (nextTiming) {
-        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        const nextDay = dayNames[nextTiming.day_from === 7 ? 0 : nextTiming.day_from];
-        const nextTime = `${nextTiming.time_from.slice(0, 2)}:${nextTiming.time_from.slice(2, 4)}`;
-        return { isOpen: false, nextOpenTime: `${nextDay} at ${nextTime}` };
-      }
-
-      return { isOpen: false };
     } catch (error) {
-      this.logger.warn(`Failed to check store open status for store ${storeId}: ${error.message}`);
-      return { isOpen: true }; // Default to open if check fails
+      this.logger.warn(`Failed to check store timing for store ${storeId}: ${error.message}`);
+      return { isOpen: false };
     }
   }
 
@@ -1293,6 +1451,141 @@ export class BuyerService {
     } catch (error) {
       this.logger.warn(`Failed to calculate delivery time: ${error.message}`);
       return '25-30 mins'; // Default fallback
+    }
+  }
+
+  /**
+   * Get search suggestions based on dishes and nearby restaurants only
+   * Restaurants are sorted by distance (ascending)
+   */
+  async getSearchSuggestions(request: SearchSuggestionsRequestDto) {
+    const { query, location, filters, limit = 10 } = request;
+    
+    this.logger.log(`🔍 Getting search suggestions for: "${query}"`);
+    this.logger.log(`📍 Location provided: ${location ? `lat: ${location.lat}, lng: ${location.lng}` : 'No location provided'}`);
+    this.logger.log(`🔍 Filters: ${JSON.stringify(filters)}`);
+    this.logger.log(`🔍 Limit: ${limit}`);
+    
+    const suggestions: any[] = [];
+    
+    try {
+      // 1. Search dishes (primary suggestions)
+      this.logger.log(`🔍 Searching dishes...`);
+      const dishSuggestions = await this.dishRepository
+        .createQueryBuilder('d')
+        .where('d.status = :status', { status: true })
+        .andWhere('LOWER(d.name) LIKE LOWER(:query)', { query: `%${query}%` })
+        .select([
+          'd.id',
+          'd.name', 
+          'd.description',
+          'd.icon'
+        ])
+        .orderBy('d.name', 'ASC')
+        .limit(Math.ceil(limit * 0.6)) // 60% of suggestions are dishes
+        .getMany();
+
+      this.logger.log(`🍽️ Found ${dishSuggestions.length} dishes`);
+
+      // Add dish suggestions (no counts needed)
+      for (const dish of dishSuggestions) {
+        suggestions.push({
+          id: dish.id,
+          name: dish.name,
+          type: 'dish',
+          description: dish.description,
+          icon: dish.icon,
+          image: dish.icon
+        });
+      }
+
+      // 2. Search nearby restaurants (secondary suggestions)
+      const remainingLimit = limit - suggestions.length;
+      this.logger.log(`🔍 Remaining limit for restaurants: ${remainingLimit}`);
+      
+      if (remainingLimit > 0 && location?.lat && location?.lng) {
+        this.logger.log(`🏪 Searching nearby restaurants with location: ${location.lat}, ${location.lng}`);
+        
+        // Get nearby restaurants sorted by distance
+        const restaurantSuggestions = await this.storeRepository
+          .createQueryBuilder('s')
+          .leftJoin('s.store_locations', 'sl')
+          .where('s.status = :status', { status: true })
+          .andWhere('LOWER(s.name) LIKE LOWER(:query)', { query: `%${query}%` })
+          .andWhere('sl.latitude IS NOT NULL')
+          .andWhere('sl.longitude IS NOT NULL')
+          .select([
+            's.id',
+            's.name',
+            's.description', 
+            's.logo_url',
+            'sl.latitude',
+            'sl.longitude',
+            'sl.city',
+            'sl.locality'
+          ])
+          .addSelect(
+            `ST_Distance(
+              ST_GeogFromText('POINT(${location.lng} ${location.lat})'),
+              ST_GeogFromText('POINT(' || sl.longitude || ' ' || sl.latitude || ')')
+            )`,
+            'distance'
+          )
+          .orderBy('distance', 'ASC') // Sort by distance ascending
+          .limit(remainingLimit)
+          .getRawMany();
+
+        this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants`);
+
+        // Add restaurant suggestions (no counts needed)
+        for (const restaurant of restaurantSuggestions) {
+          this.logger.log(`🏪 Adding restaurant: ${restaurant.s_name} (distance: ${restaurant.distance}km)`);
+          suggestions.push({
+            id: restaurant.s_id,
+            name: restaurant.s_name,
+            type: 'restaurant',
+            description: restaurant.s_description,
+            icon: restaurant.s_logo_url,
+            image: restaurant.s_logo_url,
+            distance: restaurant.distance,
+            location: {
+              lat: restaurant.sl_latitude,
+              lng: restaurant.sl_longitude,
+              city: restaurant.sl_city,
+              locality: restaurant.sl_locality
+            }
+          });
+        }
+      } else if (remainingLimit > 0) {
+        this.logger.warn(`⚠️ No location provided, skipping restaurant suggestions`);
+      }
+
+      // Sort suggestions by type (dishes first, then restaurants by distance)
+      suggestions.sort((a, b) => {
+        if (a.type === 'dish' && b.type === 'restaurant') return -1;
+        if (a.type === 'restaurant' && b.type === 'dish') return 1;
+        if (a.type === 'restaurant' && b.type === 'restaurant') {
+          return a.distance - b.distance; // Sort restaurants by distance
+        }
+        return 0;
+      });
+
+      this.logger.log(`✅ Found ${suggestions.length} total suggestions for "${query}"`);
+      this.logger.log(`📊 Suggestions breakdown - Dishes: ${suggestions.filter(s => s.type === 'dish').length}, Restaurants: ${suggestions.filter(s => s.type === 'restaurant').length}`);
+
+      return {
+        success: true,
+        message: 'Search suggestions retrieved successfully',
+        data: {
+          query,
+          suggestions: suggestions.slice(0, limit),
+          total_suggestions: suggestions.length
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting search suggestions: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Failed to get search suggestions');
     }
   }
 }

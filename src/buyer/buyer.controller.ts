@@ -3,8 +3,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, 
 import { BuyerService } from './buyer.service';
 import { JwtAuthGuard } from '../authentication/jwt-auth.guard';
 import { HomeResponseDto } from './dto/home-response.dto';
-import { SearchRequestDto } from './dto/search-request.dto';
-import { SearchResponseDto } from './dto/search-response.dto';
+import { SearchRequestDto, SearchSuggestionsRequestDto } from './dto/search-request.dto';
+import { SearchResponseDto, SearchSuggestionsResponseDto } from './dto/search-response.dto';
 import { RestaurantDetailsResponseDto } from './dto/restaurant-details.dto';
 import { MenuRequestDto } from './dto/menu-request.dto';
 import { MenuResponseDto } from './dto/menu-response.dto';
@@ -138,6 +138,115 @@ export class BuyerController {
   ) {
     const userId = req?.user?.id;
     return this.buyerService.search(searchParams, userId);
+  }
+
+  @Post('search/suggestions')
+  @ApiOperation({
+    summary: 'Get search suggestions',
+    description: 'Get real-time search suggestions based on dishes, restaurants, and categories with advanced filtering. Returns suggestions prioritized by dishes (60%), restaurants (30%), and categories (10%).',
+  })
+  @ApiBody({ 
+    type: SearchSuggestionsRequestDto,
+    description: 'Search suggestions request payload with query, location, filters, and limit',
+    examples: {
+      basic: {
+        summary: 'Basic search suggestions',
+        description: 'Simple search with just a query string',
+        value: {
+          query: 'burgl',
+          limit: 10
+        }
+      },
+      advanced: {
+        summary: 'Advanced search with filters',
+        description: 'Search with location and dietary filters',
+        value: {
+          query: 'pizza',
+          location: {
+            lat: 12.9716,
+            lng: 77.5946
+          },
+          filters: {
+            dietary_preference: 'veg',
+            min_price: 100,
+            max_price: 500,
+            category_id: 1
+          },
+          limit: 15
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Search suggestions retrieved successfully',
+    type: SearchSuggestionsResponseDto,
+    content: {
+      'application/json': {
+        example: {
+          success: true,
+          message: 'Search suggestions retrieved successfully',
+          data: {
+            query: 'burgl',
+            suggestions: [
+              {
+                id: 1,
+                name: 'Burger',
+                type: 'dish',
+                description: 'Delicious burgers',
+                icon: 'https://example.com/burger-icon.jpg',
+                image: 'https://example.com/burger-image.jpg',
+                restaurant_count: 15,
+                item_count: 25
+              },
+              {
+                id: 2,
+                name: 'Burger Palace',
+                type: 'restaurant',
+                description: 'Best burgers in town',
+                icon: 'https://example.com/logo.jpg',
+                image: 'https://example.com/logo.jpg',
+                restaurant_count: 1,
+                item_count: 12
+              }
+            ],
+            total_suggestions: 2
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - Invalid query or parameters',
+    content: {
+      'application/json': {
+        example: {
+          success: false,
+          message: 'Query must be at least 2 characters',
+          error: 'BAD_REQUEST'
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 500, 
+    description: 'Internal server error',
+    content: {
+      'application/json': {
+        example: {
+          success: false,
+          message: 'Internal server error',
+          error: 'INTERNAL_SERVER_ERROR'
+        }
+      }
+    }
+  })
+  async getSearchSuggestions(@Body() request: SearchSuggestionsRequestDto) {
+    if (!request.query || request.query.trim().length < 2) {
+      throw new BadRequestException('Query must be at least 2 characters');
+    }
+    return this.buyerService.getSearchSuggestions(request);
   }
 
   @Get('restaurants/:id')
