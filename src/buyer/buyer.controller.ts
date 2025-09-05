@@ -32,7 +32,7 @@ export class BuyerController {
   @Get('home')
   @ApiOperation({
     summary: 'Get home page data',
-    description: 'Retrieve home page data including featured restaurants, popular categories, trending items, and active offers. Uses location-based filtering with Haversine formula for distance calculation.',
+    description: 'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner. Uses location-based filtering with Haversine formula for distance calculation.',
   })
   @ApiQuery({
     name: 'lat',
@@ -47,6 +47,13 @@ export class BuyerController {
     type: String,
     description: 'Device longitude for location-based filtering',
     example: '77.5946'
+  })
+  @ApiQuery({
+    name: 'veg_mode',
+    required: false,
+    type: Boolean,
+    description: 'Filter for vegetarian-only restaurants and items',
+    example: false
   })
   @ApiResponse({
     status: 200,
@@ -80,13 +87,15 @@ export class BuyerController {
   async getHomeData(
     @Query('lat') deviceLat?: string,
     @Query('lng') deviceLng?: string,
+    @Query('veg_mode') vegMode?: string,
     @Req() req?: any
   ) {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+    const isVegMode = vegMode === 'true';
 
-    return this.buyerService.getHomeData(userId, lat, lng);
+    return this.buyerService.getHomeData(userId, lat, lng, isVegMode);
   }
 
   @Get('search')
@@ -675,7 +684,7 @@ export class BuyerController {
     @Query('type') type?: string,
     @Query('unread_only') unreadOnly?: string
   ) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 20;
     const unreadOnlyBool = unreadOnly === 'true';
@@ -693,7 +702,7 @@ export class BuyerController {
     description: 'Notification marked as read'
   })
   async markNotificationAsRead(@Req() req: any, @Param('id') notificationId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.markAsRead(parseInt(notificationId), userId);
   }
 
@@ -707,7 +716,7 @@ export class BuyerController {
     description: 'All notifications marked as read'
   })
   async markAllNotificationsAsRead(@Req() req: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.markAllAsRead(userId);
   }
 
@@ -721,7 +730,7 @@ export class BuyerController {
     description: 'Notification deleted successfully'
   })
   async deleteNotification(@Req() req: any, @Param('id') notificationId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.deleteNotification(parseInt(notificationId), userId);
   }
 
@@ -735,7 +744,7 @@ export class BuyerController {
     description: 'Notification preferences retrieved successfully'
   })
   async getNotificationPreferences(@Req() req: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.getNotificationPreferences(userId);
   }
 
@@ -749,7 +758,7 @@ export class BuyerController {
     description: 'Notification preferences updated successfully'
   })
   async updateNotificationPreferences(@Req() req: any, @Body() preferences: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.updateNotificationPreferences(userId, preferences);
   }
 
@@ -763,7 +772,7 @@ export class BuyerController {
     description: 'Device token registered successfully'
   })
   async registerDeviceToken(@Req() req: any, @Body() tokenData: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
     }
@@ -807,7 +816,7 @@ export class BuyerController {
     description: 'Device token unregistered successfully'
   })
   async unregisterDeviceToken(@Req() req: any, @Param('token') deviceToken: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.unregisterDeviceToken(userId, deviceToken);
   }
 
@@ -821,7 +830,7 @@ export class BuyerController {
     description: 'Test notification sent successfully'
   })
   async testPushNotification(@Req() req: any, @Body() body: { message?: string }) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
     }
@@ -857,7 +866,7 @@ export class BuyerController {
     description: 'Restaurant review created successfully'
   })
   async createRestaurantReview(@Req() req: any, @Body() createReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.createRestaurantReview(userId, createReviewDto);
   }
 
@@ -871,7 +880,7 @@ export class BuyerController {
     description: 'Item review created successfully'
   })
   async createItemReview(@Req() req: any, @Body() createReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.createItemReview(userId, createReviewDto);
   }
 
@@ -948,7 +957,7 @@ export class BuyerController {
     @Query('limit') limit?: string,
     @Query('type') type?: string
   ) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 20;
     
@@ -965,7 +974,7 @@ export class BuyerController {
     description: 'Restaurant review updated successfully'
   })
   async updateRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.updateRestaurantReview(parseInt(reviewId), userId, updateReviewDto);
   }
 
@@ -979,7 +988,7 @@ export class BuyerController {
     description: 'Item review updated successfully'
   })
   async updateItemReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.updateItemReview(parseInt(reviewId), userId, updateReviewDto);
   }
 
@@ -993,7 +1002,7 @@ export class BuyerController {
     description: 'Restaurant review deleted successfully'
   })
   async deleteRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.deleteRestaurantReview(parseInt(reviewId), userId);
   }
 
@@ -1007,7 +1016,7 @@ export class BuyerController {
     description: 'Item review deleted successfully'
   })
   async deleteItemReview(@Req() req: any, @Param('reviewId') reviewId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.deleteItemReview(parseInt(reviewId), userId);
   }
 }

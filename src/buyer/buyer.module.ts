@@ -38,6 +38,7 @@ import { Notification } from '../notification/entities/notification.entity';
 import { RestaurantReview } from '../review/entities/restaurant-review.entity';
 import { ItemReview } from '../review/entities/item-review.entity';
 import { UserDeviceToken } from '../user/entities/user-device-token.entity';
+import { Dish } from '../dish/entities/dish.entity';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { UserDeviceToken } from '../user/entities/user-device-token.entity';
       RestaurantReview,
       ItemReview,
       UserDeviceToken,
+      Dish,
     ]),
     SharedNotificationModule,
   ],

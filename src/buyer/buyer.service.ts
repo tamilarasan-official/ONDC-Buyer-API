@@ -17,6 +17,9 @@ import { ItemCustomizationGroups } from '../item/entities/item-customization-gro
 import { CustomizationRelationships } from '../item/entities/customization-relationships.entity';
 import { VariantGroups } from '../variant/entities/variant-groups.entity';
 import { ItemVariants } from '../variant/entities/item-variants.entity';
+import { Dish } from '../dish/entities/dish.entity';
+import { RestaurantReview } from '../review/entities/restaurant-review.entity';
+import { ItemReview } from '../review/entities/item-review.entity';
 
 @Injectable()
 export class BuyerService {
@@ -51,13 +54,19 @@ export class BuyerService {
     private readonly variantGroupsRepository: Repository<VariantGroups>,
     @InjectRepository(ItemVariants)
     private readonly itemVariantsRepository: Repository<ItemVariants>,
+    @InjectRepository(Dish)
+    private readonly dishRepository: Repository<Dish>,
+    @InjectRepository(RestaurantReview)
+    private readonly restaurantReviewRepository: Repository<RestaurantReview>,
+    @InjectRepository(ItemReview)
+    private readonly itemReviewRepository: Repository<ItemReview>,
     private readonly locationService: LocationService,
   ) {}
 
   /**
    * Get home page data with location-based filtering
    */
-  async getHomeData(userId?: number, deviceLat?: number, deviceLng?: number) {
+  async getHomeData(userId?: number, deviceLat?: number, deviceLng?: number, vegMode?: boolean) {
     try {
       // Get user location
       const userLocation = userId 
@@ -66,39 +75,27 @@ export class BuyerService {
 
       this.logger.log(`📍 User location: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
 
-      // Get featured restaurants (within 10km radius)
-      const featuredRestaurants = await this.getFeaturedRestaurants(
+      // Get nearby restaurants (within 10km radius) - KEEP UNCHANGED but add vegMode
+      const nearbyRestaurants = await this.getFeaturedRestaurants(
         userLocation.lat, 
         userLocation.lng, 
-        10
+        10,
+        vegMode
       );
 
-      // Get popular categories
-      const popularCategories = await this.getPopularCategories();
+      // MODIFY: Get "What's On Your Mind?" dishes instead of categories
+      const whatsOnYourMind = await this.getWhatsOnYourMind();
 
-      // Get trending items
-      const trendingItems = await this.getTrendingItems(
-        userLocation.lat, 
-        userLocation.lng, 
-        10
-      );
-
-      // Get active offers
-      const activeOffers = await this.getActiveOffers();
+      // ADD: Get promotional banner data
+      const promotionalBanner = await this.getPromotionalBanner();
 
       return {
         success: true,
         message: 'Home page data retrieved successfully',
         data: {
-          location: {
-            lat: userLocation.lat,
-            lng: userLocation.lng,
-            source: userLocation.source
-          },
-          featured_restaurants: featuredRestaurants,
-          popular_categories: popularCategories,
-          trending_items: trendingItems,
-          active_offers: activeOffers
+          nearby_restaurants: nearbyRestaurants,
+          whats_on_your_mind: whatsOnYourMind,
+          promotional_banner: promotionalBanner,
         }
       };
     } catch (error) {
@@ -108,10 +105,10 @@ export class BuyerService {
   }
 
   /**
-   * Get featured restaurants within radius
+   * Get nearby restaurants within radius
    */
-  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number) {
-    this.logger.log(`🔍 Getting featured restaurants for location: ${userLat}, ${userLng} within ${radiusKm}km`);
+  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean) {
+    this.logger.log(`🔍 Getting nearby restaurants for location: ${userLat}, ${userLng} within ${radiusKm}km`);
     
     // First, let's check if we have any stores at all
     const totalStores = await this.storeRepository.count();
@@ -173,60 +170,77 @@ export class BuyerService {
     
     this.logger.log(`📊 Stores within ${radiusKm}km: ${filteredStores.length}`);
     
-    return filteredStores.map(store => {
-      const distance = this.locationService.calculateDistance(
-        userLat, userLng,
-        store.sl_gps_lat, store.sl_gps_lng
-      );
-      
-      return {
-        id: store.s_id,
-        name: store.s_name,
-        description: store.s_description,
-        logo_url: store.s_logo_url,
-        fssai_license: store.s_fssai_license_no,
-        location: {
-          lat: store.sl_gps_lat,
-          lng: store.sl_gps_lng,
-          city: store.sl_address_city,
-          locality: store.sl_address_locality
-        },
-        distance: Math.round(distance * 100) / 100,
-        rating: 4.5,
-        delivery_time: '25-30 mins',
-        offers_count: 0 // Will be calculated separately
-      };
-    });
+    // Calculate ratings and store status for all stores in parallel
+    const storesWithRatings = await Promise.all(
+      filteredStores.map(async (store) => {
+        const distance = this.locationService.calculateDistance(
+          userLat, userLng,
+          store.sl_gps_lat, store.sl_gps_lng
+        );
+        
+        const ratingData = await this.calculateRestaurantRating(store.s_id);
+        const storeStatus = await this.isStoreOpen(store.s_id);
+        const deliveryTime = this.calculateDeliveryTime(distance, store.s_id);
+        
+        return {
+          id: store.s_id,
+          name: store.s_name,
+          description: store.s_description,
+          logo_url: store.s_logo_url,
+          fssai_license: store.s_fssai_license_no,
+          location: {
+            lat: store.sl_gps_lat,
+            lng: store.sl_gps_lng,
+            city: store.sl_address_city,
+            locality: store.sl_address_locality
+          },
+          distance: Math.round(distance * 100) / 100,
+          rating: ratingData.rating,
+          delivery_time: deliveryTime,
+          offers_count: 0 // Will be calculated separately
+        };
+      })
+    );
+    
+    return storesWithRatings;
   }
 
   /**
-   * Get popular categories
+   * MODIFY: Get "What's On Your Mind?" dishes (was getPopularCategories)
    */
-  private async getPopularCategories() {
-    const categories = await this.categoryRepository
-      .createQueryBuilder('c')
-      .leftJoin('c.items', 'i')
-      .where('c.status = :status', { status: true })
-      .andWhere('c.type = :type', { type: 'custom_menu' })
+  private async getWhatsOnYourMind() {
+    const dishes = await this.dishRepository
+      .createQueryBuilder('d')
+      .where('d.status = :status', { status: true })
       .select([
-        'c.id',
-        'c.name',
-        'c.description',
-        'c.icon',
-        'COUNT(i.id) as item_count'
+        'd.id',
+        'd.name',
+        'd.description',
+        'd.icon'
       ])
-      .groupBy('c.id')
-      .orderBy('item_count', 'DESC')
-      .limit(8)
-      .getRawMany();
+      .orderBy('d.name', 'ASC')
+      .limit(5) // Based on image: Biryani, South Indian, Pizza, Burger, Cakes
+      .getMany();
 
-    return categories.map(category => ({
-      id: category.c_id,
-      name: category.c_name,
-      description: category.c_description,
-      icon: category.c_icon,
-      item_count: parseInt(category.item_count)
+    return dishes.map(dish => ({
+      id: dish.id,
+      name: dish.name,
+      description: dish.description,
+      icon: dish.icon
     }));
+  }
+
+  /**
+   * ADD: Get promotional banner data
+   */
+  private async getPromotionalBanner() {
+    return {
+      title: "Craving Something Delicious?",
+      subtitle: "Get your favorite meals delivered hot & fast—right to your doorstep.",
+      cta_button: "Order Now!",
+      image_url: "/images/promotional-thali.jpg", // Traditional Indian thali image
+      background_color: "#14b8a6" // Teal color from image
+    };
   }
 
   /**
@@ -259,22 +273,31 @@ export class BuyerService {
       .limit(12)
       .getRawMany();
 
-    return items.map(item => ({
-      id: item.i_id,
-      name: item.i_name,
-      description: item.i_short_desc,
-      images: item.i_images || [],
-      store: {
-        name: item.s_name,
-        logo_url: item.s_logo_url
-      },
-      price: {
-        amount: item.p_base_price,
-        currency: item.p_currency
-      },
-      distance: Math.round(item.distance * 100) / 100,
-      rating: 4.2 // TODO: Calculate from reviews
-    }));
+    // Calculate ratings for all items in parallel
+    const itemsWithRatings = await Promise.all(
+      items.map(async (item) => {
+        const ratingData = await this.calculateItemRating(item.i_id);
+        
+        return {
+          id: item.i_id,
+          name: item.i_name,
+          description: item.i_short_desc,
+          images: item.i_images || [],
+          store: {
+            name: item.s_name,
+            logo_url: item.s_logo_url
+          },
+          price: {
+            amount: item.p_base_price,
+            currency: item.p_currency
+          },
+          distance: Math.round(item.distance * 100) / 100,
+          rating: ratingData.rating
+        };
+      })
+    );
+    
+    return itemsWithRatings;
   }
 
   /**
@@ -468,25 +491,36 @@ export class BuyerService {
       .groupBy('s.id, sl.id')
       .getRawMany();
 
-    return restaurants.map(restaurant => ({
-      id: restaurant.s_id,
-      name: restaurant.s_name,
-      description: restaurant.s_description,
-      logo_url: restaurant.s_logo_url,
-      fssai_license: restaurant.s_fssai_license_no,
-      location: {
-        lat: restaurant.sl_gps_lat,
-        lng: restaurant.sl_gps_lng,
-        city: restaurant.sl_address_city,
-        locality: restaurant.sl_address_locality
-      },
-      distance: Math.round(restaurant.distance * 100) / 100,
-      rating: 4.5, // TODO: Calculate from reviews
-      delivery_time: '25-30 mins', // TODO: Calculate from store timings
-      offers_count: parseInt(restaurant.offers_count) || 0,
-      items_count: parseInt(restaurant.items_count) || 0,
-      is_open: true // TODO: Calculate from store timings
-    }));
+    // Calculate ratings and store status for all restaurants in parallel
+    const restaurantsWithRatings = await Promise.all(
+      restaurants.map(async (restaurant) => {
+        const ratingData = await this.calculateRestaurantRating(restaurant.s_id);
+        const storeStatus = await this.isStoreOpen(restaurant.s_id);
+        const deliveryTime = this.calculateDeliveryTime(restaurant.distance, restaurant.s_id);
+        
+        return {
+          id: restaurant.s_id,
+          name: restaurant.s_name,
+          description: restaurant.s_description,
+          logo_url: restaurant.s_logo_url,
+          fssai_license: restaurant.s_fssai_license_no,
+          location: {
+            lat: restaurant.sl_gps_lat,
+            lng: restaurant.sl_gps_lng,
+            city: restaurant.sl_address_city,
+            locality: restaurant.sl_address_locality
+          },
+          distance: Math.round(restaurant.distance * 100) / 100,
+          rating: ratingData.rating,
+          delivery_time: deliveryTime,
+          offers_count: parseInt(restaurant.offers_count) || 0,
+          items_count: parseInt(restaurant.items_count) || 0,
+          is_open: storeStatus.isOpen
+        };
+      })
+    );
+    
+    return restaurantsWithRatings;
   }
 
   /**
@@ -505,6 +539,7 @@ export class BuyerService {
       .leftJoin('i.store', 's')
       .leftJoin('s.locations', 'sl')
       .leftJoin('i.prices', 'p')
+      .leftJoin('i.quantities', 'q')
       .leftJoin('i.category', 'c')
       .where('i.status = :status', { status: true })
       .andWhere('i.type = :type', { type: 'item' })
@@ -554,34 +589,44 @@ export class BuyerService {
         's.logo_url as store_logo',
         'p.base_price',
         'p.currency',
+        'q.available_count',
         'c.id as category_id',
         'c.name as category_name',
         distanceQuery
       ])
       .getRawMany();
 
-    return items.map(item => ({
-      id: item.i_id,
-      name: item.i_name,
-      description: item.i_short_desc,
-      images: item.i_images || [],
-      price: {
-        amount: item.p_base_price,
-        currency: item.p_currency
-      },
-      store: {
-        id: item.store_id,
-        name: item.store_name,
-        logo_url: item.store_logo
-      },
-      distance: Math.round(item.distance * 100) / 100,
-      rating: 4.2, // TODO: Calculate from reviews
-      category: {
-        id: item.category_id,
-        name: item.category_name
-      },
-      is_available: true // TODO: Check item availability
-    }));
+    // Calculate ratings for all items in parallel
+    const itemsWithRatings = await Promise.all(
+      items.map(async (item) => {
+        const ratingData = await this.calculateItemRating(item.i_id);
+        
+        return {
+          id: item.i_id,
+          name: item.i_name,
+          description: item.i_short_desc,
+          images: item.i_images || [],
+          price: {
+            amount: item.p_base_price,
+            currency: item.p_currency
+          },
+          store: {
+            id: item.store_id,
+            name: item.store_name,
+            logo_url: item.store_logo
+          },
+          distance: Math.round(item.distance * 100) / 100,
+          rating: ratingData.rating,
+          category: {
+            id: item.category_id,
+            name: item.category_name
+          },
+          is_available: (item.q_available_count || 0) > 0
+        };
+      })
+    );
+    
+    return itemsWithRatings;
   }
 
   /**
@@ -684,13 +729,16 @@ export class BuyerService {
         offer.valid_to >= now
       );
 
+      // Calculate real rating data
+      const ratingData = await this.calculateRestaurantRating(restaurant.id);
+
       // Get restaurant statistics
       const stats = {
         total_items: restaurant.items.filter(item => item.status && item.type === 'item').length,
         total_categories: restaurant.categories.filter(cat => cat.status && cat.type === 'custom_menu').length,
         active_offers: activeOffers.length,
-        average_rating: 4.5, // TODO: Calculate from reviews
-        total_reviews: 150 // TODO: Get from reviews table
+        average_rating: ratingData.rating,
+        total_reviews: ratingData.reviewCount
       };
 
       // Get store configs for min order value and delivery fee
@@ -699,7 +747,8 @@ export class BuyerService {
       const deliveryFee = 30.00; // TODO: Calculate based on distance
 
       // Check if restaurant is currently open
-      const isOpen = this.checkRestaurantOpen(restaurant.timings);
+      const storeStatus = await this.isStoreOpen(restaurant.id);
+      const isOpen = storeStatus.isOpen;
 
       return {
         success: true,
@@ -787,15 +836,6 @@ export class BuyerService {
     return true; // Assume open if not current day
   }
 
-  /**
-   * Calculate delivery time based on distance
-   */
-  private calculateDeliveryTime(distance: number): string {
-    if (distance <= 2) return '20-25 mins';
-    if (distance <= 5) return '25-30 mins';
-    if (distance <= 10) return '30-35 mins';
-    return '35-40 mins';
-  }
 
   /**
    * Get restaurant menu with categories and items
@@ -983,6 +1023,9 @@ export class BuyerService {
     // Process items with customizations and variants
     const processedItems = await Promise.all(
       items.map(async (item) => {
+        // Calculate real rating for this item
+        const ratingData = await this.calculateItemRating(item.id);
+        
         const itemData = {
           id: item.id,
           name: item.name,
@@ -1016,7 +1059,7 @@ export class BuyerService {
             attribute_value: attr.attribute_value,
             attribute_group: attr.attribute_group
           })) || [],
-          rating: 4.2, // TODO: Calculate from reviews
+          rating: ratingData.rating,
           is_available: item.quantities?.[0]?.available_count > 0,
           is_recommended: item.is_recommended,
           tax_rate: item.tax_rate,
@@ -1106,5 +1149,150 @@ export class BuyerService {
     });
 
     return Array.from(variantGroups.values());
+  }
+
+  /**
+   * Calculate average rating for a restaurant
+   */
+  private async calculateRestaurantRating(storeId: number): Promise<{ rating: number; reviewCount: number }> {
+    try {
+      const result = await this.restaurantReviewRepository
+        .createQueryBuilder('review')
+        .select('AVG(review.rating)', 'averageRating')
+        .addSelect('COUNT(review.id)', 'reviewCount')
+        .where('review.store.id = :storeId', { storeId })
+        .getRawOne();
+
+      return {
+        rating: result.averageRating ? parseFloat(result.averageRating) : 0,
+        reviewCount: parseInt(result.reviewCount) || 0
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to calculate rating for store ${storeId}: ${error.message}`);
+      return { rating: 0, reviewCount: 0 };
+    }
+  }
+
+  /**
+   * Calculate average rating for an item
+   */
+  private async calculateItemRating(itemId: number): Promise<{ rating: number; reviewCount: number }> {
+    try {
+      const result = await this.itemReviewRepository
+        .createQueryBuilder('review')
+        .select('AVG(review.rating)', 'averageRating')
+        .addSelect('COUNT(review.id)', 'reviewCount')
+        .where('review.item.id = :itemId', { itemId })
+        .getRawOne();
+
+      return {
+        rating: result.averageRating ? parseFloat(result.averageRating) : 0,
+        reviewCount: parseInt(result.reviewCount) || 0
+      };
+    } catch (error) {
+      this.logger.warn(`Failed to calculate rating for item ${itemId}: ${error.message}`);
+      return { rating: 0, reviewCount: 0 };
+    }
+  }
+
+  /**
+   * Check if restaurant is currently open based on store timings
+   */
+  private async isStoreOpen(storeId: number): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
+    try {
+      const now = new Date();
+      const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Convert Sunday from 0 to 7
+      const currentTime = now.getHours() * 100 + now.getMinutes(); // Convert to HHMM format
+
+      // Check for close timings (holidays, maintenance)
+      const closeTimings = await this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.closeTimings', 'sct')
+        .where('s.id = :storeId', { storeId })
+        .andWhere('sct.close_start_datetime <= :now', { now })
+        .andWhere('sct.close_end_datetime >= :now', { now })
+        .getCount();
+
+      if (closeTimings > 0) {
+        return { isOpen: false };
+      }
+
+      // Check regular store timings
+      const storeTimings = await this.storeTimingsRepository
+        .createQueryBuilder('st')
+        .leftJoin('st.store', 's')
+        .where('s.id = :storeId', { storeId })
+        .andWhere('st.type = :type', { type: 'Order' })
+        .andWhere('st.day_from <= :currentDay', { currentDay })
+        .andWhere('st.day_to >= :currentDay', { currentDay })
+        .getMany();
+
+      for (const timing of storeTimings) {
+        const openTime = parseInt(timing.time_from);
+        const closeTime = parseInt(timing.time_to);
+
+        if (currentTime >= openTime && currentTime <= closeTime) {
+          return { isOpen: true };
+        }
+      }
+
+      // Find next opening time
+      const nextTiming = await this.storeTimingsRepository
+        .createQueryBuilder('st')
+        .leftJoin('st.store', 's')
+        .where('s.id = :storeId', { storeId })
+        .andWhere('st.type = :type', { type: 'Order' })
+        .andWhere('(st.day_from > :currentDay OR (st.day_from = :currentDay AND st.time_from > :currentTime))', {
+          currentDay,
+          currentTime
+        })
+        .orderBy('st.day_from', 'ASC')
+        .addOrderBy('st.time_from', 'ASC')
+        .getOne();
+
+      if (nextTiming) {
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const nextDay = dayNames[nextTiming.day_from === 7 ? 0 : nextTiming.day_from];
+        const nextTime = `${nextTiming.time_from.slice(0, 2)}:${nextTiming.time_from.slice(2, 4)}`;
+        return { isOpen: false, nextOpenTime: `${nextDay} at ${nextTime}` };
+      }
+
+      return { isOpen: false };
+    } catch (error) {
+      this.logger.warn(`Failed to check store open status for store ${storeId}: ${error.message}`);
+      return { isOpen: true }; // Default to open if check fails
+    }
+  }
+
+  /**
+   * Calculate delivery time based on distance and store preparation time
+   */
+  private calculateDeliveryTime(distance: number, storeId?: number): string {
+    try {
+      // Base preparation time (in minutes)
+      const basePrepTime = 15;
+      
+      // Distance-based delivery time (1 minute per km, minimum 5 minutes)
+      const deliveryTime = Math.max(5, Math.round(distance));
+      
+      // Total time
+      const totalTime = basePrepTime + deliveryTime;
+      
+      // Add some buffer time
+      const bufferTime = 5;
+      const finalTime = totalTime + bufferTime;
+      
+      // Round to nearest 5 minutes
+      const roundedTime = Math.ceil(finalTime / 5) * 5;
+      
+      // Format as range (e.g., "25-30 mins")
+      const minTime = roundedTime;
+      const maxTime = roundedTime + 5;
+      
+      return `${minTime}-${maxTime} mins`;
+    } catch (error) {
+      this.logger.warn(`Failed to calculate delivery time: ${error.message}`);
+      return '25-30 mins'; // Default fallback
+    }
   }
 }

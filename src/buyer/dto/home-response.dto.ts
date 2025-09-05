@@ -21,6 +21,18 @@ export class LocationDto {
     example: 'default_address'
   })
   source: string;
+
+  @ApiProperty({
+    description: 'City name from user address',
+    example: 'Chennai'
+  })
+  city: string;
+
+  @ApiProperty({
+    description: 'Full address from user address',
+    example: 'Vigneshwar Nagar, Nanganallur, Tamilnadu'
+  })
+  address: string;
 }
 
 export class RestaurantLocationDto {
@@ -51,7 +63,7 @@ export class RestaurantLocationDto {
   locality: string;
 }
 
-export class FeaturedRestaurantDto {
+export class NearbyRestaurantDto {
   @ApiProperty({
     description: 'Restaurant ID',
     example: 1,
@@ -234,75 +246,83 @@ export class TrendingItemDto {
   rating: number;
 }
 
-export class ActiveOfferDto {
+export class WhatsOnYourMindDto {
   @ApiProperty({
-    description: 'Offer ID',
+    description: 'Dish ID',
     example: 1,
     type: 'number'
   })
   id: number;
 
   @ApiProperty({
-    description: 'Offer name',
-    example: '50% Off on Pizza'
+    description: 'Dish name',
+    example: 'Biryani'
   })
   name: string;
 
   @ApiProperty({
-    description: 'Offer description',
-    example: 'Get 50% off on all pizzas'
+    description: 'Dish description',
+    example: 'Aromatic rice dish with spices'
   })
   description: string;
 
   @ApiProperty({
-    description: 'Offer banner image URL',
-    example: 'https://example.com/offer.jpg'
+    description: 'Dish icon URL',
+    example: 'https://example.com/biryani-icon.jpg'
   })
-  banner_image_url: string;
+  icon: string;
+}
+
+export class PromotionalBannerDto {
+  @ApiProperty({
+    description: 'Banner title',
+    example: 'Craving Something Delicious?'
+  })
+  title: string;
 
   @ApiProperty({
-    description: 'Offer code',
-    example: 'PIZZA50'
+    description: 'Banner subtitle',
+    example: 'Get your favorite meals delivered hot & fast—right to your doorstep.'
   })
-  offer_code: string;
+  subtitle: string;
 
   @ApiProperty({
-    description: 'Store name',
-    example: 'Pizza Palace'
+    description: 'Call-to-action button text',
+    example: 'Order Now!'
   })
-  store_name: string;
+  cta_button: string;
+
+  @ApiProperty({
+    description: 'Banner image URL',
+    example: '/images/promotional-thali.jpg'
+  })
+  image_url: string;
+
+  @ApiProperty({
+    description: 'Background color in hex',
+    example: '#14b8a6'
+  })
+  background_color: string;
 }
 
 export class HomeDataDto {
   @ApiProperty({
-    description: 'User location information',
-    type: LocationDto
+    description: 'Nearby restaurants within radius',
+    type: [NearbyRestaurantDto]
   })
-  location: LocationDto;
+  nearby_restaurants: NearbyRestaurantDto[];
 
   @ApiProperty({
-    description: 'Featured restaurants within radius',
-    type: [FeaturedRestaurantDto]
+    description: '"What\'s On Your Mind?" dish categories',
+    type: [WhatsOnYourMindDto]
   })
-  featured_restaurants: FeaturedRestaurantDto[];
+  whats_on_your_mind: WhatsOnYourMindDto[];
 
   @ApiProperty({
-    description: 'Popular food categories',
-    type: [PopularCategoryDto]
+    description: 'Promotional banner information',
+    type: PromotionalBannerDto
   })
-  popular_categories: PopularCategoryDto[];
-
-  @ApiProperty({
-    description: 'Trending food items',
-    type: [TrendingItemDto]
-  })
-  trending_items: TrendingItemDto[];
-
-  @ApiProperty({
-    description: 'Active offers and promotions',
-    type: [ActiveOfferDto]
-  })
-  active_offers: ActiveOfferDto[];
+  promotional_banner: PromotionalBannerDto;
 }
 
 export class HomeResponseDto {
