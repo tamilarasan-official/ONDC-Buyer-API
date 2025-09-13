@@ -1070,8 +1070,14 @@ export class CatalogIngestionService {
       return;
     }
 
-    // ✅ NEW APPROACH: Find all customization groups (categories with type='custom_group') for this store
-    // and link them to main items based on the ONDC data structure
+    // ✅ CORRECT APPROACH: Find customization groups that should be linked to this specific item
+    // Based on the ONDC data structure, we need to determine which customization groups
+    // are relevant for this main item based on business logic or item attributes
+    
+    // For now, let's link customization groups based on item categories or other criteria
+    // This can be made more specific based on your business requirements
+    
+    // Get all customization groups for this store
     const customizationGroups = await queryRunner.manager.find(Category, {
       where: { 
         store: { id: store.id }, 
@@ -1085,11 +1091,23 @@ export class CatalogIngestionService {
       return;
     }
 
-    // For each customization group, check if it should be linked to this main item
-    // In the current ONDC data, we'll link all customization groups to all main items
-    // This can be made more specific based on business rules
+    // ✅ BUSINESS LOGIC: Determine which customization groups should be linked to this item
+    // For now, we'll link based on item category or other criteria
+    // You can modify this logic based on your specific requirements
+    
+    const relevantCustomizationGroups = this.filterRelevantCustomizationGroups(
+      item, 
+      customizationGroups, 
+      itemData
+    );
+
+    if (relevantCustomizationGroups.length === 0) {
+      this.logger.log(`No relevant customization groups found for item ${item.reference_id}`);
+      return;
+    }
+
     let sequence = 1;
-    for (const customizationGroup of customizationGroups) {
+    for (const customizationGroup of relevantCustomizationGroups) {
       // Get configuration from the customization group's tags
       const config = await this.extractCustomizationGroupConfig(customizationGroup, queryRunner);
       
@@ -1104,6 +1122,65 @@ export class CatalogIngestionService {
       await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
       this.logger.log(`✅ Linked main item ${item.reference_id} to customization group ${customizationGroup.reference_id} (${customizationGroup.name})`);
     }
+  }
+
+  /**
+   * Filter customization groups that are relevant for a specific item
+   * This is where you can implement your business logic
+   */
+  private filterRelevantCustomizationGroups(
+    item: Item, 
+    customizationGroups: Category[], 
+    itemData: ONDCItem
+  ): Category[] {
+    // ✅ BUSINESS LOGIC: Implement your specific rules here
+    // For now, let's implement a simple rule based on item name patterns
+    
+    const relevantGroups: Category[] = [];
+    
+    for (const group of customizationGroups) {
+      // Example business logic: Link based on item name patterns
+      if (this.shouldLinkCustomizationGroup(item, group, itemData)) {
+        relevantGroups.push(group);
+      }
+    }
+    
+    return relevantGroups;
+  }
+
+  /**
+   * Determine if a customization group should be linked to an item
+   * This is where you implement your specific business logic
+   */
+  private shouldLinkCustomizationGroup(
+    item: Item, 
+    customizationGroup: Category, 
+    itemData: ONDCItem
+  ): boolean {
+    // ✅ IMPLEMENT YOUR BUSINESS LOGIC HERE
+    // For now, let's implement a simple rule based on item name patterns
+    
+    const itemName = item.name.toLowerCase();
+    const groupName = customizationGroup.name.toLowerCase();
+    
+    // Example: Link "Fish Special" group to items containing "fish"
+    if (groupName.includes('fish') && itemName.includes('fish')) {
+      return true;
+    }
+    
+    // Example: Link "Biriyani Special" group to items containing "biriyani"
+    if (groupName.includes('biriyani') && itemName.includes('biriyani')) {
+      return true;
+    }
+    
+    // Example: Link "Soups" group to items containing "soup"
+    if (groupName.includes('soup') && itemName.includes('soup')) {
+      return true;
+    }
+    
+    // Add more business logic as needed
+    
+    return false; // Default: don't link
   }
 
   /**
@@ -1275,30 +1352,47 @@ export class CatalogIngestionService {
         const relationship = customizationItem.customizationRelationships[0]; // Take the first one
         const customizationGroup = relationship.child_customization_group;
 
-        // Find main items that use this customization group
-        const mainItemsWithThisGroup = await queryRunner.manager
-          .createQueryBuilder(ItemCustomizationGroups, 'icg')
-          .leftJoinAndSelect('icg.item', 'item')
-          .where('icg.customization_group = :categoryId', { categoryId: customizationGroup.id })
-          .andWhere('item.type = :type', { type: 'item' })
-          .andWhere('item.status = :status', { status: true })
-          .getMany();
+        // ✅ FIXED: Find the correct parent item based on the ONDC data structure
+        // The customization item ID contains the parent item ID (e.g., "a-21673-342" -> parent is "21673")
+        const parentItemId = this.extractParentItemIdFromCustomizationId(customizationItem.reference_id);
+        
+        if (parentItemId) {
+          // Find the parent item by reference_id
+          const parentItem = await queryRunner.manager.findOne(Item, {
+            where: { 
+              reference_id: parentItemId, 
+              store: { id: store.id },
+              type: 'item',
+              status: true 
+            }
+          });
 
-        // Link the customization item to its parent main items
-        for (const itemCustomizationGroup of mainItemsWithThisGroup) {
-          const parentItem = itemCustomizationGroup.item;
-          
-          // Set the parent_item relationship
-          customizationItem.parent_item = parentItem;
-          await queryRunner.manager.save(Item, customizationItem);
-          
-          this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id}`);
-          break; // Only link to the first main item found to avoid multiple parent_item assignments
+          if (parentItem) {
+            // Set the parent_item relationship
+            customizationItem.parent_item = parentItem;
+            await queryRunner.manager.save(Item, customizationItem);
+            
+            this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id}`);
+          } else {
+            this.logger.warn(`Parent item ${parentItemId} not found for customization item ${customizationItem.reference_id}`);
+          }
+        } else {
+          this.logger.warn(`Could not extract parent item ID from customization item ${customizationItem.reference_id}`);
         }
       }
     }
 
     this.logger.log(`Completed post-processing customization parent_item relationships for store ${store.reference_id}`);
+  }
+
+  /**
+   * Extract parent item ID from customization item ID
+   * Examples: "a-21673-342" -> "21673", "a-21674-343" -> "21674"
+   */
+  private extractParentItemIdFromCustomizationId(customizationId: string): string | null {
+    // Pattern: "a-{parentId}-{suffix}"
+    const match = customizationId.match(/^a-(\d+)-/);
+    return match ? match[1] : null;
   }
 
   /**
