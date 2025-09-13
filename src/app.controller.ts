@@ -23,6 +23,7 @@ export class AppController {
   @Post('on_search')
   async ondcWebhook(@Body() catalogData: any) {
     try {
+      this.logger.log(`🔔 ONDC Webhook received. Full data: ${catalogData}`);
       this.logger.log(`🔔 ONDC Webhook received. Message ID: ${catalogData.context?.message_id}`);
       
        // 🔍 COMPREHENSIVE LOGGING: Log the complete webhook payload structure
