@@ -1291,64 +1291,86 @@ export class BuyerService {
 
   /**
    * Get item customizations
+   * Updated to use parent_item_id field for better performance and accuracy
    */
   private async getItemCustomizations(itemId: number) {
     try {
       this.logger.log(`🔧 Getting customizations for item ${itemId}`);
       
-      // Step 1: Get customization groups for this item
-      const customizations = await this.itemCustomizationGroupsRepository
-        .createQueryBuilder('icg')
-        .leftJoinAndSelect('icg.customization_group', 'cg')
-        .leftJoinAndSelect('cg.configs', 'cc')
-        .where('icg.itemId = :itemId', { itemId })
-        .orderBy('icg.sequence', 'ASC')
+      // Get all customization items that have this item as parent
+      const customizationItems = await this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoinAndSelect('i.prices', 'p')
+        .leftJoinAndSelect('i.item_categories', 'ic')
+        .leftJoinAndSelect('ic.category', 'c')
+        .leftJoin('i.parent_item', 'p')
+        .where('p.id = :itemId', { itemId })
+        .andWhere('i.type = :type', { type: 'customization' })
+        .andWhere('i.status = :status', { status: true })
+        .orderBy('c.display_rank', 'ASC')
+        .addOrderBy('i.display_rank', 'ASC')
         .getMany();
 
-      this.logger.log(`📋 Found ${customizations.length} customization groups for item ${itemId}`);
+      this.logger.log(`📋 Found ${customizationItems.length} customization items for item ${itemId}`);
 
-      // Step 2: For each customization group, get the options via CustomizationRelationships
-      const customizationsWithOptions = await Promise.all(
-        customizations.map(async (customization) => {
-          // Get customization options (items) that belong to this group
-          const options = await this.customizationRelationshipsRepository
-            .createQueryBuilder('cr')
-            .leftJoinAndSelect('cr.parent_customization', 'option')
-            .leftJoinAndSelect('option.prices', 'p')
-            .where('cr.child_customization_group = :groupId', { 
-              groupId: customization.customization_group.id 
-            })
-            .andWhere('option.type = :type', { type: 'customization' })
-            .andWhere('option.status = :status', { status: true })
-            .orderBy('option.display_rank', 'ASC')
-            .getMany();
+      // Group customization items by their category (customization group)
+      const groupedCustomizations = new Map();
+      
+      for (const customizationItem of customizationItems) {
+        const category = customizationItem.item_categories?.[0]?.category;
+        if (!category) continue;
 
-          this.logger.log(`🎯 Found ${options.length} options for group "${customization.customization_group.name}"`);
+        const groupId = category.id;
+        if (!groupedCustomizations.has(groupId)) {
+          groupedCustomizations.set(groupId, {
+            id: category.id,
+            name: category.name,
+            description: category.description,
+            min_selections: 0, // Default values - can be configured in category configs
+            max_selections: 1,
+            input_type: 'select',
+            is_mandatory: false,
+            options: []
+          });
+        }
 
-          return {
-            id: customization.customization_group.id,
-            name: customization.customization_group.name,
-            description: customization.customization_group.description,
-            min_selections: customization.min_selections || customization.customization_group.configs?.[0]?.min_selections || 0,
-            max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
-            input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
-            is_mandatory: customization.is_mandatory,
-            options: options.map(rel => ({
-              id: rel.parent_customization.id,
-              name: rel.parent_customization.name,
-              price: rel.parent_customization.prices?.[0]?.base_price || 0,
-              is_default: rel.is_default
-            }))
-          };
-        })
-      );
+        const group = groupedCustomizations.get(groupId);
+        group.options.push({
+          id: customizationItem.id,
+          name: customizationItem.name,
+          price: customizationItem.prices?.[0]?.base_price || 0,
+          is_default: false
+        });
+      }
 
-      this.logger.log(`✅ Processed ${customizationsWithOptions.length} customization groups with options`);
-      return customizationsWithOptions;
+      const customizations = Array.from(groupedCustomizations.values());
+      this.logger.log(`✅ Processed ${customizations.length} customization groups with options`);
+      return customizations;
 
     } catch (error) {
       this.logger.error(`❌ Error getting item customizations: ${error.message}`, error.stack);
       return [];
+    }
+  }
+
+  /**
+   * Check if item has customizations (efficient method)
+   * Returns true if there are any customization items with parent_item = itemId
+   */
+  private async checkItemHasCustomizations(itemId: number): Promise<boolean> {
+    try {
+      const count = await this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoin('i.parent_item', 'p')
+        .where('p.id = :itemId', { itemId })
+        .andWhere('i.type = :type', { type: 'customization' })
+        .andWhere('i.status = :status', { status: true })
+        .getCount();
+      
+      return count > 0;
+    } catch (error) {
+      this.logger.warn(`Failed to check customizations for item ${itemId}: ${error.message}`);
+      return false;
     }
   }
 
@@ -1687,6 +1709,7 @@ export class BuyerService {
         .leftJoinAndSelect('ic.item', 'i')
         .leftJoinAndSelect('i.prices', 'p')
         .leftJoinAndSelect('i.attributes', 'a')
+        .leftJoinAndSelect('i.parent_item', 'parent')
         .where('c.storeId = :storeId', { storeId: restaurantId })
         .andWhere('c.status = :status', { status: true })
         .andWhere('i.status = :status', { status: true });
@@ -1721,11 +1744,16 @@ export class BuyerService {
           continue; // Skip categories with no items
         }
 
-        // Get items with ratings
+        // Get items with ratings (only main items, not customization items)
         const items: any[] = [];
         for (const itemCategory of category.item_categories) {
           const item = itemCategory.item;
           if (!item) continue;
+
+          // Only show main items (type='item' and parent_item=null)
+          if (item.type !== 'item' || item.parent_item !== null) {
+            continue;
+          }
 
           // Get item rating
           const itemRating = await this.calculateItemRating(item.id);
@@ -1738,9 +1766,8 @@ export class BuyerService {
           const basePrice = item.prices?.[0]?.base_price || 0;
           const currency = item.prices?.[0]?.currency || 'INR';
 
-          // Get customizations for this item
-          const customizations = await this.getItemCustomizations(item.id);
-          const hasCustomizations = customizations && customizations.length > 0;
+          // Check if item has customizations (more efficient)
+          const hasCustomizations = await this.checkItemHasCustomizations(item.id);
 
           items.push({
             id: item.id,
@@ -1756,8 +1783,7 @@ export class BuyerService {
             is_available: item.status,
             is_recommended: item.is_recommended,
             dietary_preference: dietaryPref,
-            has_customizations: hasCustomizations,
-            customizations: hasCustomizations ? customizations : undefined
+            has_customizations: hasCustomizations
           });
         }
 

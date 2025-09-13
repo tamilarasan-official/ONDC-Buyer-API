@@ -107,6 +107,11 @@ export class CartService {
         throw new BadRequestException('Insufficient quantity available');
       }
 
+      // Validate customizations if provided
+      if (addToCartDto.customizations && addToCartDto.customizations.length > 0) {
+        await this.validateCustomizations(addToCartDto.item_id, addToCartDto.customizations);
+      }
+
       // Get or create active cart
       let cart = await this.cartRepository
         .createQueryBuilder('c')
@@ -208,6 +213,11 @@ export class CartService {
       // Check item availability
       if (!cartItem.item.quantities?.[0] || cartItem.item.quantities[0].available_count < updateCartItemDto.quantity) {
         throw new BadRequestException('Insufficient quantity available');
+      }
+
+      // Validate customizations if provided
+      if (updateCartItemDto.customizations && updateCartItemDto.customizations.length > 0) {
+        await this.validateCustomizations(cartItem.item.id, updateCartItemDto.customizations);
       }
 
       // Update cart item
@@ -513,5 +523,49 @@ export class CartService {
       created_at: cart.created_at.toISOString(),
       updated_at: cart.updated_at.toISOString()
     };
+  }
+
+  /**
+   * Validate customization options belong to the correct parent item
+   */
+  private async validateCustomizations(itemId: number, customizations: any[]) {
+    try {
+      this.logger.log(`🔍 Validating customizations for item ${itemId}`);
+
+      for (const customization of customizations) {
+        const { customization_group_id, selected_options } = customization;
+
+        if (!selected_options || selected_options.length === 0) {
+          continue; // Skip empty customizations
+        }
+
+        // Validate that all selected options belong to this parent item and group
+        const validOptions = await this.itemRepository
+          .createQueryBuilder('option')
+          .leftJoin('option.item_categories', 'ic')
+          .where('option.id IN (:...optionIds)', { optionIds: selected_options })
+          .andWhere('option.parent_item_id = :itemId', { itemId })
+          .andWhere('ic.categoryId = :groupId', { groupId: customization_group_id })
+          .andWhere('option.type = :type', { type: 'customization' })
+          .andWhere('option.status = :status', { status: true })
+          .getMany();
+
+        if (validOptions.length !== selected_options.length) {
+          const invalidOptions = selected_options.filter(
+            id => !validOptions.some(option => option.id === id)
+          );
+          throw new BadRequestException(
+            `Invalid customization options: ${invalidOptions.join(', ')}. These options do not belong to the selected item or group.`
+          );
+        }
+
+        this.logger.log(`✅ Validated ${validOptions.length} customization options for group ${customization_group_id}`);
+      }
+
+      this.logger.log(`✅ All customizations validated successfully for item ${itemId}`);
+    } catch (error) {
+      this.logger.error(`❌ Error validating customizations: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 }
