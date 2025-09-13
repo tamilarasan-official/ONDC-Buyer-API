@@ -836,7 +836,15 @@ export class BuyerService {
   /**
    * Get restaurant details
    */
-  async getRestaurantDetails(restaurantId: number, userId?: number, deviceLat?: number, deviceLng?: number) {
+  async getRestaurantDetails(
+    restaurantId: number, 
+    userId?: number, 
+    deviceLat?: number, 
+    deviceLng?: number,
+    includeItems: boolean = false,
+    search?: string,
+    dietaryPreference?: string
+  ) {
     try {
       this.logger.log(`🏪 Getting details for restaurant ID: ${restaurantId}`);
 
@@ -907,7 +915,7 @@ export class BuyerService {
         .getCount();
 
       // Format response
-      const restaurantDetails = {
+      const restaurantDetails: any = {
         id: restaurant.id,
         name: restaurant.name,
         description: restaurant.description,
@@ -956,6 +964,23 @@ export class BuyerService {
         min_order_value: restaurant.configs?.[0]?.min_order_value || 0,
         delivery_fee: 30.00 // TODO: Calculate based on distance and store config
       };
+
+      // Add categorized items if requested
+      if (includeItems) {
+        this.logger.log(`🍽️ Fetching categorized items for restaurant ${restaurantId}`);
+        
+        const categorizedItems = await this.getCategorizedItems(
+          restaurantId, 
+          search, 
+          dietaryPreference
+        );
+        
+        restaurantDetails.categories = categorizedItems;
+        restaurantDetails.applied_filters = {
+          search: search || undefined,
+          dietary_preference: dietaryPreference || undefined
+        };
+      }
 
       this.logger.log(`✅ Restaurant details retrieved successfully`);
 
@@ -1277,18 +1302,37 @@ export class BuyerService {
         .orderBy('icg.sequence', 'ASC')
         .getMany();
 
-      // TODO: Get customization options for each group
-      return customizations.map(customization => ({
-        id: customization.customization_group.id,
-        name: customization.customization_group.name,
-        description: customization.customization_group.description,
-        min_selections: customization.min_selections || customization.customization_group.configs?.[0]?.min_selections || 0,
-        max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
-        input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
-        is_mandatory: customization.is_mandatory,
-        sequence: customization.sequence,
-        options: [] // TODO: Implement option fetching
-      }));
+      // For each customization group, get the options (items that belong to this category)
+      const customizationsWithOptions = await Promise.all(
+        customizations.map(async (customization) => {
+          const options = await this.itemRepository
+            .createQueryBuilder('i')
+            .leftJoin('i.category', 'c')
+            .where('c.id = :categoryId', { categoryId: customization.customization_group.id })
+            .andWhere('i.type = :type', { type: 'customization' })
+            .andWhere('i.status = :status', { status: true })
+            .orderBy('i.display_rank', 'ASC')
+            .getMany();
+
+          return {
+            id: customization.customization_group.id,
+            name: customization.customization_group.name,
+            description: customization.customization_group.description,
+            min_selections: customization.min_selections || customization.customization_group.configs?.[0]?.min_selections || 0,
+            max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
+            input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
+            is_mandatory: customization.is_mandatory,
+            options: options.map(option => ({
+              id: option.id,
+              name: option.name,
+              price: 0, // Customization options don't have separate prices in this structure
+              is_default: false // This would need to be determined from relationships
+            }))
+          };
+        })
+      );
+
+      return customizationsWithOptions;
 
     } catch (error) {
       this.logger.error(`❌ Error getting item customizations: ${error.message}`, error.stack);
@@ -1609,6 +1653,123 @@ export class BuyerService {
     } catch (error) {
       this.logger.error(`❌ Error getting search suggestions: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Failed to get search suggestions');
+    }
+  }
+
+  /**
+   * Get categorized items for a restaurant with filtering and sorting
+   */
+  private async getCategorizedItems(
+    restaurantId: number, 
+    search?: string, 
+    dietaryPreference?: string
+  ) {
+    try {
+      this.logger.log(`🍽️ Getting categorized items for restaurant ${restaurantId}`);
+      this.logger.log(`🔍 Search: ${search || 'none'}, Dietary: ${dietaryPreference || 'none'}`);
+
+      // Get categories with their items
+      const categoriesQuery = this.categoryRepository
+        .createQueryBuilder('c')
+        .leftJoinAndSelect('c.item_categories', 'ic')
+        .leftJoinAndSelect('ic.item', 'i')
+        .leftJoinAndSelect('i.prices', 'p')
+        .leftJoinAndSelect('i.attributes', 'a')
+        .where('c.storeId = :storeId', { storeId: restaurantId })
+        .andWhere('c.status = :status', { status: true })
+        .andWhere('i.status = :status', { status: true });
+
+      // Apply search filter
+      if (search && search.trim()) {
+        categoriesQuery.andWhere('LOWER(i.name) LIKE LOWER(:search)', { 
+          search: `%${search.trim()}%` 
+        });
+      }
+
+      // Apply dietary preference filter
+      if (dietaryPreference) {
+        categoriesQuery.andWhere('a.attribute_code = :attrCode', { 
+          attrCode: 'veg_nonveg' 
+        });
+        categoriesQuery.andWhere('a.attribute_value = :attrValue', { 
+          attrValue: dietaryPreference 
+        });
+      }
+
+      const categories = await categoriesQuery
+        .orderBy('c.display_rank', 'ASC')
+        .addOrderBy('i.name', 'ASC')
+        .getMany();
+
+      // Process categories and items
+      const processedCategories: any[] = [];
+      
+      for (const category of categories) {
+        if (!category.item_categories || category.item_categories.length === 0) {
+          continue; // Skip categories with no items
+        }
+
+        // Get items with ratings
+        const items: any[] = [];
+        for (const itemCategory of category.item_categories) {
+          const item = itemCategory.item;
+          if (!item) continue;
+
+          // Get item rating
+          const itemRating = await this.calculateItemRating(item.id);
+          
+          // Get dietary preference from attributes
+          const dietaryAttr = item.attributes?.find(attr => attr.attribute_code === 'veg_nonveg');
+          const dietaryPref = dietaryAttr?.attribute_value || 'non-veg';
+
+          // Get base price
+          const basePrice = item.prices?.[0]?.base_price || 0;
+          const currency = item.prices?.[0]?.currency || 'INR';
+
+          // Get customizations for this item
+          const customizations = await this.getItemCustomizations(item.id);
+          const hasCustomizations = customizations && customizations.length > 0;
+
+          items.push({
+            id: item.id,
+            name: item.name,
+            description: item.short_desc || '',
+            long_description: item.long_desc || undefined,
+            images: item.images || [],
+            price: {
+              base_price: basePrice,
+              currency: currency
+            },
+            rating: itemRating.rating,
+            is_available: item.status,
+            is_recommended: item.is_recommended,
+            dietary_preference: dietaryPref,
+            has_customizations: hasCustomizations,
+            customizations: hasCustomizations ? customizations : undefined
+          });
+        }
+
+        // Sort items by rating (highest first)
+        items.sort((a, b) => b.rating - a.rating);
+
+        if (items.length > 0) {
+          processedCategories.push({
+            id: category.id,
+            name: category.name,
+            description: category.description || '',
+            icon: category.icon || '',
+            items: items,
+            item_count: items.length
+          });
+        }
+      }
+
+      this.logger.log(`✅ Found ${processedCategories.length} categories with items`);
+      return processedCategories;
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting categorized items: ${error.message}`, error.stack);
+      return []; // Return empty array on error to not break the main response
     }
   }
 }

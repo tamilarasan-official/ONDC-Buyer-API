@@ -295,6 +295,28 @@ export class BuyerController {
     description: 'Device longitude for distance calculation',
     example: '77.5946'
   })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search term to filter items by name',
+    example: 'pizza'
+  })
+  @ApiQuery({
+    name: 'dietary_preference',
+    required: false,
+    type: String,
+    description: 'Dietary preference filter',
+    enum: ['veg', 'non-veg', 'eggterian'],
+    example: 'veg'
+  })
+  @ApiQuery({
+    name: 'include_items',
+    required: false,
+    type: Boolean,
+    description: 'Include categorized items in response',
+    example: true
+  })
   @ApiResponse({
     status: 200,
     description: 'Restaurant details retrieved successfully',
@@ -328,13 +350,25 @@ export class BuyerController {
     @Param('id') restaurantId: string,
     @Query('lat') deviceLat?: string,
     @Query('lng') deviceLng?: string,
+    @Query('search') search?: string,
+    @Query('dietary_preference') dietaryPreference?: string,
+    @Query('include_items') includeItems?: string,
     @Req() req?: any
   ) {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+    const shouldIncludeItems = includeItems === 'true';
 
-    return this.buyerService.getRestaurantDetails(parseInt(restaurantId), userId, lat, lng);
+    return this.buyerService.getRestaurantDetails(
+      parseInt(restaurantId), 
+      userId, 
+      lat, 
+      lng, 
+      shouldIncludeItems,
+      search,
+      dietaryPreference
+    );
   }
 
   @Get('restaurants/:id/menu')
