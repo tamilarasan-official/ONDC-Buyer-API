@@ -25,6 +25,11 @@ export class AppController {
     try {
       this.logger.log(`🔔 ONDC Webhook received. Message ID: ${catalogData.context?.message_id}`);
       
+       // 🔍 COMPREHENSIVE LOGGING: Log the complete webhook payload structure
+       this.logger.log(`📋 Complete ONDC Webhook Payload Structure:`);
+       this.logger.log(`   Context: ${JSON.stringify(catalogData.context, null, 2)}`);
+       this.logger.log(`   Message Keys: ${JSON.stringify(Object.keys(catalogData.message || {}))}`);
+       
       // Check if this is a valid catalog response
       if (!catalogData.message) {
         this.logger.log(`📭 ONDC sent response without 'message' field - likely ACK/NACK or error response`);
@@ -73,6 +78,10 @@ export class AppController {
         };
       }
 
+      // �� DETAILED ITEM LOGGING: Log all items and their relationships
+      this.logDetailedItemInfo(catalogData);
+
+
       // Process the catalog data using the ingestion service
       this.logger.log(`🔄 Processing catalog with ${providersCount} provider(s)`);
       const result = await this.catalogIngestionService.ingestCatalogData([catalogData]);
@@ -107,6 +116,72 @@ export class AppController {
           }
         }
       };
+    }
+  }
+
+  /**
+   * Log detailed information about items and their relationships
+   */
+  private logDetailedItemInfo(catalogData: any) {
+    try {
+      const providers = catalogData.message.catalog['bpp/providers'] || [];
+      
+      providers.forEach((provider: any, providerIndex: number) => {
+        this.logger.log(`🏪 Provider ${providerIndex + 1}: ${provider.descriptor?.name || 'Unknown'}`);
+        this.logger.log(`   ID: ${provider.id}`);
+        this.logger.log(`   Items Count: ${provider.items?.length || 0}`);
+        this.logger.log(`   Categories Count: ${provider.categories?.length || 0}`);
+        
+        // Log categories
+        if (provider.categories && provider.categories.length > 0) {
+          this.logger.log(`   📂 Categories:`);
+          provider.categories.forEach((category: any, catIndex: number) => {
+            this.logger.log(`      ${catIndex + 1}. ${category.descriptor?.name || 'Unknown'} (ID: ${category.id})`);
+            this.logger.log(`         Type: ${category.tags?.find((tag: any) => tag.code === 'type')?.list?.[0]?.value || 'regular'}`);
+          });
+        }
+        
+        // Log items with detailed information
+        if (provider.items && provider.items.length > 0) {
+          this.logger.log(`   🍕 Items:`);
+          provider.items.forEach((item: any, itemIndex: number) => {
+            this.logger.log(`      ${itemIndex + 1}. ${item.descriptor?.name || 'Unknown'} (ID: ${item.id})`);
+            this.logger.log(`         Type: ${item.tags?.find((tag: any) => tag.code === 'type')?.list?.[0]?.value || 'item'}`);
+            this.logger.log(`         Parent Item ID: ${item.parent_item_id || 'None'}`);
+            this.logger.log(`         Price: ${item.price?.value || 'N/A'} ${item.price?.currency || ''}`);
+            
+            // Log tags for this item
+            if (item.tags && item.tags.length > 0) {
+              this.logger.log(`         Tags:`);
+              item.tags.forEach((tag: any) => {
+                this.logger.log(`            ${tag.code}: ${JSON.stringify(tag.list)}`);
+              });
+            }
+            
+            // Log customization-specific information
+            if (item.parent_item_id) {
+              this.logger.log(`         🔗 This is a customization/variant item linked to parent: ${item.parent_item_id}`);
+            }
+          });
+          
+          // 🔍 CUSTOMIZATION ANALYSIS: Find items with parent_item_id relationships
+          const customizationItems = provider.items.filter((item: any) => item.parent_item_id);
+          const mainItems = provider.items.filter((item: any) => !item.parent_item_id);
+          
+          this.logger.log(`   🔍 Customization Analysis:`);
+          this.logger.log(`      Main Items: ${mainItems.length}`);
+          this.logger.log(`      Customization/Variant Items: ${customizationItems.length}`);
+          
+          if (customizationItems.length > 0) {
+            this.logger.log(`      Customization Items Details:`);
+            customizationItems.forEach((item: any) => {
+              this.logger.log(`         ${item.descriptor?.name} -> Parent: ${item.parent_item_id}`);
+            });
+          }
+        }
+      });
+    } catch (error) {
+      this.logger.error(`❌ Error logging detailed item info: ${error.message}`);
     }
   }
 }
