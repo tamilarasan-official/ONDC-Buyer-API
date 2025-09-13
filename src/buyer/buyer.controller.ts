@@ -30,6 +30,8 @@ export class BuyerController {
   ) {}
 
   @Get('home')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get home page data',
     description: 'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner. Uses location-based filtering with Haversine formula for distance calculation.',
@@ -73,6 +75,18 @@ export class BuyerController {
     }
   })
   @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token required',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'UNAUTHORIZED' }
+      }
+    }
+  })
+  @ApiResponse({
     status: 500,
     description: 'Internal server error',
     schema: {
@@ -99,6 +113,8 @@ export class BuyerController {
   }
 
   @Get('search')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Search restaurants, items, and categories',
     description: 'Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters.',
@@ -141,6 +157,8 @@ export class BuyerController {
   }
 
   @Post('search/suggestions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get search suggestions',
     description: 'Get real-time search suggestions based on dishes, restaurants, and categories with advanced filtering. Returns suggestions prioritized by dishes (60%), restaurants (30%), and categories (10%).',
@@ -250,6 +268,8 @@ export class BuyerController {
   }
 
   @Get('restaurants/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant details',
     description: 'Get detailed information about a specific restaurant including menu, offers, timings, locations, and statistics.',
@@ -317,6 +337,8 @@ export class BuyerController {
   }
 
   @Get('restaurants/:id/menu')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant menu',
     description: 'Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search.',
@@ -365,7 +387,7 @@ export class BuyerController {
 
   @Get('cart')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user cart',
     description: 'Retrieve the current user\'s active cart with all items, pricing, and summary.',
@@ -394,7 +416,7 @@ export class BuyerController {
 
   @Post('cart/add')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Add item to cart',
     description: 'Add an item to the user\'s cart with quantity, customizations, and variants.',
@@ -436,7 +458,7 @@ export class BuyerController {
 
   @Put('cart/update')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update cart item',
     description: 'Update quantity, customizations, or variants of an existing cart item.',
@@ -466,7 +488,7 @@ export class BuyerController {
 
   @Delete('cart/remove')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Remove item from cart',
     description: 'Remove a specific item from the user\'s cart.',
@@ -496,7 +518,7 @@ export class BuyerController {
 
   @Delete('cart/clear')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Clear cart',
     description: 'Remove all items from the user\'s cart.',
@@ -519,7 +541,7 @@ export class BuyerController {
 
   @Post('cart/apply-offer')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Apply offer to cart',
     description: 'Apply a discount offer to the user\'s cart using offer code or offer ID.',
@@ -561,7 +583,7 @@ export class BuyerController {
 
   @Post('orders')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create order from cart',
     description: 'Create a new order from the user\'s active cart with delivery address and payment method.',
@@ -603,7 +625,7 @@ export class BuyerController {
 
   @Get('orders')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user orders',
     description: 'Retrieve paginated list of user\'s orders with tracking information.',
@@ -640,7 +662,7 @@ export class BuyerController {
 
   @Get('orders/:id')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get order details',
     description: 'Retrieve detailed information about a specific order including items, tracking, and payment status.',
@@ -675,7 +697,7 @@ export class BuyerController {
 
   @Post('orders/:id/cancel')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Cancel order',
     description: 'Cancel a pending or confirmed order. Refunds will be processed for paid orders.',
@@ -717,7 +739,7 @@ export class BuyerController {
 
   @Post('payments/create')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create payment for order',
     description: 'Create a Razorpay payment order for online payment processing.',
@@ -747,7 +769,7 @@ export class BuyerController {
 
   @Post('payments/verify')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Verify payment',
     description: 'Verify Razorpay payment signature and update order status.',
@@ -778,6 +800,8 @@ export class BuyerController {
   // ==================== NOTIFICATION ENDPOINTS ====================
 
   @Get('notifications')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user notifications',
     description: 'Retrieve user notifications with pagination and filtering options'
@@ -802,6 +826,8 @@ export class BuyerController {
   }
 
   @Put('notifications/:id/read')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Mark notification as read',
     description: 'Mark a specific notification as read'
@@ -816,6 +842,8 @@ export class BuyerController {
   }
 
   @Put('notifications/read-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Mark all notifications as read',
     description: 'Mark all unread notifications as read for the user'
@@ -872,6 +900,8 @@ export class BuyerController {
   }
 
   @Post('push-tokens')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Register device token',
     description: 'Register device token for push notifications'
@@ -930,6 +960,8 @@ export class BuyerController {
   }
 
   @Post('test-push-notification')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Test push notification (for development)',
     description: 'Send a test push notification to the authenticated user'
@@ -966,6 +998,8 @@ export class BuyerController {
   // ==================== REVIEW ENDPOINTS ====================
 
   @Post('reviews/restaurant')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create restaurant review',
     description: 'Create a review for a restaurant based on a delivered order'
@@ -980,6 +1014,8 @@ export class BuyerController {
   }
 
   @Post('reviews/item')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create item review',
     description: 'Create a review for a specific item based on a delivered order'
@@ -994,6 +1030,8 @@ export class BuyerController {
   }
 
   @Get('reviews/restaurant/:restaurantId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant reviews',
     description: 'Get all reviews for a specific restaurant with pagination'
@@ -1023,6 +1061,8 @@ export class BuyerController {
   }
 
   @Get('reviews/item/:itemId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get item reviews',
     description: 'Get all reviews for a specific item with pagination'
@@ -1052,6 +1092,8 @@ export class BuyerController {
   }
 
   @Get('reviews/my')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user reviews',
     description: 'Get all reviews created by the current user with pagination'
@@ -1074,6 +1116,8 @@ export class BuyerController {
   }
 
   @Put('reviews/restaurant/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update restaurant review',
     description: 'Update a restaurant review created by the current user'
@@ -1088,6 +1132,8 @@ export class BuyerController {
   }
 
   @Put('reviews/item/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update item review',
     description: 'Update an item review created by the current user'
@@ -1102,6 +1148,8 @@ export class BuyerController {
   }
 
   @Delete('reviews/restaurant/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Delete restaurant review',
     description: 'Delete a restaurant review created by the current user'
@@ -1116,6 +1164,8 @@ export class BuyerController {
   }
 
   @Delete('reviews/item/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Delete item review',
     description: 'Delete an item review created by the current user'

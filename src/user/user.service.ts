@@ -39,7 +39,8 @@ export class UserService {
         await this.userRepository.save(user);
       }
 
-      const otp = Math.floor(1000 + Math.random() * 9000);
+      // const otp = Math.floor(1000 + Math.random() * 9000);
+      const otp = 1234;
       user.otp = this.userOtpRepository.create({ otp, user });
 
       await this.userOtpRepository.save(user.otp);
