@@ -45,8 +45,8 @@ async function bootstrap() {
         type: 'http',
         scheme: 'bearer',
         bearerFormat: 'JWT',
-        name: 'JWT',
-        description: 'Enter JWT token',
+        name: 'Authorization',
+        description: 'Enter JWT token (e.g., Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...)',
         in: 'header',
       },
       'JWT-auth',
@@ -61,12 +61,17 @@ async function bootstrap() {
       persistAuthorization: true,
       tagsSorter: 'alpha',
       operationsSorter: 'alpha',
+      docExpansion: 'none',
+      defaultModelsExpandDepth: 2,
+      defaultModelExpandDepth: 2,
     },
     customSiteTitle: 'ONDC Buyer API Documentation',
     customfavIcon: '/favicon.ico',
     customCss: `
       .swagger-ui .topbar { display: none }
       .swagger-ui .info .title { color: #3b82f6; }
+      .swagger-ui .auth-container { margin: 20px 0; }
+      .swagger-ui .auth-btn-wrapper { margin: 10px 0; }
     `,
   });
 

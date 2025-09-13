@@ -22,7 +22,7 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard)
   @Get("profile")
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user profile',
     description: 'Retrieve the authenticated user\'s profile information including personal details and preferences.',
@@ -68,7 +68,7 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard)
   @Patch("profile")
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update user profile',
     description: 'Update the authenticated user\'s profile information including name, email, and other personal details.',
@@ -126,7 +126,7 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard)
   @Post("address")
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Add new address',
     description: 'Add a new delivery address for the authenticated user. Users can have multiple addresses for different locations.',
@@ -190,7 +190,7 @@ export class UserController {
 
   @UseGuards(JwtAuthGuard)
   @Patch("address/:id")
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update address',
     description: 'Update an existing address for the authenticated user. Only the user who owns the address can update it.',

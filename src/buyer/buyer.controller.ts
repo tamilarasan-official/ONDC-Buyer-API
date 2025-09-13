@@ -3,8 +3,8 @@ import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, 
 import { BuyerService } from './buyer.service';
 import { JwtAuthGuard } from '../authentication/jwt-auth.guard';
 import { HomeResponseDto } from './dto/home-response.dto';
-import { SearchRequestDto } from './dto/search-request.dto';
-import { SearchResponseDto } from './dto/search-response.dto';
+import { SearchRequestDto, SearchSuggestionsRequestDto } from './dto/search-request.dto';
+import { SearchResponseDto, SearchSuggestionsResponseDto } from './dto/search-response.dto';
 import { RestaurantDetailsResponseDto } from './dto/restaurant-details.dto';
 import { MenuRequestDto } from './dto/menu-request.dto';
 import { MenuResponseDto } from './dto/menu-response.dto';
@@ -30,9 +30,11 @@ export class BuyerController {
   ) {}
 
   @Get('home')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get home page data',
-    description: 'Retrieve home page data including featured restaurants, popular categories, trending items, and active offers. Uses location-based filtering with Haversine formula for distance calculation.',
+    description: 'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner. Uses location-based filtering with Haversine formula for distance calculation.',
   })
   @ApiQuery({
     name: 'lat',
@@ -47,6 +49,13 @@ export class BuyerController {
     type: String,
     description: 'Device longitude for location-based filtering',
     example: '77.5946'
+  })
+  @ApiQuery({
+    name: 'veg_mode',
+    required: false,
+    type: Boolean,
+    description: 'Filter for vegetarian-only restaurants and items',
+    example: false
   })
   @ApiResponse({
     status: 200,
@@ -66,6 +75,18 @@ export class BuyerController {
     }
   })
   @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - JWT token required',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'UNAUTHORIZED' }
+      }
+    }
+  })
+  @ApiResponse({
     status: 500,
     description: 'Internal server error',
     schema: {
@@ -80,16 +101,20 @@ export class BuyerController {
   async getHomeData(
     @Query('lat') deviceLat?: string,
     @Query('lng') deviceLng?: string,
+    @Query('veg_mode') vegMode?: string,
     @Req() req?: any
   ) {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+    const isVegMode = vegMode === 'true';
 
-    return this.buyerService.getHomeData(userId, lat, lng);
+    return this.buyerService.getHomeData(userId, lat, lng, isVegMode);
   }
 
   @Get('search')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Search restaurants, items, and categories',
     description: 'Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters.',
@@ -131,7 +156,121 @@ export class BuyerController {
     return this.buyerService.search(searchParams, userId);
   }
 
+  @Post('search/suggestions')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get search suggestions',
+    description: 'Get real-time search suggestions based on dishes, restaurants, and categories with advanced filtering. Returns suggestions prioritized by dishes (60%), restaurants (30%), and categories (10%).',
+  })
+  @ApiBody({ 
+    type: SearchSuggestionsRequestDto,
+    description: 'Search suggestions request payload with query, location, filters, and limit',
+    examples: {
+      basic: {
+        summary: 'Basic search suggestions',
+        description: 'Simple search with just a query string',
+        value: {
+          query: 'burgl',
+          limit: 10
+        }
+      },
+      advanced: {
+        summary: 'Advanced search with filters',
+        description: 'Search with location and dietary filters',
+        value: {
+          query: 'pizza',
+          location: {
+            lat: 12.9716,
+            lng: 77.5946
+          },
+          filters: {
+            dietary_preference: 'veg',
+            min_price: 100,
+            max_price: 500,
+            category_id: 1
+          },
+          limit: 15
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Search suggestions retrieved successfully',
+    type: SearchSuggestionsResponseDto,
+    content: {
+      'application/json': {
+        example: {
+          success: true,
+          message: 'Search suggestions retrieved successfully',
+          data: {
+            query: 'burgl',
+            suggestions: [
+              {
+                id: 1,
+                name: 'Burger',
+                type: 'dish',
+                description: 'Delicious burgers',
+                icon: 'https://example.com/burger-icon.jpg',
+                image: 'https://example.com/burger-image.jpg',
+                restaurant_count: 15,
+                item_count: 25
+              },
+              {
+                id: 2,
+                name: 'Burger Palace',
+                type: 'restaurant',
+                description: 'Best burgers in town',
+                icon: 'https://example.com/logo.jpg',
+                image: 'https://example.com/logo.jpg',
+                restaurant_count: 1,
+                item_count: 12
+              }
+            ],
+            total_suggestions: 2
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 400, 
+    description: 'Bad request - Invalid query or parameters',
+    content: {
+      'application/json': {
+        example: {
+          success: false,
+          message: 'Query must be at least 2 characters',
+          error: 'BAD_REQUEST'
+        }
+      }
+    }
+  })
+  @ApiResponse({ 
+    status: 500, 
+    description: 'Internal server error',
+    content: {
+      'application/json': {
+        example: {
+          success: false,
+          message: 'Internal server error',
+          error: 'INTERNAL_SERVER_ERROR'
+        }
+      }
+    }
+  })
+  async getSearchSuggestions(@Body() request: SearchSuggestionsRequestDto, @Req() req: any) {
+    if (!request.query || request.query.trim().length < 2) {
+      throw new BadRequestException('Query must be at least 2 characters');
+    }
+    const userId = req?.user?.id;
+    return this.buyerService.getSearchSuggestions(request, userId);
+  }
+
   @Get('restaurants/:id')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant details',
     description: 'Get detailed information about a specific restaurant including menu, offers, timings, locations, and statistics.',
@@ -155,6 +294,28 @@ export class BuyerController {
     type: String,
     description: 'Device longitude for distance calculation',
     example: '77.5946'
+  })
+  @ApiQuery({
+    name: 'search',
+    required: false,
+    type: String,
+    description: 'Search term to filter items by name',
+    example: 'pizza'
+  })
+  @ApiQuery({
+    name: 'dietary_preference',
+    required: false,
+    type: String,
+    description: 'Dietary preference filter',
+    enum: ['veg', 'non-veg', 'eggterian'],
+    example: 'veg'
+  })
+  @ApiQuery({
+    name: 'include_items',
+    required: false,
+    type: Boolean,
+    description: 'Include categorized items in response',
+    example: true
   })
   @ApiResponse({
     status: 200,
@@ -189,16 +350,30 @@ export class BuyerController {
     @Param('id') restaurantId: string,
     @Query('lat') deviceLat?: string,
     @Query('lng') deviceLng?: string,
+    @Query('search') search?: string,
+    @Query('dietary_preference') dietaryPreference?: string,
+    @Query('include_items') includeItems?: string,
     @Req() req?: any
   ) {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
+    const shouldIncludeItems = includeItems === 'true';
 
-    return this.buyerService.getRestaurantDetails(parseInt(restaurantId), userId, lat, lng);
+    return this.buyerService.getRestaurantDetails(
+      parseInt(restaurantId), 
+      userId, 
+      lat, 
+      lng, 
+      shouldIncludeItems,
+      search,
+      dietaryPreference
+    );
   }
 
   @Get('restaurants/:id/menu')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant menu',
     description: 'Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search.',
@@ -247,7 +422,7 @@ export class BuyerController {
 
   @Get('cart')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user cart',
     description: 'Retrieve the current user\'s active cart with all items, pricing, and summary.',
@@ -276,7 +451,7 @@ export class BuyerController {
 
   @Post('cart/add')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Add item to cart',
     description: 'Add an item to the user\'s cart with quantity, customizations, and variants.',
@@ -318,7 +493,7 @@ export class BuyerController {
 
   @Put('cart/update')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update cart item',
     description: 'Update quantity, customizations, or variants of an existing cart item.',
@@ -348,7 +523,7 @@ export class BuyerController {
 
   @Delete('cart/remove')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Remove item from cart',
     description: 'Remove a specific item from the user\'s cart.',
@@ -378,7 +553,7 @@ export class BuyerController {
 
   @Delete('cart/clear')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Clear cart',
     description: 'Remove all items from the user\'s cart.',
@@ -401,7 +576,7 @@ export class BuyerController {
 
   @Post('cart/apply-offer')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Apply offer to cart',
     description: 'Apply a discount offer to the user\'s cart using offer code or offer ID.',
@@ -443,7 +618,7 @@ export class BuyerController {
 
   @Post('orders')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create order from cart',
     description: 'Create a new order from the user\'s active cart with delivery address and payment method.',
@@ -485,7 +660,7 @@ export class BuyerController {
 
   @Get('orders')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user orders',
     description: 'Retrieve paginated list of user\'s orders with tracking information.',
@@ -522,7 +697,7 @@ export class BuyerController {
 
   @Get('orders/:id')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get order details',
     description: 'Retrieve detailed information about a specific order including items, tracking, and payment status.',
@@ -557,7 +732,7 @@ export class BuyerController {
 
   @Post('orders/:id/cancel')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Cancel order',
     description: 'Cancel a pending or confirmed order. Refunds will be processed for paid orders.',
@@ -599,7 +774,7 @@ export class BuyerController {
 
   @Post('payments/create')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create payment for order',
     description: 'Create a Razorpay payment order for online payment processing.',
@@ -629,7 +804,7 @@ export class BuyerController {
 
   @Post('payments/verify')
   @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Verify payment',
     description: 'Verify Razorpay payment signature and update order status.',
@@ -660,6 +835,8 @@ export class BuyerController {
   // ==================== NOTIFICATION ENDPOINTS ====================
 
   @Get('notifications')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user notifications',
     description: 'Retrieve user notifications with pagination and filtering options'
@@ -675,7 +852,7 @@ export class BuyerController {
     @Query('type') type?: string,
     @Query('unread_only') unreadOnly?: string
   ) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 20;
     const unreadOnlyBool = unreadOnly === 'true';
@@ -684,6 +861,8 @@ export class BuyerController {
   }
 
   @Put('notifications/:id/read')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Mark notification as read',
     description: 'Mark a specific notification as read'
@@ -693,11 +872,13 @@ export class BuyerController {
     description: 'Notification marked as read'
   })
   async markNotificationAsRead(@Req() req: any, @Param('id') notificationId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.markAsRead(parseInt(notificationId), userId);
   }
 
   @Put('notifications/read-all')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Mark all notifications as read',
     description: 'Mark all unread notifications as read for the user'
@@ -707,7 +888,7 @@ export class BuyerController {
     description: 'All notifications marked as read'
   })
   async markAllNotificationsAsRead(@Req() req: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.markAllAsRead(userId);
   }
 
@@ -721,7 +902,7 @@ export class BuyerController {
     description: 'Notification deleted successfully'
   })
   async deleteNotification(@Req() req: any, @Param('id') notificationId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.deleteNotification(parseInt(notificationId), userId);
   }
 
@@ -735,7 +916,7 @@ export class BuyerController {
     description: 'Notification preferences retrieved successfully'
   })
   async getNotificationPreferences(@Req() req: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.getNotificationPreferences(userId);
   }
 
@@ -749,11 +930,13 @@ export class BuyerController {
     description: 'Notification preferences updated successfully'
   })
   async updateNotificationPreferences(@Req() req: any, @Body() preferences: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.updateNotificationPreferences(userId, preferences);
   }
 
   @Post('push-tokens')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Register device token',
     description: 'Register device token for push notifications'
@@ -763,7 +946,7 @@ export class BuyerController {
     description: 'Device token registered successfully'
   })
   async registerDeviceToken(@Req() req: any, @Body() tokenData: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
     }
@@ -807,11 +990,13 @@ export class BuyerController {
     description: 'Device token unregistered successfully'
   })
   async unregisterDeviceToken(@Req() req: any, @Param('token') deviceToken: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.notificationService.unregisterDeviceToken(userId, deviceToken);
   }
 
   @Post('test-push-notification')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Test push notification (for development)',
     description: 'Send a test push notification to the authenticated user'
@@ -821,7 +1006,7 @@ export class BuyerController {
     description: 'Test notification sent successfully'
   })
   async testPushNotification(@Req() req: any, @Body() body: { message?: string }) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException('User not authenticated');
     }
@@ -848,6 +1033,8 @@ export class BuyerController {
   // ==================== REVIEW ENDPOINTS ====================
 
   @Post('reviews/restaurant')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create restaurant review',
     description: 'Create a review for a restaurant based on a delivered order'
@@ -857,11 +1044,13 @@ export class BuyerController {
     description: 'Restaurant review created successfully'
   })
   async createRestaurantReview(@Req() req: any, @Body() createReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.createRestaurantReview(userId, createReviewDto);
   }
 
   @Post('reviews/item')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Create item review',
     description: 'Create a review for a specific item based on a delivered order'
@@ -871,11 +1060,13 @@ export class BuyerController {
     description: 'Item review created successfully'
   })
   async createItemReview(@Req() req: any, @Body() createReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.createItemReview(userId, createReviewDto);
   }
 
   @Get('reviews/restaurant/:restaurantId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get restaurant reviews',
     description: 'Get all reviews for a specific restaurant with pagination'
@@ -905,6 +1096,8 @@ export class BuyerController {
   }
 
   @Get('reviews/item/:itemId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get item reviews',
     description: 'Get all reviews for a specific item with pagination'
@@ -934,6 +1127,8 @@ export class BuyerController {
   }
 
   @Get('reviews/my')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Get user reviews',
     description: 'Get all reviews created by the current user with pagination'
@@ -948,7 +1143,7 @@ export class BuyerController {
     @Query('limit') limit?: string,
     @Query('type') type?: string
   ) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 20;
     
@@ -956,6 +1151,8 @@ export class BuyerController {
   }
 
   @Put('reviews/restaurant/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update restaurant review',
     description: 'Update a restaurant review created by the current user'
@@ -965,11 +1162,13 @@ export class BuyerController {
     description: 'Restaurant review updated successfully'
   })
   async updateRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.updateRestaurantReview(parseInt(reviewId), userId, updateReviewDto);
   }
 
   @Put('reviews/item/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Update item review',
     description: 'Update an item review created by the current user'
@@ -979,11 +1178,13 @@ export class BuyerController {
     description: 'Item review updated successfully'
   })
   async updateItemReview(@Req() req: any, @Param('reviewId') reviewId: string, @Body() updateReviewDto: any) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.updateItemReview(parseInt(reviewId), userId, updateReviewDto);
   }
 
   @Delete('reviews/restaurant/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Delete restaurant review',
     description: 'Delete a restaurant review created by the current user'
@@ -993,11 +1194,13 @@ export class BuyerController {
     description: 'Restaurant review deleted successfully'
   })
   async deleteRestaurantReview(@Req() req: any, @Param('reviewId') reviewId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.deleteRestaurantReview(parseInt(reviewId), userId);
   }
 
   @Delete('reviews/item/:reviewId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @ApiOperation({
     summary: 'Delete item review',
     description: 'Delete an item review created by the current user'
@@ -1007,7 +1210,7 @@ export class BuyerController {
     description: 'Item review deleted successfully'
   })
   async deleteItemReview(@Req() req: any, @Param('reviewId') reviewId: string) {
-    const userId = req.user?.id || 1; // TODO: Get from JWT token
+    const userId = req.user?.id;
     return this.reviewService.deleteItemReview(parseInt(reviewId), userId);
   }
 }

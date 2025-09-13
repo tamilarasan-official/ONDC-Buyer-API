@@ -2,6 +2,7 @@ import {
   Column,
   CreateDateColumn,
   Entity,
+  JoinColumn,
   ManyToOne,
   PrimaryGeneratedColumn,
 } from "typeorm";
@@ -16,11 +17,13 @@ export class CustomizationRelationships {
   @ManyToOne(() => Item, (item) => item.customizationRelationships, {
     onDelete: "CASCADE",
   })
+  @JoinColumn({ name: 'parentCustomizationId' })
   parent_customization: Item; // Parent customization item (type='customization')
 
   @ManyToOne(() => Category, (category) => category.customizationRelationships, {
     onDelete: "CASCADE",
   })
+  @JoinColumn({ name: 'childCustomizationGroupId' })
   child_customization_group: Category; // Child customization group (type='custom_group')
 
   @Column({ type: "boolean", default: false })

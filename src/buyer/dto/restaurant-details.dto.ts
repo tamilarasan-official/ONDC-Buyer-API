@@ -133,6 +133,220 @@ export class RestaurantOfferDto {
   valid_to: string;
 }
 
+export class ItemCustomizationOptionDto {
+  @ApiProperty({
+    description: 'Option ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Option name',
+    example: 'Thin Crust'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Option price',
+    example: 0,
+    type: 'number'
+  })
+  price: number;
+
+  @ApiProperty({
+    description: 'Is default option',
+    example: true,
+    type: 'boolean'
+  })
+  is_default: boolean;
+}
+
+export class ItemCustomizationGroupDto {
+  @ApiProperty({
+    description: 'Customization group ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Group name',
+    example: 'Crust'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Group description',
+    example: 'Choose your pizza crust'
+  })
+  description: string;
+
+  @ApiProperty({
+    description: 'Minimum selections required',
+    example: 1,
+    type: 'number'
+  })
+  min_selections: number;
+
+  @ApiProperty({
+    description: 'Maximum selections allowed',
+    example: 1,
+    type: 'number'
+  })
+  max_selections: number;
+
+  @ApiProperty({
+    description: 'Input type',
+    example: 'select',
+    enum: ['select', 'radio', 'checkbox']
+  })
+  input_type: string;
+
+  @ApiProperty({
+    description: 'Is mandatory',
+    example: true,
+    type: 'boolean'
+  })
+  is_mandatory: boolean;
+
+  @ApiProperty({
+    description: 'Available options',
+    type: [ItemCustomizationOptionDto]
+  })
+  options: ItemCustomizationOptionDto[];
+}
+
+export class RestaurantItemDto {
+  @ApiProperty({
+    description: 'Item ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Item name',
+    example: 'Margherita Pizza'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Item short description',
+    example: 'Classic margherita with fresh mozzarella'
+  })
+  description: string;
+
+  @ApiProperty({
+    description: 'Item long description',
+    example: 'Traditional Italian pizza with fresh mozzarella, tomato sauce, and basil',
+    required: false
+  })
+  long_description?: string;
+
+  @ApiProperty({
+    description: 'Item images',
+    type: [String],
+    example: ['https://example.com/pizza.jpg']
+  })
+  images: string[];
+
+  @ApiProperty({
+    description: 'Item price',
+    type: 'object',
+    properties: {
+      base_price: { type: 'number', example: 299.00 },
+      currency: { type: 'string', example: 'INR' }
+    }
+  })
+  price: {
+    base_price: number;
+    currency: string;
+  };
+
+  @ApiProperty({
+    description: 'Item rating',
+    example: 4.2,
+    type: 'number'
+  })
+  rating: number;
+
+  @ApiProperty({
+    description: 'Is item available',
+    example: true,
+    type: 'boolean'
+  })
+  is_available: boolean;
+
+  @ApiProperty({
+    description: 'Is item recommended',
+    example: true,
+    type: 'boolean'
+  })
+  is_recommended: boolean;
+
+  @ApiProperty({
+    description: 'Dietary preference',
+    example: 'veg',
+    enum: ['veg', 'non-veg', 'eggterian']
+  })
+  dietary_preference: string;
+
+  @ApiProperty({
+    description: 'Has customizations',
+    example: true,
+    type: 'boolean'
+  })
+  has_customizations: boolean;
+
+  @ApiProperty({
+    description: 'Customization groups',
+    type: [ItemCustomizationGroupDto],
+    required: false
+  })
+  customizations?: ItemCustomizationGroupDto[];
+}
+
+export class RestaurantCategoryDto {
+  @ApiProperty({
+    description: 'Category ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Category name',
+    example: 'Pizza'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Category description',
+    example: 'Delicious pizzas'
+  })
+  description: string;
+
+  @ApiProperty({
+    description: 'Category icon URL',
+    example: 'https://example.com/pizza-icon.jpg'
+  })
+  icon: string;
+
+  @ApiProperty({
+    description: 'Items in this category',
+    type: [RestaurantItemDto]
+  })
+  items: RestaurantItemDto[];
+
+  @ApiProperty({
+    description: 'Number of items in this category',
+    example: 15,
+    type: 'number'
+  })
+  item_count: number;
+}
+
 export class RestaurantStatsDto {
   @ApiProperty({
     description: 'Total number of items',
@@ -258,6 +472,26 @@ export class RestaurantDetailsDto {
     type: 'number'
   })
   delivery_fee: number;
+
+  @ApiProperty({
+    description: 'Categorized items (only included when include_items=true)',
+    type: [RestaurantCategoryDto],
+    required: false
+  })
+  categories?: RestaurantCategoryDto[];
+
+  @ApiProperty({
+    description: 'Applied filters for items',
+    required: false,
+    example: {
+      search: 'pizza',
+      dietary_preference: 'veg'
+    }
+  })
+  applied_filters?: {
+    search?: string;
+    dietary_preference?: string;
+  };
 }
 
 export class RestaurantDetailsResponseDto {
