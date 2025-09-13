@@ -1294,6 +1294,9 @@ export class BuyerService {
    */
   private async getItemCustomizations(itemId: number) {
     try {
+      this.logger.log(`🔧 Getting customizations for item ${itemId}`);
+      
+      // Step 1: Get customization groups for this item
       const customizations = await this.itemCustomizationGroupsRepository
         .createQueryBuilder('icg')
         .leftJoinAndSelect('icg.customization_group', 'cg')
@@ -1302,17 +1305,25 @@ export class BuyerService {
         .orderBy('icg.sequence', 'ASC')
         .getMany();
 
-      // For each customization group, get the options (items that belong to this category)
+      this.logger.log(`📋 Found ${customizations.length} customization groups for item ${itemId}`);
+
+      // Step 2: For each customization group, get the options via CustomizationRelationships
       const customizationsWithOptions = await Promise.all(
         customizations.map(async (customization) => {
-          const options = await this.itemRepository
-            .createQueryBuilder('i')
-            .leftJoin('i.category', 'c')
-            .where('c.id = :categoryId', { categoryId: customization.customization_group.id })
-            .andWhere('i.type = :type', { type: 'customization' })
-            .andWhere('i.status = :status', { status: true })
-            .orderBy('i.display_rank', 'ASC')
+          // Get customization options (items) that belong to this group
+          const options = await this.customizationRelationshipsRepository
+            .createQueryBuilder('cr')
+            .leftJoinAndSelect('cr.parent_customization', 'option')
+            .leftJoinAndSelect('option.prices', 'p')
+            .where('cr.child_customization_group = :groupId', { 
+              groupId: customization.customization_group.id 
+            })
+            .andWhere('option.type = :type', { type: 'customization' })
+            .andWhere('option.status = :status', { status: true })
+            .orderBy('option.display_rank', 'ASC')
             .getMany();
+
+          this.logger.log(`🎯 Found ${options.length} options for group "${customization.customization_group.name}"`);
 
           return {
             id: customization.customization_group.id,
@@ -1322,16 +1333,17 @@ export class BuyerService {
             max_selections: customization.max_selections || customization.customization_group.configs?.[0]?.max_selections || 1,
             input_type: customization.customization_group.configs?.[0]?.input_type || 'select',
             is_mandatory: customization.is_mandatory,
-            options: options.map(option => ({
-              id: option.id,
-              name: option.name,
-              price: 0, // Customization options don't have separate prices in this structure
-              is_default: false // This would need to be determined from relationships
+            options: options.map(rel => ({
+              id: rel.parent_customization.id,
+              name: rel.parent_customization.name,
+              price: rel.parent_customization.prices?.[0]?.base_price || 0,
+              is_default: rel.is_default
             }))
           };
         })
       );
 
+      this.logger.log(`✅ Processed ${customizationsWithOptions.length} customization groups with options`);
       return customizationsWithOptions;
 
     } catch (error) {
