@@ -460,7 +460,7 @@ export class CatalogIngestionService {
         await this.processCategoryTiming(timing, savedCategory, queryRunner);
       }
 
-      // Process category configuration if available
+      // Process category configuration if available (especially for custom_group types)
       const config = this.categoryTransformer.transformConfig(categoryData);
       if (config) {
         await this.processCategoryConfig(config, savedCategory, queryRunner);
@@ -1059,6 +1059,7 @@ export class CatalogIngestionService {
   /**
    * Process item customization groups
    * This method creates the relationship between main items and customization groups
+   * Based on the actual ONDC data structure where customization groups are separate categories
    */
   private async processItemCustomizationGroups(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
     // Delete existing customization groups for this item
@@ -1069,40 +1070,72 @@ export class CatalogIngestionService {
       return;
     }
 
-    if (!itemData.tags || !Array.isArray(itemData.tags)) {
+    // ✅ NEW APPROACH: Find all customization groups (categories with type='custom_group') for this store
+    // and link them to main items based on the ONDC data structure
+    const customizationGroups = await queryRunner.manager.find(Category, {
+      where: { 
+        store: { id: store.id }, 
+        type: 'custom_group',
+        status: true 
+      }
+    });
+
+    if (customizationGroups.length === 0) {
+      this.logger.log(`No customization groups found for store ${store.reference_id}`);
       return;
     }
 
-    // ✅ CORRECT ONDC APPROACH: Find custom_group tag to get customization group IDs
-    const customGroupTag = itemData.tags.find(tag => tag.code === 'custom_group');
-    if (!customGroupTag || !Array.isArray(customGroupTag.list)) {
-      return; // This main item doesn't have customization groups
-    }
-
+    // For each customization group, check if it should be linked to this main item
+    // In the current ONDC data, we'll link all customization groups to all main items
+    // This can be made more specific based on business rules
     let sequence = 1;
-    for (const customGroupItem of customGroupTag.list) {
-      if (customGroupItem.code === 'id' && customGroupItem.value) {
-        const customizationGroupId = customGroupItem.value;
-        
-        // Find the customization group category (type='custom_group')
-        const category = await queryRunner.manager.findOne(Category, {
-          where: { reference_id: customizationGroupId, store: { id: store.id }, type: 'custom_group' }
-        });
+    for (const customizationGroup of customizationGroups) {
+      // Get configuration from the customization group's tags
+      const config = await this.extractCustomizationGroupConfig(customizationGroup, queryRunner);
+      
+      const itemCustomizationGroup = new ItemCustomizationGroups();
+      itemCustomizationGroup.item = item;
+      itemCustomizationGroup.customization_group = customizationGroup;
+      itemCustomizationGroup.min_selections = config.min_selections;
+      itemCustomizationGroup.max_selections = config.max_selections;
+      itemCustomizationGroup.is_mandatory = config.is_mandatory;
+      itemCustomizationGroup.sequence = sequence++;
 
-        if (category) {
-          const itemCustomizationGroup = new ItemCustomizationGroups();
-          itemCustomizationGroup.item = item;
-          itemCustomizationGroup.customization_group = category;
-          itemCustomizationGroup.is_mandatory = false; // Could be enhanced from category config
-          itemCustomizationGroup.sequence = sequence++;
-
-          await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
-          this.logger.log(`✅ Linked main item ${item.reference_id} to customization group ${category.reference_id}`);
-        } else {
-          this.logger.warn(`Customization group ${customizationGroupId} not found for item ${itemData.id}`);
-        }
-      }
+      await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
+      this.logger.log(`✅ Linked main item ${item.reference_id} to customization group ${customizationGroup.reference_id} (${customizationGroup.name})`);
     }
+  }
+
+  /**
+   * Extract configuration from customization group category
+   */
+  private async extractCustomizationGroupConfig(category: Category, queryRunner: any): Promise<{
+    min_selections: number;
+    max_selections: number;
+    is_mandatory: boolean;
+  }> {
+    // Default values
+    let min_selections = 0;
+    let max_selections = 1;
+    let is_mandatory = false;
+
+    // Load category configs from database
+    const categoryConfigs = await queryRunner.manager.find(CategoryConfigs, {
+      where: { category: { id: category.id } }
+    });
+
+    if (categoryConfigs.length > 0) {
+      const config = categoryConfigs[0];
+      min_selections = config.min_selections || 0;
+      max_selections = config.max_selections || 1;
+      is_mandatory = config.is_mandatory || false;
+    }
+
+    return {
+      min_selections,
+      max_selections,
+      is_mandatory
+    };
   }
 
   /**
