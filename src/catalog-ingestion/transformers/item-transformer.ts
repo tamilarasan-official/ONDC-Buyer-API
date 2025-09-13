@@ -81,9 +81,18 @@ export class ItemTransformer extends BaseTransformer {
   }
   
   /**
-   * Extract item type from tags
+   * Extract item type from ONDC data structure
    */
   private extractItemType(tags: any[]): string {
+    // Check if this is a customization item based on ONDC structure
+    // In ONDC, customization items have related: true and parent tags
+    const hasParentTag = tags.some(tag => tag.code === 'parent' && Array.isArray(tag.list));
+    
+    if (hasParentTag) {
+      return 'customization';
+    }
+    
+    // Check for explicit type in tags
     const itemType = this.extractTagValue(tags, 'type', 'type', 'item');
     
     // Validate item type

@@ -1058,6 +1058,7 @@ export class CatalogIngestionService {
 
   /**
    * Process item customization groups
+   * This method creates the relationship between main items and customization groups
    */
   private async processItemCustomizationGroups(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
     // Delete existing customization groups for this item
@@ -1106,6 +1107,7 @@ export class CatalogIngestionService {
 
   /**
    * Process customization relationships for customization items
+   * This method creates the relationship between customization items and their parent customization groups
    */
   private async processCustomizationRelationships(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
     // Only process if this is a customization item
