@@ -518,7 +518,7 @@ export class BuyerService {
       if (categoryId) {
         queryBuilder = queryBuilder
           .leftJoin('i.item_categories', 'ic')
-          .andWhere('ic.category_id = :categoryId', { categoryId });
+          .andWhere('ic.categoryId = :categoryId', { categoryId });
       }
 
       // Apply store filter
@@ -589,7 +589,7 @@ export class BuyerService {
           // Count items in this restaurant
           const itemsCount = await this.itemRepository
             .createQueryBuilder('i')
-            .where('i.store_id = :storeId', { storeId: restaurant.s_id })
+            .where('i.storeId = :storeId', { storeId: restaurant.s_id })
             .andWhere('i.status = :status', { status: true })
             .getCount();
 
@@ -662,12 +662,12 @@ export class BuyerService {
 
       // Apply category filter
       if (categoryId) {
-        queryBuilder = queryBuilder.andWhere('ic.category_id = :categoryId', { categoryId });
+        queryBuilder = queryBuilder.andWhere('ic.categoryId = :categoryId', { categoryId });
       }
 
       // Apply store filter
       if (storeId) {
-        queryBuilder = queryBuilder.andWhere('i.store_id = :storeId', { storeId });
+        queryBuilder = queryBuilder.andWhere('i.storeId = :storeId', { storeId });
       }
 
       // Apply dietary preference filter
@@ -801,7 +801,7 @@ export class BuyerService {
           const itemCount = await this.itemRepository
             .createQueryBuilder('i')
             .leftJoin('i.item_categories', 'ic')
-            .where('ic.category_id = :categoryId', { categoryId: category.id })
+            .where('ic.categoryId = :categoryId', { categoryId: category.id })
             .andWhere('i.status = :status', { status: true })
             .getCount();
 
@@ -810,7 +810,7 @@ export class BuyerService {
             .createQueryBuilder('s')
             .leftJoin('s.items', 'i')
             .leftJoin('i.item_categories', 'ic')
-            .where('ic.category_id = :categoryId', { categoryId: category.id })
+            .where('ic.categoryId = :categoryId', { categoryId: category.id })
             .andWhere('s.status = :status', { status: true })
             .getCount();
 
@@ -884,7 +884,7 @@ export class BuyerService {
       // Get item counts
       const itemCount = await this.itemRepository
         .createQueryBuilder('i')
-        .where('i.store_id = :storeId', { storeId: restaurant.id })
+        .where('i.storeId = :storeId', { storeId: restaurant.id })
         .andWhere('i.status = :status', { status: true })
         .getCount();
 
@@ -893,14 +893,14 @@ export class BuyerService {
         .createQueryBuilder('c')
         .leftJoin('c.item_categories', 'ic')
         .leftJoin('ic.item', 'i')
-        .where('i.store_id = :storeId', { storeId: restaurant.id })
+        .where('i.storeId = :storeId', { storeId: restaurant.id })
         .andWhere('c.status = :status', { status: true })
         .getCount();
 
       // Get active offers count
       const offersCount = await this.offersRepository
         .createQueryBuilder('o')
-        .where('o.store_id = :storeId', { storeId: restaurant.id })
+        .where('o.storeId = :storeId', { storeId: restaurant.id })
         .andWhere('o.status = :status', { status: true })
         .andWhere('o.valid_from <= :now', { now: new Date() })
         .andWhere('o.valid_to >= :now', { now: new Date() })
@@ -1079,7 +1079,7 @@ export class BuyerService {
         .createQueryBuilder('c')
         .leftJoin('c.item_categories', 'ic')
         .leftJoin('ic.item', 'i')
-        .where('i.store_id = :restaurantId', { restaurantId })
+        .where('i.storeId = :restaurantId', { restaurantId })
         .andWhere('c.status = :status', { status: true })
         .andWhere('i.status = :status', { status: true });
 
@@ -1138,8 +1138,8 @@ export class BuyerService {
         .leftJoin('i.prices', 'p')
         .leftJoin('i.quantities', 'q')
         .leftJoin('i.attributes', 'a')
-        .where('i.store_id = :restaurantId', { restaurantId })
-        .andWhere('ic.category_id = :categoryId', { categoryId })
+        .where('i.storeId = :restaurantId', { restaurantId })
+        .andWhere('ic.categoryId = :categoryId', { categoryId })
         .andWhere('i.status = :status', { status: true });
 
       // Apply search filter
@@ -1198,7 +1198,7 @@ export class BuyerService {
           // Get attributes
           const attributes = await this.itemAttributesRepository
             .createQueryBuilder('a')
-            .where('a.item_id = :itemId', { itemId: item.i_id })
+            .where('a.itemId = :itemId', { itemId: item.i_id })
             .select([
               'a.attribute_code',
               'a.attribute_name',
@@ -1273,7 +1273,7 @@ export class BuyerService {
         .createQueryBuilder('icg')
         .leftJoinAndSelect('icg.customization_group', 'cg')
         .leftJoinAndSelect('cg.configs', 'cc')
-        .where('icg.item_id = :itemId', { itemId })
+        .where('icg.itemId = :itemId', { itemId })
         .orderBy('icg.sequence', 'ASC')
         .getMany();
 
@@ -1304,7 +1304,7 @@ export class BuyerService {
       const variants = await this.itemVariantsRepository
         .createQueryBuilder('iv')
         .leftJoinAndSelect('iv.variant_group', 'vg')
-        .where('iv.item_id = :itemId', { itemId })
+        .where('iv.itemId = :itemId', { itemId })
         .getMany();
 
       // TODO: Get variant options for each group
@@ -1330,7 +1330,7 @@ export class BuyerService {
         .createQueryBuilder('rr')
         .select('AVG(rr.rating)', 'avgRating')
         .addSelect('COUNT(rr.id)', 'reviewCount')
-        .where('rr.store_id = :storeId', { storeId })
+        .where('rr.storeId = :storeId', { storeId })
         .getRawOne();
 
       return {
@@ -1352,7 +1352,7 @@ export class BuyerService {
         .createQueryBuilder('ir')
         .select('AVG(ir.rating)', 'avgRating')
         .addSelect('COUNT(ir.id)', 'reviewCount')
-        .where('ir.item_id = :itemId', { itemId })
+        .where('ir.itemId = :itemId', { itemId })
         .getRawOne();
 
       return {
@@ -1377,7 +1377,7 @@ export class BuyerService {
       // Check regular timings
       const todayTiming = await this.storeTimingsRepository
         .createQueryBuilder('st')
-        .where('st.store_id = :storeId', { storeId })
+        .where('st.storeId = :storeId', { storeId })
         .andWhere('st.day_from <= :day AND st.day_to >= :day', { day: currentDay })
         .getOne();
 
@@ -1458,17 +1458,31 @@ export class BuyerService {
    * Get search suggestions based on dishes and nearby restaurants only
    * Restaurants are sorted by distance (ascending)
    */
-  async getSearchSuggestions(request: SearchSuggestionsRequestDto) {
+  async getSearchSuggestions(request: SearchSuggestionsRequestDto, userId?: number) {
     const { query, location, filters, limit = 10 } = request;
     
     this.logger.log(`🔍 Getting search suggestions for: "${query}"`);
-    this.logger.log(`📍 Location provided: ${location ? `lat: ${location.lat}, lng: ${location.lng}` : 'No location provided'}`);
-    this.logger.log(`🔍 Filters: ${JSON.stringify(filters)}`);
-    this.logger.log(`🔍 Limit: ${limit}`);
+    this.logger.log(`👤 User ID: ${userId || 'guest'}`);
+    this.logger.log(`📍 Input location - lat: ${location?.lat}, lng: ${location?.lng}`);
     
     const suggestions: any[] = [];
     
     try {
+      // Get user location using the same logic as search endpoint
+      let userLocation;
+      if (userId) {
+        this.logger.log(`🔍 Fetching location for authenticated user: ${userId}`);
+        userLocation = await this.locationService.getUserLocation(userId, location?.lat, location?.lng);
+        this.logger.log(`📍 User location from service: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
+      } else {
+        this.logger.log(`🔍 Using device location for guest user`);
+        userLocation = { 
+          lat: location?.lat || 12.9716, 
+          lng: location?.lng || 77.5946, 
+          source: 'device_location' as const 
+        };
+      }
+
       // 1. Search dishes (primary suggestions)
       this.logger.log(`🔍 Searching dishes...`);
       const dishSuggestions = await this.dishRepository
@@ -1487,7 +1501,7 @@ export class BuyerService {
 
       this.logger.log(`🍽️ Found ${dishSuggestions.length} dishes`);
 
-      // Add dish suggestions (no counts needed)
+      // Add dish suggestions
       for (const dish of dishSuggestions) {
         suggestions.push({
           id: dish.id,
@@ -1500,46 +1514,53 @@ export class BuyerService {
       }
 
       // 2. Search nearby restaurants (secondary suggestions)
+      // Now always searches restaurants since we always have a location
       const remainingLimit = limit - suggestions.length;
       this.logger.log(`🔍 Remaining limit for restaurants: ${remainingLimit}`);
       
-      if (remainingLimit > 0 && location?.lat && location?.lng) {
-        this.logger.log(`🏪 Searching nearby restaurants with location: ${location.lat}, ${location.lng}`);
+      if (remainingLimit > 0) {
+        this.logger.log(`🏪 Searching nearby restaurants with location: ${userLocation.lat}, ${userLocation.lng}`);
         
         // Get nearby restaurants sorted by distance
+        // Search restaurants by name OR restaurants that have items matching the query
         const restaurantSuggestions = await this.storeRepository
           .createQueryBuilder('s')
-          .leftJoin('s.store_locations', 'sl')
+          .leftJoin('s.locations', 'sl')
+          .leftJoin('s.items', 'i') // Join with items to search by item names
           .where('s.status = :status', { status: true })
-          .andWhere('LOWER(s.name) LIKE LOWER(:query)', { query: `%${query}%` })
-          .andWhere('sl.latitude IS NOT NULL')
-          .andWhere('sl.longitude IS NOT NULL')
+          .andWhere('sl.gps_lat IS NOT NULL')
+          .andWhere('sl.gps_lng IS NOT NULL')
+          .andWhere(
+            '(LOWER(s.name) LIKE LOWER(:query) OR LOWER(i.name) LIKE LOWER(:query))',
+            { query: `%${query}%` }
+          )
           .select([
             's.id',
             's.name',
             's.description', 
             's.logo_url',
-            'sl.latitude',
-            'sl.longitude',
-            'sl.city',
-            'sl.locality'
+            'sl.gps_lat',
+            'sl.gps_lng',
+            'sl.address_city',
+            'sl.address_locality'
           ])
           .addSelect(
-            `ST_Distance(
-              ST_GeogFromText('POINT(${location.lng} ${location.lat})'),
-              ST_GeogFromText('POINT(' || sl.longitude || ' ' || sl.latitude || ')')
-            )`,
+            `(6371 * acos(cos(radians(:userLat)) * cos(radians(sl.gps_lat)) * cos(radians(sl.gps_lng) - radians(:userLng)) + sin(radians(:userLat)) * sin(radians(sl.gps_lat))))`,
             'distance'
           )
-          .orderBy('distance', 'ASC') // Sort by distance ascending
+          .setParameters({
+            userLat: userLocation.lat,
+            userLng: userLocation.lng
+          })
+          .groupBy('s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality') // Group to avoid duplicates
+          .orderBy('distance', 'ASC')
           .limit(remainingLimit)
           .getRawMany();
 
         this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants`);
 
-        // Add restaurant suggestions (no counts needed)
+        // Add restaurant suggestions
         for (const restaurant of restaurantSuggestions) {
-          this.logger.log(`🏪 Adding restaurant: ${restaurant.s_name} (distance: ${restaurant.distance}km)`);
           suggestions.push({
             id: restaurant.s_id,
             name: restaurant.s_name,
@@ -1549,15 +1570,13 @@ export class BuyerService {
             image: restaurant.s_logo_url,
             distance: restaurant.distance,
             location: {
-              lat: restaurant.sl_latitude,
-              lng: restaurant.sl_longitude,
-              city: restaurant.sl_city,
-              locality: restaurant.sl_locality
+              lat: restaurant.sl_gps_lat,
+              lng: restaurant.sl_gps_lng,
+              city: restaurant.sl_address_city,
+              locality: restaurant.sl_address_locality
             }
           });
         }
-      } else if (remainingLimit > 0) {
-        this.logger.warn(`⚠️ No location provided, skipping restaurant suggestions`);
       }
 
       // Sort suggestions by type (dishes first, then restaurants by distance)
@@ -1571,13 +1590,17 @@ export class BuyerService {
       });
 
       this.logger.log(`✅ Found ${suggestions.length} total suggestions for "${query}"`);
-      this.logger.log(`📊 Suggestions breakdown - Dishes: ${suggestions.filter(s => s.type === 'dish').length}, Restaurants: ${suggestions.filter(s => s.type === 'restaurant').length}`);
 
       return {
         success: true,
         message: 'Search suggestions retrieved successfully',
         data: {
           query,
+          location: {
+            lat: userLocation.lat,
+            lng: userLocation.lng,
+            source: userLocation.source
+          },
           suggestions: suggestions.slice(0, limit),
           total_suggestions: suggestions.length
         }

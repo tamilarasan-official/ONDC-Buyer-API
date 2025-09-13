@@ -260,11 +260,12 @@ export class BuyerController {
       }
     }
   })
-  async getSearchSuggestions(@Body() request: SearchSuggestionsRequestDto) {
+  async getSearchSuggestions(@Body() request: SearchSuggestionsRequestDto, @Req() req: any) {
     if (!request.query || request.query.trim().length < 2) {
       throw new BadRequestException('Query must be at least 2 characters');
     }
-    return this.buyerService.getSearchSuggestions(request);
+    const userId = req?.user?.id;
+    return this.buyerService.getSearchSuggestions(request, userId);
   }
 
   @Get('restaurants/:id')
