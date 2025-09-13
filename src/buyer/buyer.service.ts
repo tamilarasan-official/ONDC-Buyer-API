@@ -1297,64 +1297,40 @@ export class BuyerService {
     try {
       this.logger.log(`🔧 Getting customizations for item ${itemId}`);
       
-      // Debug: Check what customization items exist and their parent_item_id values
-      const debugItems = await this.itemRepository
-        .createQueryBuilder('i')
-        .where('i.type = :type', { type: 'customization' })
-        .andWhere('i.status = :status', { status: true })
-        .select(['i.id', 'i.name', 'i.reference_id', 'i.parent_item_id'])
-        .getMany();
-      
-      this.logger.log(`🔍 All customization items: ${JSON.stringify(debugItems)}`);
-      
-      // Simple query: Get customization items where parent_item_id = itemId
+      // Simple query: Get customization items where parentItemId = itemId
       const customizationItems = await this.itemRepository
         .createQueryBuilder('i')
         .leftJoinAndSelect('i.prices', 'p')
-        .leftJoinAndSelect('i.item_categories', 'ic')
-        .leftJoinAndSelect('ic.category', 'c')
-        .where('i.parent_item_id = :itemId', { itemId })
+        .where('i."parentItemId" = :itemId', { itemId })
         .andWhere('i.type = :type', { type: 'customization' })
         .andWhere('i.status = :status', { status: true })
-        .orderBy('c.display_rank', 'ASC')
-        .addOrderBy('i.display_rank', 'ASC')
+        .orderBy('i.id', 'ASC')
         .getMany();
 
       this.logger.log(`📋 Found ${customizationItems.length} customization items for item ${itemId}`);
 
-      // Group customization items by their category (customization group)
-      const groupedCustomizations = new Map();
-      
-      for (const customizationItem of customizationItems) {
-        const category = customizationItem.item_categories?.[0]?.category;
-        if (!category) continue;
-
-        const groupId = category.id;
-        if (!groupedCustomizations.has(groupId)) {
-          groupedCustomizations.set(groupId, {
-            id: category.id,
-            name: category.name,
-            description: category.description,
-            min_selections: 0, // Default values - can be configured in category configs
-            max_selections: 1,
-            input_type: 'select',
-            is_mandatory: false,
-            options: []
-          });
-        }
-
-        const group = groupedCustomizations.get(groupId);
-        group.options.push({
-          id: customizationItem.id,
-          name: customizationItem.name,
-          price: customizationItem.prices?.[0]?.base_price || 0,
-          is_default: false
-        });
+      // For now, return a simple structure with all customization items as one group
+      if (customizationItems.length === 0) {
+        return [];
       }
 
-      const customizations = Array.from(groupedCustomizations.values());
-      this.logger.log(`✅ Processed ${customizations.length} customization groups with options`);
-      return customizations;
+      const options = customizationItems.map(item => ({
+        id: item.id,
+        name: item.name,
+        price: item.prices?.[0]?.base_price || 0,
+        is_default: false
+      }));
+
+      return [{
+        id: 1,
+        name: 'Customizations',
+        description: 'Available customization options',
+        min_selections: 0,
+        max_selections: 1,
+        input_type: 'select',
+        is_mandatory: false,
+        options: options
+      }];
 
     } catch (error) {
       this.logger.error(`❌ Error getting item customizations: ${error.message}`, error.stack);
@@ -1372,8 +1348,7 @@ export class BuyerService {
       
       const count = await this.itemRepository
         .createQueryBuilder('i')
-        .leftJoin('i.parent_item', 'p')
-        .where('p.id = :itemId', { itemId })
+        .where('i."parentItemId" = :itemId', { itemId })
         .andWhere('i.type = :type', { type: 'customization' })
         .andWhere('i.status = :status', { status: true })
         .getCount();

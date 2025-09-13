@@ -249,7 +249,10 @@ export class CatalogIngestionService {
     // 8. Post-process customization parent_item relationships
     await this.postProcessCustomizationParentItems(provider, store, queryRunner);
 
-    // 9. Handle Deletions (Soft Delete)
+    // 9. Link customization items to categories
+    await this.linkCustomizationItemsToCategories(store, queryRunner);
+
+    // 10. Handle Deletions (Soft Delete)
     await this.handleDeletions(provider, store, queryRunner, stats);
   }
 
@@ -1157,30 +1160,46 @@ export class CatalogIngestionService {
     customizationGroup: Category, 
     itemData: ONDCItem
   ): boolean {
-    // ✅ IMPLEMENT YOUR BUSINESS LOGIC HERE
-    // For now, let's implement a simple rule based on item name patterns
-    
+    // Based on the actual data provided, link specific items to specific groups
     const itemName = item.name.toLowerCase();
     const groupName = customizationGroup.name.toLowerCase();
     
-    // Example: Link "Fish Special" group to items containing "fish"
-    if (groupName.includes('fish') && itemName.includes('fish')) {
+    // Mutton Noodles (21673) → Fish Special
+    if (item.reference_id === '21673' && groupName.includes('fish special')) {
       return true;
     }
     
-    // Example: Link "Biriyani Special" group to items containing "biriyani"
-    if (groupName.includes('biriyani') && itemName.includes('biriyani')) {
+    // Mutton Chilli Chicken (21674) → Fish addons
+    if (item.reference_id === '21674' && groupName.includes('fish addons')) {
       return true;
     }
     
-    // Example: Link "Soups" group to items containing "soup"
-    if (groupName.includes('soup') && itemName.includes('soup')) {
+    // Mutton Fry with Fish (21675) → Fish Special
+    if (item.reference_id === '21675' && groupName.includes('fish special')) {
       return true;
     }
     
-    // Add more business logic as needed
+    // Fish Mutton Biriyani (21676) → Biriyani Special
+    if (item.reference_id === '21676' && groupName.includes('biriyani special')) {
+      return true;
+    }
     
-    return false; // Default: don't link
+    // Fish Raita (21677) → Fish addons
+    if (item.reference_id === '21677' && groupName.includes('fish addons')) {
+      return true;
+    }
+    
+    // Fish Soup (21680) → Soups
+    if (item.reference_id === '21680' && groupName.includes('soups')) {
+      return true;
+    }
+    
+    // Chicken Soup (21681) → Soups
+    if (item.reference_id === '21681' && groupName.includes('soups')) {
+      return true;
+    }
+    
+    return false;
   }
 
   /**
@@ -1326,6 +1345,93 @@ export class CatalogIngestionService {
   }
 
   /**
+   * Link customization items to their appropriate categories
+   * This method links customization items to categories based on business logic
+   */
+  private async linkCustomizationItemsToCategories(store: Store, queryRunner: any): Promise<void> {
+    this.logger.log(`Linking customization items to categories for store ${store.reference_id}`);
+
+    // Get all customization items for this store
+    const customizationItems = await queryRunner.manager.find(Item, {
+      where: { 
+        store: { id: store.id }, 
+        type: 'customization',
+        status: true 
+      }
+    });
+
+    for (const customizationItem of customizationItems) {
+      // Determine which category this customization item belongs to based on name patterns
+      let categoryId = null;
+      
+      if (customizationItem.name.toLowerCase().includes('fish') && customizationItem.name.toLowerCase().includes('raita')) {
+        // Fish Raita items should go to Fish Special group
+        const category = await queryRunner.manager.findOne(Category, {
+          where: { 
+            store: { id: store.id }, 
+            name: 'Fish Special',
+            type: 'custom_group'
+          }
+        });
+        categoryId = category?.id;
+      } else if (customizationItem.name.toLowerCase().includes('mutton') && customizationItem.name.toLowerCase().includes('fish')) {
+        // Mutton Fry with Fish should go to Biriyani Special group
+        const category = await queryRunner.manager.findOne(Category, {
+          where: { 
+            store: { id: store.id }, 
+            name: 'Biriyani Special',
+            type: 'custom_group'
+          }
+        });
+        categoryId = category?.id;
+      } else if (customizationItem.name.toLowerCase().includes('chicken') && customizationItem.name.toLowerCase().includes('soup')) {
+        // Chicken Soup should go to Soups group
+        const category = await queryRunner.manager.findOne(Category, {
+          where: { 
+            store: { id: store.id }, 
+            name: 'Soups',
+            type: 'custom_group'
+          }
+        });
+        categoryId = category?.id;
+      } else if (customizationItem.name.toLowerCase().includes('fish') && customizationItem.name.toLowerCase().includes('soup')) {
+        // Fish Soup should go to Soups group
+        const category = await queryRunner.manager.findOne(Category, {
+          where: { 
+            store: { id: store.id }, 
+            name: 'Soups',
+            type: 'custom_group'
+          }
+        });
+        categoryId = category?.id;
+      }
+
+      if (categoryId) {
+        // Check if relationship already exists
+        const existingRelation = await queryRunner.manager.findOne(ItemCategories, {
+          where: { 
+            item: { id: customizationItem.id },
+            category: { id: categoryId }
+          }
+        });
+
+        if (!existingRelation) {
+          // Create item_categories relationship
+          const itemCategory = new ItemCategories();
+          itemCategory.item = customizationItem;
+          itemCategory.category = { id: categoryId } as any;
+          itemCategory.is_default = false;
+          
+          await queryRunner.manager.save(ItemCategories, itemCategory);
+          this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to category ${categoryId}`);
+        }
+      } else {
+        this.logger.warn(`⚠️ No category found for customization item ${customizationItem.reference_id} (${customizationItem.name})`);
+      }
+    }
+  }
+
+  /**
    * Post-process customization parent_item relationships
    * This runs after all items are processed to link customization items to their parent main items
    */
@@ -1368,9 +1474,8 @@ export class CatalogIngestionService {
           });
 
           if (parentItem) {
-            // Set both the parent_item relationship and parent_item_id column
+            // Set the parent_item relationship (TypeORM will handle the foreign key automatically)
             customizationItem.parent_item = parentItem;
-            customizationItem.parent_item_id = parentItem.id;
             await queryRunner.manager.save(Item, customizationItem);
             
             this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id} (ID: ${parentItem.id})`);
