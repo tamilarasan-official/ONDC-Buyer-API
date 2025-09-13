@@ -1368,11 +1368,12 @@ export class CatalogIngestionService {
           });
 
           if (parentItem) {
-            // Set the parent_item relationship
+            // Set both the parent_item relationship and parent_item_id column
             customizationItem.parent_item = parentItem;
+            customizationItem.parent_item_id = parentItem.id;
             await queryRunner.manager.save(Item, customizationItem);
             
-            this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id}`);
+            this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id} (ID: ${parentItem.id})`);
           } else {
             this.logger.warn(`Parent item ${parentItemId} not found for customization item ${customizationItem.reference_id}`);
           }

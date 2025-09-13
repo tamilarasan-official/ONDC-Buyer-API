@@ -543,8 +543,9 @@ export class CartService {
         const validOptions = await this.itemRepository
           .createQueryBuilder('option')
           .leftJoin('option.item_categories', 'ic')
+          .leftJoin('option.parent_item', 'parent')
           .where('option.id IN (:...optionIds)', { optionIds: selected_options })
-          .andWhere('option.parent_item_id = :itemId', { itemId })
+          .andWhere('parent.id = :itemId', { itemId })
           .andWhere('ic.categoryId = :groupId', { groupId: customization_group_id })
           .andWhere('option.type = :type', { type: 'customization' })
           .andWhere('option.status = :status', { status: true })

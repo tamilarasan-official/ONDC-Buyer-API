@@ -1,4 +1,4 @@
-import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, Logger, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { LocationService } from '../shared/services/location.service';
@@ -1235,7 +1235,7 @@ export class BuyerService {
           // Get customizations if requested
           let customizations: any[] = [];
           if (params.include_customizations) {
-            customizations = await this.getItemCustomizations(item.i_id);
+            customizations = await this.getCustomizationGroups(item.i_id);
           }
 
           // Get variants if requested
@@ -1290,21 +1290,30 @@ export class BuyerService {
   }
 
   /**
-   * Get item customizations
-   * Updated to use parent_item_id field for better performance and accuracy
+   * Get customization groups for an item
+   * Updated to use parent_item relation for better performance and accuracyIdm
    */
-  private async getItemCustomizations(itemId: number) {
+  private async getCustomizationGroups(itemId: number) {
     try {
       this.logger.log(`🔧 Getting customizations for item ${itemId}`);
       
-      // Get all customization items that have this item as parent
+      // Debug: Check what customization items exist and their parent_item_id values
+      const debugItems = await this.itemRepository
+        .createQueryBuilder('i')
+        .where('i.type = :type', { type: 'customization' })
+        .andWhere('i.status = :status', { status: true })
+        .select(['i.id', 'i.name', 'i.reference_id', 'i.parent_item_id'])
+        .getMany();
+      
+      this.logger.log(`🔍 All customization items: ${JSON.stringify(debugItems)}`);
+      
+      // Simple query: Get customization items where parent_item_id = itemId
       const customizationItems = await this.itemRepository
         .createQueryBuilder('i')
         .leftJoinAndSelect('i.prices', 'p')
         .leftJoinAndSelect('i.item_categories', 'ic')
         .leftJoinAndSelect('ic.category', 'c')
-        .leftJoin('i.parent_item', 'p')
-        .where('p.id = :itemId', { itemId })
+        .where('i.parent_item_id = :itemId', { itemId })
         .andWhere('i.type = :type', { type: 'customization' })
         .andWhere('i.status = :status', { status: true })
         .orderBy('c.display_rank', 'ASC')
@@ -1359,6 +1368,8 @@ export class BuyerService {
    */
   private async checkItemHasCustomizations(itemId: number): Promise<boolean> {
     try {
+      this.logger.log(`🔍 Checking if item ${itemId} has customizations`);
+      
       const count = await this.itemRepository
         .createQueryBuilder('i')
         .leftJoin('i.parent_item', 'p')
@@ -1367,6 +1378,7 @@ export class BuyerService {
         .andWhere('i.status = :status', { status: true })
         .getCount();
       
+      this.logger.log(`📊 Found ${count} customization items for item ${itemId}`);
       return count > 0;
     } catch (error) {
       this.logger.warn(`Failed to check customizations for item ${itemId}: ${error.message}`);
@@ -1687,6 +1699,67 @@ export class BuyerService {
     } catch (error) {
       this.logger.error(`❌ Error getting search suggestions: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Failed to get search suggestions');
+    }
+  }
+
+  /**
+   * Get item customizations for a main item
+   */
+  async getItemCustomizations(itemId: number) {
+    try {
+      this.logger.log(`🔧 Getting customizations for item ${itemId}`);
+
+      // First, verify the item exists and is a main item
+      const item = await this.itemRepository
+        .createQueryBuilder('i')
+        .leftJoin('i.parent_item', 'parent')
+        .where('i.id = :itemId', { itemId })
+        .andWhere('i.status = :status', { status: true })
+        .andWhere('i.type = :type', { type: 'item' })
+        .andWhere('parent.id IS NULL')
+        .select(['i.id', 'i.name', 'i.type'])
+        .getOne();
+
+      if (!item) {
+        throw new NotFoundException('Item not found or is not a main item');
+      }
+
+      // Check if item has customizations
+      const hasCustomizations = await this.checkItemHasCustomizations(itemId);
+
+      if (!hasCustomizations) {
+        return {
+          success: true,
+          message: 'Item customizations retrieved successfully',
+          data: {
+            item_id: item.id,
+            item_name: item.name,
+            has_customizations: false,
+            customizations: []
+          }
+        };
+      }
+
+      // Get customization groups and options
+      const customizations = await this.getCustomizationGroups(itemId);
+
+      return {
+        success: true,
+        message: 'Item customizations retrieved successfully',
+        data: {
+          item_id: item.id,
+          item_name: item.name,
+          has_customizations: true,
+          customizations: customizations
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting item customizations: ${error.message}`, error.stack);
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Failed to retrieve item customizations');
     }
   }
 

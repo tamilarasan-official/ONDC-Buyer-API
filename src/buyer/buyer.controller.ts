@@ -420,6 +420,93 @@ export class BuyerController {
     return this.buyerService.getRestaurantMenu(parseInt(restaurantId), menuParams);
   }
 
+  @Get('items/:id/customizations')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get item customizations',
+    description: 'Get all available customization options for a specific main item. This endpoint is useful when user clicks "Add to Cart" to show customization options.',
+  })
+  @ApiParam({
+    name: 'id',
+    description: 'Main item ID',
+    example: 1,
+    type: 'number'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Item customizations retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Item customizations retrieved successfully' },
+        data: {
+          type: 'object',
+          properties: {
+            item_id: { type: 'number', example: 1 },
+            item_name: { type: 'string', example: 'Mutton Biriyani' },
+            has_customizations: { type: 'boolean', example: true },
+            customizations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  id: { type: 'number', example: 1 },
+                  name: { type: 'string', example: 'Fish Special' },
+                  description: { type: 'string', example: 'Choose your fish preparation' },
+                  min_selections: { type: 'number', example: 0 },
+                  max_selections: { type: 'number', example: 1 },
+                  input_type: { type: 'string', example: 'select' },
+                  is_mandatory: { type: 'boolean', example: false },
+                  options: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'number', example: 1 },
+                        name: { type: 'string', example: 'Fish Raita' },
+                        price: { type: 'number', example: 25 },
+                        is_default: { type: 'boolean', example: false }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Item not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Item not found' },
+        error: { type: 'string', example: 'NOT_FOUND' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - Item is not a main item',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Item is not a main item' },
+        error: { type: 'string', example: 'BAD_REQUEST' }
+      }
+    }
+  })
+  async getItemCustomizations(@Param('id') itemId: string) {
+    return this.buyerService.getItemCustomizations(parseInt(itemId));
+  }
+
   @Get('cart')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
