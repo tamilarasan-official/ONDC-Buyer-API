@@ -78,7 +78,7 @@ export class Item {
     onDelete: "CASCADE",
     nullable: true,
   })
-  parent_item: Item; // For customizations
+  parent_item: Item; // For customizations - TypeORM will create parent_item_id column automatically
 
   @OneToMany(() => Item, (item) => item.parent_item)
   children: Item[]; // Child customizations
