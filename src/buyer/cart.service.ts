@@ -4,6 +4,8 @@ import { Repository } from 'typeorm';
 import { Cart } from '../cart/entities/cart.entity';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Item } from '../item/entities/item.entity';
+import { ItemCustomizationGroups } from '../item/entities/item-customization-groups.entity';
+import { CustomizationRelationships } from '../item/entities/customization-relationships.entity';
 import { Store } from '../store/entities/store.entity';
 import { User } from '../user/entities/user.entity';
 import { Offers } from '../offer/entities/offers.entity';
@@ -20,13 +22,17 @@ export class CartService {
     private readonly cartItemRepository: Repository<CartItem>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(ItemCustomizationGroups)
+    private readonly itemCustomizationGroupsRepository: Repository<ItemCustomizationGroups>,
+    @InjectRepository(CustomizationRelationships)
+    private readonly customizationRelationshipsRepository: Repository<CustomizationRelationships>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(Offers)
     private readonly offersRepository: Repository<Offers>,
-  ) {}
+  ) { }
 
   /**
    * Get user's active cart
@@ -40,7 +46,8 @@ export class CartService {
         .leftJoinAndSelect('c.store', 's')
         .leftJoinAndSelect('c.cart_items', 'ci')
         .leftJoinAndSelect('ci.item', 'i')
-        .where('c.user_id = :userId', { userId })
+        .leftJoin('c.user', 'u')
+        .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .orderBy('ci.created_at', 'ASC')
         .getOne();
@@ -96,11 +103,12 @@ export class CartService {
         .leftJoinAndSelect('i.prices', 'p')
         .leftJoinAndSelect('i.quantities', 'q')
         .where('i.id = :itemId', { itemId: addToCartDto.item_id })
+        .andWhere('i.storeId = :restaurantId', { restaurantId: addToCartDto.restaurant_id })
         .andWhere('i.status = :status', { status: true })
         .getOne();
 
       if (!item) {
-        throw new NotFoundException('Item not found');
+        throw new NotFoundException('Item not found in the specified restaurant');
       }
 
       if (!item.quantities?.[0] || item.quantities[0].available_count < addToCartDto.quantity) {
@@ -116,35 +124,60 @@ export class CartService {
       let cart = await this.cartRepository
         .createQueryBuilder('c')
         .leftJoinAndSelect('c.store', 's')
-        .where('c.user_id = :userId', { userId })
+        .leftJoin('c.user', 'u')
+        .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
       // Check if adding item from different restaurant
-      if (cart && cart.store.id !== item.store.id) {
+      if (cart && cart.store.id !== addToCartDto.restaurant_id) {
         throw new BadRequestException('Cannot add items from different restaurants. Please clear your cart first.');
       }
 
       if (!cart) {
-        cart = await this.createCart(userId, item.store.id);
+        cart = await this.createCart(userId, addToCartDto.restaurant_id);
       }
 
       // Check if item already exists in cart
       const existingCartItem = await this.cartItemRepository
         .createQueryBuilder('ci')
-        .where('ci.cart_id = :cartId', { cartId: cart.id })
-        .andWhere('ci.item_id = :itemId', { itemId: addToCartDto.item_id })
-        .andWhere('ci.customizations = :customizations', { customizations: JSON.stringify(addToCartDto.customizations || []) })
-        .andWhere('ci.variants = :variants', { variants: JSON.stringify(addToCartDto.variants || []) })
+        .where('ci.cart = :cartId', { cartId: cart.id })
+        .andWhere('ci.item = :itemId', { itemId: addToCartDto.item_id })
+        .andWhere('ci.customizations::text = :customizations', { customizations: JSON.stringify(addToCartDto.customizations || []) })
+        .andWhere('ci.variants::text = :variants', { variants: JSON.stringify(addToCartDto.variants || []) })
         .getOne();
 
       let cartItem: CartItem;
-      const unitPrice = item.prices?.[0]?.base_price || 0;
+      const unitPrice = Number(item.prices?.[0]?.base_price || 0);
+      
+      // Calculate customization prices
+      let customizationPrice = 0;
+      if (addToCartDto.customizations && addToCartDto.customizations.length > 0) {
+        for (const customization of addToCartDto.customizations) {
+          if (customization.selected_options && customization.selected_options.length > 0) {
+            // Get customization item prices
+            const customizationItems = await this.itemRepository
+              .createQueryBuilder('item')
+              .leftJoin('item.prices', 'price')
+              .where('item.id IN (:...optionIds)', { optionIds: customization.selected_options })
+              .andWhere('item.type = :type', { type: 'customization' })
+              .select(['item.id', 'price.base_price'])
+              .getMany();
+            
+            for (const customItem of customizationItems) {
+              customizationPrice += Number(customItem.prices?.[0]?.base_price || 0);
+            }
+          }
+        }
+      }
+      
+      const totalUnitPrice = Number((unitPrice + customizationPrice).toFixed(2));
+      const totalPrice = Number((addToCartDto.quantity * totalUnitPrice).toFixed(2));
 
       if (existingCartItem) {
         // Update existing item quantity
         existingCartItem.quantity += addToCartDto.quantity;
-        existingCartItem.total_price = existingCartItem.quantity * existingCartItem.unit_price;
+        existingCartItem.total_price = Number((existingCartItem.quantity * totalUnitPrice).toFixed(2));
         cartItem = await this.cartItemRepository.save(existingCartItem);
       } else {
         // Create new cart item
@@ -152,8 +185,8 @@ export class CartService {
           cart,
           item,
           quantity: addToCartDto.quantity,
-          unit_price: unitPrice,
-          total_price: addToCartDto.quantity * unitPrice,
+          unit_price: totalUnitPrice,
+          total_price: totalPrice,
           customizations: addToCartDto.customizations || [],
           variants: addToCartDto.variants || [],
           special_instructions: addToCartDto.special_instructions
@@ -201,13 +234,19 @@ export class CartService {
         .createQueryBuilder('ci')
         .leftJoinAndSelect('ci.cart', 'c')
         .leftJoinAndSelect('ci.item', 'i')
+        .leftJoin('c.user', 'u')
         .where('ci.id = :cartItemId', { cartItemId: updateCartItemDto.cart_item_id })
-        .andWhere('c.user_id = :userId', { userId })
+        .andWhere('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
       if (!cartItem) {
         throw new NotFoundException('Cart item not found');
+      }
+
+      // Validate restaurant if provided
+      if (updateCartItemDto.restaurant_id && cartItem.cart.store.id !== updateCartItemDto.restaurant_id) {
+        throw new BadRequestException('Cart item does not belong to the specified restaurant');
       }
 
       // Check item availability
@@ -220,9 +259,36 @@ export class CartService {
         await this.validateCustomizations(cartItem.item.id, updateCartItemDto.customizations);
       }
 
+      // Recalculate prices if customizations changed (including when removed)
+      const basePrice = Number(cartItem.item.prices?.[0]?.base_price || 0);
+      let customizationPrice = 0;
+      
+      // Calculate customization price if customizations are provided
+      if (updateCartItemDto.customizations && updateCartItemDto.customizations.length > 0) {
+        for (const customization of updateCartItemDto.customizations) {
+          if (customization.selected_options && customization.selected_options.length > 0) {
+            const customizationItems = await this.itemRepository
+              .createQueryBuilder('item')
+              .leftJoin('item.prices', 'price')
+              .where('item.id IN (:...optionIds)', { optionIds: customization.selected_options })
+              .andWhere('item.type = :type', { type: 'customization' })
+              .select(['item.id', 'price.base_price'])
+              .getMany();
+            
+            for (const customItem of customizationItems) {
+              customizationPrice += Number(customItem.prices?.[0]?.base_price || 0);
+            }
+          }
+        }
+      }
+      // If customizations is empty array or not provided, customizationPrice remains 0
+      
+      const newUnitPrice = Number((basePrice + customizationPrice).toFixed(2));
+
       // Update cart item
       cartItem.quantity = updateCartItemDto.quantity;
-      cartItem.total_price = cartItem.quantity * cartItem.unit_price;
+      cartItem.unit_price = newUnitPrice;
+      cartItem.total_price = Number((cartItem.quantity * newUnitPrice).toFixed(2));
       cartItem.customizations = updateCartItemDto.customizations || cartItem.customizations;
       cartItem.variants = updateCartItemDto.variants || cartItem.variants;
       cartItem.special_instructions = updateCartItemDto.special_instructions || cartItem.special_instructions;
@@ -267,8 +333,9 @@ export class CartService {
       const cartItem = await this.cartItemRepository
         .createQueryBuilder('ci')
         .leftJoinAndSelect('ci.cart', 'c')
+        .leftJoin('c.user', 'u')
         .where('ci.id = :cartItemId', { cartItemId: removeFromCartDto.cart_item_id })
-        .andWhere('c.user_id = :userId', { userId })
+        .andWhere('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
@@ -326,14 +393,15 @@ export class CartService {
 
       const cart = await this.cartRepository
         .createQueryBuilder('c')
-        .where('c.user_id = :userId', { userId })
+        .leftJoin('c.user', 'u')
+        .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
       if (cart) {
         // Remove all cart items
         await this.cartItemRepository.delete({ cart: { id: cart.id } });
-        
+
         // Deactivate cart
         await this.cartRepository.update(cart.id, { is_active: false });
       }
@@ -360,7 +428,8 @@ export class CartService {
         .leftJoinAndSelect('c.store', 's')
         .leftJoinAndSelect('c.cart_items', 'ci')
         .leftJoinAndSelect('ci.item', 'i')
-        .where('c.user_id = :userId', { userId })
+        .leftJoin('c.user', 'u')
+        .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
@@ -449,13 +518,29 @@ export class CartService {
    */
   private async updateCartTotals(cartId: number): Promise<void> {
     const cartItems = await this.cartItemRepository.find({
-      where: { cart: { id: cartId } }
+      where: { cart: { id: cartId } },
+      relations: ['item']
     });
 
-    const subtotal = cartItems.reduce((sum, item) => sum + item.total_price, 0);
+    const subtotal = cartItems.reduce((sum, item) => sum + Number(item.total_price), 0);
     const deliveryFee = subtotal > 200 ? 0 : 30; // Free delivery above 200
-    const taxAmount = subtotal * 0.18; // 18% GST
-    const finalAmount = subtotal + deliveryFee + taxAmount;
+    
+    // Calculate tax based on item's tax rate and type
+    let taxAmount = 0;
+    for (const cartItem of cartItems) {
+      if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
+        const itemTax = (Number(cartItem.total_price) * cartItem.item.tax_rate) / 100;
+        taxAmount += itemTax;
+      }
+    }
+    taxAmount = Number(taxAmount.toFixed(2));
+    
+    const finalAmount = Number((subtotal + deliveryFee + taxAmount).toFixed(2));
+
+    this.logger.log(`subtotal: ${Number(subtotal)}`);
+    this.logger.log(`deliveryFee: ${Number(deliveryFee)}`);
+    this.logger.log(`taxAmount: ${Number(taxAmount)}`);
+    this.logger.log(`finalAmount: ${Number(finalAmount)}`);
 
     await this.cartRepository.update(cartId, {
       total_amount: subtotal,
@@ -463,29 +548,31 @@ export class CartService {
       tax_amount: taxAmount,
       final_amount: finalAmount
     });
+
+    this.logger.log(`cart updated`);
   }
 
   /**
    * Calculate cart summary
    */
   private async calculateCartSummary(cart: Cart) {
-    const subtotal = cart.cart_items?.reduce((sum, item) => sum + item.total_price, 0) || 0;
-    const deliveryFee = cart.delivery_fee || 0;
-    const taxAmount = cart.tax_amount || 0;
-    const discountAmount = cart.discount_amount || 0;
-    const finalAmount = cart.final_amount || 0;
+    const subtotal = cart.cart_items?.reduce((sum, item) => sum + Number(item.total_price || 0), 0) || 0;
+    const deliveryFee = Number(cart.delivery_fee || 0);
+    const taxAmount = Number(cart.tax_amount || 0);
+    const discountAmount = Number(cart.discount_amount || 0);
+    const finalAmount = Number(cart.final_amount || 0);
 
     return {
-      subtotal,
-      delivery_fee: deliveryFee,
-      tax_amount: taxAmount,
-      discount_amount: discountAmount,
-      final_amount: finalAmount,
+      subtotal: Number(subtotal.toFixed(2)),
+      delivery_fee: Number(deliveryFee.toFixed(2)),
+      tax_amount: Number(taxAmount.toFixed(2)),
+      discount_amount: Number(discountAmount.toFixed(2)),
+      final_amount: Number(finalAmount.toFixed(2)),
       applied_offer: discountAmount > 0 ? {
         id: 1,
         name: 'Applied Offer',
         offer_code: 'OFFER',
-        discount_amount: discountAmount
+        discount_amount: Number(discountAmount.toFixed(2))
       } : undefined
     };
   }
@@ -494,20 +581,27 @@ export class CartService {
    * Format cart data for response
    */
   private async formatCartData(cart: Cart) {
-    const cartItems = cart.cart_items?.map(item => ({
-      id: item.id,
-      item_id: item.item.id,
-      item_name: item.item.name,
-      item_description: item.item.short_desc,
-      item_images: item.item.images || [],
-      quantity: item.quantity,
-      unit_price: item.unit_price,
-      total_price: item.total_price,
-      customizations: item.customizations || [],
-      variants: item.variants || [],
-      special_instructions: item.special_instructions,
-      is_available: item.item.quantities?.[0]?.available_count > 0
-    })) || [];
+    const cartItems = await Promise.all(
+      (cart.cart_items || []).map(async (item) => {
+        // Format customizations with names and prices
+        const formattedCustomizations = await this.formatCustomizations(item.customizations || []);
+        
+        return {
+          id: item.id,
+          item_id: item.item.id,
+          item_name: item.item.name,
+          item_description: item.item.short_desc,
+          item_images: item.item.images || [],
+          quantity: item.quantity,
+          unit_price: Number(item.unit_price || 0),
+          total_price: Number(item.total_price || 0),
+          customizations: formattedCustomizations,
+          variants: item.variants || [],
+          special_instructions: item.special_instructions,
+          is_available: item.item.quantities?.[0]?.available_count > 0
+        };
+      })
+    );
 
     const summary = await this.calculateCartSummary(cart);
 
@@ -526,6 +620,60 @@ export class CartService {
   }
 
   /**
+   * Format customizations with names and prices for display
+   */
+  private async formatCustomizations(customizations: any[]) {
+    if (!customizations || customizations.length === 0) {
+      return [];
+    }
+
+    const formattedCustomizations = await Promise.all(
+      customizations.map(async (customization) => {
+        const { customization_group_id, selected_options } = customization;
+        
+        // Get customization group name first
+        const customizationGroup = await this.itemCustomizationGroupsRepository
+          .createQueryBuilder('icg')
+          .leftJoin('icg.customization_group', 'cg')
+          .where('cg.id = :groupId', { groupId: customization_group_id })
+          .select(['cg.name'])
+          .getOne();
+
+        if (!selected_options || selected_options.length === 0) {
+          return {
+            customization_group_id,
+            customization_group_name: customizationGroup?.customization_group?.name || 'Customizations',
+            selected_options: []
+          };
+        }
+
+        // Get selected options with names and prices
+        const selectedOptions = await this.itemRepository
+          .createQueryBuilder('item')
+          .leftJoin('item.prices', 'price')
+          .where('item.id IN (:...optionIds)', { optionIds: selected_options })
+          .andWhere('item.type = :type', { type: 'customization' })
+          .select(['item.id', 'item.name', 'price.base_price'])
+          .getMany();
+
+        const formattedOptions = selectedOptions.map(option => ({
+          id: option.id,
+          name: option.name,
+          price: Number(option.prices?.[0]?.base_price || 0)
+        }));
+
+        return {
+          customization_group_id,
+          customization_group_name: customizationGroup?.customization_group?.name || 'Customizations',
+          selected_options: formattedOptions
+        };
+      })
+    );
+
+    return formattedCustomizations;
+  }
+
+  /**
    * Validate customization options belong to the correct parent item
    */
   private async validateCustomizations(itemId: number, customizations: any[]) {
@@ -539,24 +687,26 @@ export class CartService {
           continue; // Skip empty customizations
         }
 
-        // Validate that all selected options belong to this parent item and group
+        // Simple check: Just verify the customization options belong to the main item
+        this.logger.log(`🔍 Validating customization options: ${selected_options.join(', ')} for item ${itemId}`);
+
+        console.log(`selected_options: ${selected_options}`);
+        console.log(`itemId: ${itemId}`);
         const validOptions = await this.itemRepository
           .createQueryBuilder('option')
-          .leftJoin('option.item_categories', 'ic')
-          .leftJoin('option.parent_item', 'parent')
           .where('option.id IN (:...optionIds)', { optionIds: selected_options })
-          .andWhere('parent.id = :itemId', { itemId })
-          .andWhere('ic.categoryId = :groupId', { groupId: customization_group_id })
+          .andWhere('option.parentItemId = :itemId', { itemId })
           .andWhere('option.type = :type', { type: 'customization' })
           .andWhere('option.status = :status', { status: true })
+          .select(['option.id', 'option.name'])
           .getMany();
 
+        this.logger.log(`🔍 Valid options found:`, validOptions.map(opt => ({ id: opt.id, name: opt.name })));
+
+
         if (validOptions.length !== selected_options.length) {
-          const invalidOptions = selected_options.filter(
-            id => !validOptions.some(option => option.id === id)
-          );
           throw new BadRequestException(
-            `Invalid customization options: ${invalidOptions.join(', ')}. These options do not belong to the selected item or group.`
+            `Invalid customization options. Some options do not belong to the selected item.`
           );
         }
 

@@ -48,6 +48,16 @@ export class CartItemVariantDto {
 
 export class AddToCartDto {
   @ApiProperty({
+    description: 'Restaurant ID where the item belongs',
+    example: 1,
+    type: 'number'
+  })
+  @IsNotEmpty()
+  @Type(() => Number)
+  @IsNumber()
+  restaurant_id: number;
+
+  @ApiProperty({
     description: 'Item ID to add to cart',
     example: 1,
     type: 'number'
@@ -113,6 +123,16 @@ export class UpdateCartItemDto {
   @Type(() => Number)
   @IsNumber()
   cart_item_id: number;
+
+  @ApiProperty({
+    description: 'Restaurant ID (for validation)',
+    example: 1,
+    type: 'number'
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  restaurant_id?: number;
 
   @ApiProperty({
     description: 'New quantity',

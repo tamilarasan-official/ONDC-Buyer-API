@@ -1321,14 +1321,40 @@ export class BuyerService {
         is_default: false
       }));
 
+      // Get the actual customization group details for this item
+      const customizationGroup = await this.itemCustomizationGroupsRepository
+        .createQueryBuilder('icg')
+        .leftJoin('icg.item', 'i')
+        .leftJoin('icg.customization_group', 'cg')
+        .where('i.id = :itemId', { itemId })
+        .andWhere('cg.type = :type', { type: 'custom_group' })
+        .select([
+          'icg.id', 
+          'icg.min_selections', 
+          'icg.max_selections', 
+          'icg.is_mandatory',
+          'cg.id',
+          'cg.name',
+          'cg.description'
+        ])
+        .getOne();
+
+      const groupId = customizationGroup?.customization_group?.id || 1;
+      const groupName = customizationGroup?.customization_group?.name || 'Customizations';
+      const groupDescription = customizationGroup?.customization_group?.description || 'Available customization options';
+      const minSelections = customizationGroup?.min_selections || 0;
+      const maxSelections = customizationGroup?.max_selections || 1;
+      const inputType = 'select'; // Default input type
+      const isMandatory = customizationGroup?.is_mandatory || false;
+
       return [{
-        id: 1,
-        name: 'Customizations',
-        description: 'Available customization options',
-        min_selections: 0,
-        max_selections: 1,
-        input_type: 'select',
-        is_mandatory: false,
+        id: groupId,
+        name: groupName,
+        description: groupDescription,
+        min_selections: minSelections,
+        max_selections: maxSelections,
+        input_type: inputType,
+        is_mandatory: isMandatory,
         options: options
       }];
 
@@ -1858,4 +1884,5 @@ export class BuyerService {
       return []; // Return empty array on error to not break the main response
     }
   }
+
 }
