@@ -153,19 +153,21 @@ export class BuyerService {
 
       const queryBuilder = this.storeRepository
         .createQueryBuilder('s')
-        .leftJoin('s.locations', 'sl')
+        .innerJoin('s.locations', 'sl')
         .where('s.status = :status', { status: true })
+        .andWhere('sl.gps_lat IS NOT NULL')
+        .andWhere('sl.gps_lng IS NOT NULL')
         .andWhere(distanceFilter)
         .select([
-          's.id',
-          's.name',
-          's.description',
-          's.logo_url',
-          's.fssai_license_no',
-          'sl.gps_lat',
-          'sl.gps_lng',
-          'sl.address_city',
-          'sl.address_locality',
+          'DISTINCT s.id as s_id',
+          's.name as s_name',
+          's.description as s_description',
+          's.logo_url as s_logo_url',
+          's.fssai_license_no as s_fssai_license_no',
+          'sl.gps_lat as sl_gps_lat',
+          'sl.gps_lng as sl_gps_lng',
+          'sl.address_city as sl_address_city',
+          'sl.address_locality as sl_address_locality',
           distanceSubquery
         ])
         .orderBy('distance', 'ASC')
@@ -174,6 +176,11 @@ export class BuyerService {
       this.logger.log(`🔍 Executing restaurant query...`);
       const stores = await queryBuilder.getRawMany();
       this.logger.log(`🏪 Found ${stores.length} nearby restaurants`);
+      
+      // Debug: Log all found stores
+      stores.forEach((store, index) => {
+        this.logger.log(`🏪 Store ${index + 1}: ${store.s_name} (ID: ${store.s_id}) - Distance: ${store.distance}km - Lat: ${store.sl_gps_lat}, Lng: ${store.sl_gps_lng}`);
+      });
 
       if (stores.length === 0) {
         this.logger.warn(`⚠️ No restaurants found within ${radiusKm}km of ${userLat}, ${userLng}`);
