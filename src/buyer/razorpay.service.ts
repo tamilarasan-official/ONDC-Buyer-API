@@ -11,16 +11,26 @@ export class RazorpayService {
   private readonly keySecret: string;
 
   constructor(private readonly configService: ConfigService) {
-    // Using test keys for development
+    // Get Razorpay credentials from environment or use defaults
     this.keyId = this.configService.get<string>('RAZORPAY_KEY_ID') || 'rzp_test_1DP5mmOlF5G5ag';
     this.keySecret = this.configService.get<string>('RAZORPAY_KEY_SECRET') || 'thisisasecretkey';
 
-    this.razorpay = new Razorpay({
-      key_id: this.keyId,
-      key_secret: this.keySecret,
-    });
+    // Validate credentials
+    if (!this.keyId || !this.keySecret || this.keyId === 'rzp_test_1DP5mmOlF5G5ag') {
+      this.logger.warn(`⚠️ Using default Razorpay test credentials. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables for production.`);
+    }
 
-    this.logger.log(`🔑 Razorpay initialized with Key ID: ${this.keyId}`);
+    try {
+      this.razorpay = new Razorpay({
+        key_id: this.keyId,
+        key_secret: this.keySecret,
+      });
+
+      this.logger.log(`🔑 Razorpay initialized with Key ID: ${this.keyId}`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to initialize Razorpay:`, error);
+      throw new Error('Failed to initialize Razorpay service');
+    }
   }
 
   /**
@@ -29,6 +39,29 @@ export class RazorpayService {
   async createOrder(amount: number, currency: string = 'INR', receipt?: string) {
     try {
       this.logger.log(`💳 Creating Razorpay order for amount: ${amount} ${currency}`);
+
+      // Validate amount
+      if (!amount || amount <= 0) {
+        throw new Error('Invalid amount provided');
+      }
+
+      // Development fallback - return mock order if using default credentials
+      if (this.keyId === 'rzp_test_1DP5mmOlF5G5ag') {
+        this.logger.warn(`⚠️ Using mock Razorpay order for development`);
+        return {
+          id: `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+          amount: amount,
+          currency: currency,
+          receipt: receipt || `receipt_${Date.now()}`,
+          status: 'created',
+          created_at: Math.floor(Date.now() / 1000)
+        };
+      }
+
+      // Validate Razorpay instance
+      if (!this.razorpay) {
+        throw new Error('Razorpay instance not initialized');
+      }
 
       const options = {
         amount: amount, // Amount in paise
@@ -40,13 +73,20 @@ export class RazorpayService {
         }
       };
 
+      this.logger.log(`🔧 Razorpay options:`, options);
       const order = await this.razorpay.orders.create(options);
       
       this.logger.log(`✅ Razorpay order created: ${order.id}`);
       return order;
     } catch (error) {
-      this.logger.error(`❌ Error creating Razorpay order: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to create payment order');
+      this.logger.error(`❌ Error creating Razorpay order:`, error);
+      this.logger.error(`❌ Error details:`, {
+        message: error?.message,
+        code: error?.code,
+        statusCode: error?.statusCode,
+        response: error?.response
+      });
+      throw new BadRequestException(`Failed to create payment order: ${error?.message || 'Unknown error'}`);
     }
   }
 
@@ -78,21 +118,61 @@ export class RazorpayService {
   }
 
   /**
-   * Fetch payment details
+   * Verify webhook signature
+   */
+  verifyWebhookSignature(body: string, signature: string): boolean {
+    try {
+      this.logger.log(`🔍 Verifying webhook signature`);
+
+      const expectedSignature = crypto
+        .createHmac('sha256', this.keySecret)
+        .update(body)
+        .digest('hex');
+
+      const isValid = expectedSignature === signature;
+      
+      this.logger.log(`🔐 Webhook signature verification: ${isValid ? 'VALID' : 'INVALID'}`);
+      return isValid;
+    } catch (error) {
+      this.logger.error(`❌ Error verifying webhook signature: ${error.message}`, error.stack);
+      return false;
+    }
+  }
+
+  /**
+   * Get payment details from Razorpay
    */
   async getPaymentDetails(paymentId: string) {
     try {
-      this.logger.log(`📋 Fetching payment details for: ${paymentId}`);
+      this.logger.log(`💳 Fetching payment details for: ${paymentId}`);
+
+      // Development fallback
+      if (this.keyId === 'rzp_test_1DP5mmOlF5G5ag') {
+        this.logger.warn(`⚠️ Using mock payment details for development`);
+        return {
+          id: paymentId,
+          amount: 123000,
+          currency: 'INR',
+          status: 'captured',
+          method: 'card',
+          created_at: Math.floor(Date.now() / 1000)
+        };
+      }
+
+      if (!this.razorpay) {
+        throw new Error('Razorpay instance not initialized');
+      }
 
       const payment = await this.razorpay.payments.fetch(paymentId);
       
-      this.logger.log(`✅ Payment details fetched: ${payment.status}`);
+      this.logger.log(`✅ Payment details fetched: ${payment.id}`);
       return payment;
     } catch (error) {
-      this.logger.error(`❌ Error fetching payment details: ${error.message}`, error.stack);
-      throw new BadRequestException('Failed to fetch payment details');
+      this.logger.error(`❌ Error fetching payment details:`, error);
+      throw new BadRequestException(`Failed to fetch payment details: ${error?.message || 'Unknown error'}`);
     }
   }
+
 
   /**
    * Capture payment

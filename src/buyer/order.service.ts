@@ -11,6 +11,7 @@ import { UserAddress } from '../user/entities/user-address.entity';
 import { User } from '../user/entities/user.entity';
 import { Store } from '../store/entities/store.entity';
 import { Item } from '../item/entities/item.entity';
+import { ItemCustomizationGroups } from '../item/entities/item-customization-groups.entity';
 import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
 import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
@@ -40,12 +41,14 @@ export class OrderService {
     private readonly storeRepository: Repository<Store>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(ItemCustomizationGroups)
+    private readonly itemCustomizationGroupsRepository: Repository<ItemCustomizationGroups>,
     private readonly razorpayService: RazorpayService,
     private readonly notificationService: NotificationService,
   ) {}
 
   /**
-   * Create order from cart
+   * Create order from cart (without payment processing)
    */
   async createOrder(userId: number, createOrderDto: CreateOrderDto) {
     try {
@@ -57,7 +60,8 @@ export class OrderService {
         .leftJoinAndSelect('c.store', 's')
         .leftJoinAndSelect('c.cart_items', 'ci')
         .leftJoinAndSelect('ci.item', 'i')
-        .where('c.user_id = :userId', { userId })
+        .leftJoin('c.user', 'u')
+        .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
         .getOne();
 
@@ -77,20 +81,23 @@ export class OrderService {
       // Generate order number
       const orderNumber = this.generateOrderNumber();
 
-      // Create order
+      // Create order with appropriate status based on payment method
+      const orderStatus = createOrderDto.payment_method === 'cod' ? 'confirmed' : 'pending_payment';
+      const paymentStatus = createOrderDto.payment_method === 'cod' ? 'pending' : 'pending';
+
       const order = this.orderRepository.create({
         order_number: orderNumber,
         user: { id: userId },
         store: { id: cart.store.id },
         delivery_address: { id: deliveryAddress.id },
-        status: 'pending',
+        status: orderStatus,
         subtotal: cart.total_amount,
         delivery_fee: cart.delivery_fee,
         tax_amount: cart.tax_amount,
         discount_amount: cart.discount_amount,
         total_amount: cart.final_amount,
         payment_method: createOrderDto.payment_method,
-        payment_status: createOrderDto.payment_method === 'cod' ? 'pending' : 'pending',
+        payment_status: paymentStatus,
         notes: createOrderDto.notes,
         estimated_delivery_time: this.calculateEstimatedDeliveryTime()
       });
@@ -113,7 +120,10 @@ export class OrderService {
       await this.orderItemRepository.save(orderItems);
 
       // Create initial tracking entry
-      await this.createOrderTracking(savedOrder.id, 'pending', 'Order placed successfully');
+      const trackingMessage = createOrderDto.payment_method === 'cod' 
+        ? 'Order placed successfully - Cash on Delivery' 
+        : 'Order placed successfully - Payment pending';
+      await this.createOrderTracking(savedOrder.id, orderStatus, trackingMessage);
 
       // Deactivate cart
       await this.cartRepository.update(cart.id, { is_active: false });
@@ -121,29 +131,24 @@ export class OrderService {
       // Get complete order data
       const orderData = await this.getOrderById(savedOrder.id, userId);
 
-      let paymentDetails: any = null;
-
-      // If online payment, create Razorpay order
-      if (createOrderDto.payment_method === 'online') {
-        const razorpayOrder = await this.razorpayService.createOrder(
-          Math.round(cart.final_amount * 100), // Convert to paise
-          'INR',
-          orderNumber
-        );
-
-        paymentDetails = {
-          razorpay_order_id: razorpayOrder.id,
-          amount: Math.round(cart.final_amount * 100),
-          currency: 'INR',
-          key: this.razorpayService.getRazorpayKey()
+      // For COD orders, return immediately
+      if (createOrderDto.payment_method === 'cod') {
+        return {
+          success: true,
+          message: 'Order created successfully - Cash on Delivery',
+          order: orderData,
+          payment_required: false
         };
       }
 
+      // For online payment, return order with payment_required flag
       return {
         success: true,
-        message: 'Order created successfully',
+        message: 'Order created successfully - Payment required',
         order: orderData,
-        payment_details: paymentDetails
+        payment_required: true,
+        payment_amount: Math.round(cart.final_amount * 100), // in paise
+        currency: 'INR'
       };
     } catch (error) {
       this.logger.error(`❌ Error creating order: ${error.message}`, error.stack);
@@ -165,8 +170,9 @@ export class OrderService {
         .leftJoinAndSelect('o.order_items', 'oi')
         .leftJoinAndSelect('oi.item', 'i')
         .leftJoinAndSelect('o.tracking', 't')
+        .leftJoin('o.user', 'u')
         .where('o.id = :orderId', { orderId })
-        .andWhere('o.user_id = :userId', { userId })
+        .andWhere('u.id = :userId', { userId })
         .orderBy('t.timestamp', 'ASC')
         .getOne();
 
@@ -174,7 +180,7 @@ export class OrderService {
         throw new NotFoundException('Order not found');
       }
 
-      return this.formatOrderData(order);
+      return await this.formatOrderData(order);
     } catch (error) {
       this.logger.error(`❌ Error getting order: ${error.message}`, error.stack);
       throw error;
@@ -195,14 +201,15 @@ export class OrderService {
         .leftJoinAndSelect('o.order_items', 'oi')
         .leftJoinAndSelect('oi.item', 'i')
         .leftJoinAndSelect('o.tracking', 't')
-        .where('o.user_id = :userId', { userId })
+        .leftJoin('o.user', 'u')
+        .where('u.id = :userId', { userId })
         .orderBy('o.created_at', 'DESC')
         .addOrderBy('t.timestamp', 'ASC')
         .skip((page - 1) * limit)
         .take(limit)
         .getManyAndCount();
 
-      const formattedOrders = orders.map(order => this.formatOrderData(order));
+      const formattedOrders = await Promise.all(orders.map(order => this.formatOrderData(order)));
 
       return {
         success: true,
@@ -224,7 +231,77 @@ export class OrderService {
   }
 
   /**
-   * Create payment for order
+   * Initiate payment for an order
+   */
+  async initiatePayment(userId: number, orderId: number, customerDetails: any) {
+    try {
+      this.logger.log(`💳 Initiating payment for order ${orderId}`);
+
+      // Get order
+      const order = await this.orderRepository.findOne({
+        where: { id: orderId, user: { id: userId } },
+        relations: ['store', 'user']
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+
+      if (order.payment_status === 'paid') {
+        throw new BadRequestException('Order is already paid');
+      }
+
+      if (order.status !== 'pending_payment') {
+        throw new BadRequestException('Order is not in pending payment status');
+      }
+
+      // Create Razorpay order
+      const razorpayOrder = await this.razorpayService.createOrder(
+        Math.round(order.total_amount * 100), // Convert to paise
+        'INR',
+        order.order_number
+      );
+
+      // Create payment record
+      const payment = this.paymentRepository.create({
+        order: { id: order.id },
+        user: { id: userId },
+        payment_id: razorpayOrder.id, // Store Razorpay order ID temporarily
+        payment_method: 'online',
+        payment_status: 'pending',
+        amount: order.total_amount,
+        gateway: 'razorpay'
+      });
+
+      await this.paymentRepository.save(payment);
+
+      const paymentDetails = {
+        razorpay_order_id: razorpayOrder.id,
+        amount: Math.round(order.total_amount * 100),
+        currency: 'INR',
+        key: this.razorpayService.getRazorpayKey(),
+        name: order.store.name,
+        description: `Order #${order.order_number}`,
+        prefill: {
+          name: customerDetails.name,
+          email: customerDetails.email,
+          contact: customerDetails.phone
+        }
+      };
+
+      return {
+        success: true,
+        message: 'Payment initiated successfully',
+        payment_details: paymentDetails
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error initiating payment: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Create payment for order (legacy method - kept for backward compatibility)
    */
   async createPayment(userId: number, createPaymentDto: CreatePaymentDto) {
     try {
@@ -290,133 +367,6 @@ export class OrderService {
   }
 
   /**
-   * Verify payment
-   */
-  async verifyPayment(userId: number, verifyPaymentDto: VerifyPaymentDto) {
-    try {
-      this.logger.log(`🔍 Verifying payment for user ${userId}`);
-
-      // Verify signature
-      const isValidSignature = this.razorpayService.verifyPaymentSignature(
-        verifyPaymentDto.razorpay_order_id,
-        verifyPaymentDto.razorpay_payment_id,
-        verifyPaymentDto.razorpay_signature
-      );
-
-      if (!isValidSignature) {
-        throw new BadRequestException('Invalid payment signature');
-      }
-
-      // Get payment record
-      const payment = await this.paymentRepository.findOne({
-        where: { payment_id: verifyPaymentDto.razorpay_order_id },
-        relations: ['order']
-      });
-
-      if (!payment) {
-        throw new NotFoundException('Payment record not found');
-      }
-
-      // Update payment record
-      payment.payment_id = verifyPaymentDto.razorpay_payment_id;
-      payment.payment_status = 'success';
-      payment.paid_at = new Date();
-      payment.gateway_response = {
-        razorpay_order_id: verifyPaymentDto.razorpay_order_id,
-        razorpay_payment_id: verifyPaymentDto.razorpay_payment_id,
-        razorpay_signature: verifyPaymentDto.razorpay_signature
-      };
-
-      await this.paymentRepository.save(payment);
-
-      // Update order status
-      await this.orderRepository.update(payment.order.id, {
-        payment_status: 'paid',
-        status: 'confirmed'
-      });
-
-      // Create tracking entry
-      await this.createOrderTracking(payment.order.id, 'confirmed', 'Payment successful, order confirmed');
-
-      // Create payment success notification
-      try {
-        await this.notificationService.createPaymentSuccessNotification(
-          userId,
-          payment.order.id,
-          payment.amount / 100, // Convert from paise to rupees
-          payment.payment_method
-        );
-      } catch (notificationError) {
-        this.logger.error(`Failed to create payment success notification: ${notificationError.message}`, notificationError.stack);
-      }
-
-      return {
-        success: true,
-        message: 'Payment verified successfully',
-        payment_id: verifyPaymentDto.razorpay_payment_id,
-        order_status: 'confirmed'
-      };
-    } catch (error) {
-      this.logger.error(`❌ Error verifying payment: ${error.message}`, error.stack);
-      
-      // Create payment failure notification if we have payment info
-      try {
-        const payment = await this.paymentRepository.findOne({
-          where: { payment_id: verifyPaymentDto.razorpay_order_id },
-          relations: ['order']
-        });
-        
-        if (payment) {
-          await this.notificationService.createPaymentFailedNotification(
-            userId,
-            payment.order.id,
-            payment.amount / 100, // Convert from paise to rupees
-            payment.payment_method,
-            error.message
-          );
-        }
-      } catch (notificationError) {
-        this.logger.error(`Failed to create payment failure notification: ${notificationError.message}`, notificationError.stack);
-      }
-      
-      throw error;
-    }
-  }
-
-  /**
-   * Update order status
-   */
-  async updateOrderStatus(orderId: number, updateOrderStatusDto: UpdateOrderStatusDto) {
-    try {
-      this.logger.log(`📝 Updating order ${orderId} status to ${updateOrderStatusDto.status}`);
-
-      const order = await this.orderRepository.findOne({
-        where: { id: orderId }
-      });
-
-      if (!order) {
-        throw new NotFoundException('Order not found');
-      }
-
-      // Update order status
-      await this.orderRepository.update(orderId, {
-        status: updateOrderStatusDto.status
-      });
-
-      // Create tracking entry
-      await this.createOrderTracking(orderId, updateOrderStatusDto.status, updateOrderStatusDto.message || 'Status updated');
-
-      return {
-        success: true,
-        message: 'Order status updated successfully'
-      };
-    } catch (error) {
-      this.logger.error(`❌ Error updating order status: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  /**
    * Cancel order
    */
   async cancelOrder(userId: number, orderId: number, cancelOrderDto: CancelOrderDto) {
@@ -455,6 +405,173 @@ export class OrderService {
       };
     } catch (error) {
       this.logger.error(`❌ Error cancelling order: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Verify payment manually (for mobile app)
+   */
+  async verifyPayment(userId: number, verifyPaymentDto: VerifyPaymentDto) {
+    try {
+      this.logger.log(`🔍 Verifying payment for user ${userId}`);
+
+      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = verifyPaymentDto;
+
+      // Verify payment signature
+      const isValid = this.razorpayService.verifyPaymentSignature(
+        razorpay_order_id,
+        razorpay_payment_id,
+        razorpay_signature
+      );
+
+      if (!isValid) {
+        throw new BadRequestException('Invalid payment signature');
+      }
+
+      // Find order by Razorpay order ID
+      const order = await this.orderRepository
+        .createQueryBuilder('o')
+        .leftJoin('o.user', 'u')
+        .where('o.order_number = :orderNumber', { orderNumber: razorpay_order_id })
+        .andWhere('u.id = :userId', { userId })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+
+      // Update payment status
+      await this.updatePaymentStatus(order.id, 'paid', razorpay_payment_id);
+
+      // Update order status
+      await this.updateOrderStatus(order.id, 'confirmed');
+
+      // Get updated order data
+      const orderData = await this.getOrderById(order.id, userId);
+
+      return {
+        success: true,
+        message: 'Payment verified successfully',
+        payment_id: razorpay_payment_id,
+        order: orderData
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error verifying payment: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Handle payment failure
+   */
+  async handlePaymentFailure(userId: number, orderId: number, failureReason?: string) {
+    try {
+      this.logger.log(`❌ Handling payment failure for order ${orderId}`);
+
+      const order = await this.orderRepository.findOne({
+        where: { id: orderId, user: { id: userId } }
+      });
+
+      if (!order) {
+        throw new NotFoundException('Order not found');
+      }
+
+      // Update payment status to failed
+      await this.updatePaymentStatus(order.id, 'failed');
+
+      // Keep order in pending_payment status so user can retry
+      await this.createOrderTracking(
+        order.id, 
+        'pending_payment', 
+        `Payment failed: ${failureReason || 'Unknown error'}. You can retry payment.`
+      );
+
+      return {
+        success: true,
+        message: 'Payment failure recorded. You can retry payment.',
+        order_id: orderId,
+        can_retry: true
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error handling payment failure: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Get orders pending payment
+   */
+  async getPendingPaymentOrders(userId: number) {
+    try {
+      this.logger.log(`📋 Getting pending payment orders for user ${userId}`);
+
+      const orders = await this.orderRepository
+        .createQueryBuilder('o')
+        .leftJoinAndSelect('o.store', 's')
+        .leftJoinAndSelect('o.delivery_address', 'da')
+        .leftJoinAndSelect('o.order_items', 'oi')
+        .leftJoinAndSelect('oi.item', 'i')
+        .leftJoin('o.user', 'u')
+        .where('u.id = :userId', { userId })
+        .andWhere('o.status = :status', { status: 'pending_payment' })
+        .andWhere('o.payment_status = :paymentStatus', { paymentStatus: 'pending' })
+        .orderBy('o.created_at', 'DESC')
+        .getMany();
+
+      const formattedOrders = await Promise.all(orders.map(order => this.formatOrderData(order)));
+
+      return {
+        success: true,
+        message: 'Pending payment orders retrieved successfully',
+        data: formattedOrders,
+        count: formattedOrders.length
+      };
+    } catch (error) {
+      this.logger.error(`❌ Error getting pending payment orders: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Update payment status
+   */
+  async updatePaymentStatus(orderId: number, paymentStatus: string, paymentId?: string) {
+    try {
+      this.logger.log(`💳 Updating payment status for order ${orderId}: ${paymentStatus}`);
+
+      const updateData: any = { payment_status: paymentStatus };
+      if (paymentId) {
+        updateData.payment_id = paymentId;
+      }
+
+      await this.orderRepository.update(orderId, updateData);
+
+      // Create tracking entry
+      await this.createOrderTracking(orderId, paymentStatus, `Payment ${paymentStatus}`);
+
+      this.logger.log(`✅ Payment status updated for order ${orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Error updating payment status: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Update order status
+   */
+  async updateOrderStatus(orderId: number, status: string) {
+    try {
+      this.logger.log(`📋 Updating order status for order ${orderId}: ${status}`);
+
+      await this.orderRepository.update(orderId, { status });
+
+      // Create tracking entry
+      await this.createOrderTracking(orderId, status, `Order ${status}`);
+
+      this.logger.log(`✅ Order status updated for order ${orderId}`);
+    } catch (error) {
+      this.logger.error(`❌ Error updating order status: ${error.message}`, error.stack);
       throw error;
     }
   }
@@ -525,7 +642,28 @@ export class OrderService {
   /**
    * Format order data for response
    */
-  private formatOrderData(order: Order) {
+  private async formatOrderData(order: Order) {
+    // Format order items with customizations
+    const formattedItems = await Promise.all(
+      (order.order_items || []).map(async (item) => {
+        const formattedCustomizations = await this.formatCustomizations(item.customizations || []);
+        
+        return {
+          id: item.id,
+          item_id: item.item.id,
+          item_name: item.item.name,
+          item_description: item.item.short_desc,
+          item_images: item.item.images || [],
+          quantity: item.quantity,
+          unit_price: Number(item.unit_price),
+          total_price: Number(item.total_price),
+          customizations: formattedCustomizations,
+          variants: item.variants || [],
+          special_instructions: item.special_instructions
+        };
+      })
+    );
+
     return {
       id: order.id,
       order_number: order.order_number,
@@ -553,25 +691,13 @@ export class OrderService {
         type: order.delivery_address.type,
         alternate_phone_number: order.delivery_address.alternate_phone_number
       },
-      items: order.order_items?.map(item => ({
-        id: item.id,
-        item_id: item.item.id,
-        item_name: item.item.name,
-        item_description: item.item.short_desc,
-        item_images: item.item.images || [],
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        total_price: item.total_price,
-        customizations: item.customizations || [],
-        variants: item.variants || [],
-        special_instructions: item.special_instructions
-      })) || [],
+      items: formattedItems,
       summary: {
-        subtotal: order.subtotal,
-        delivery_fee: order.delivery_fee,
-        tax_amount: order.tax_amount,
-        discount_amount: order.discount_amount,
-        total_amount: order.total_amount
+        subtotal: Number(order.subtotal),
+        delivery_fee: Number(order.delivery_fee),
+        tax_amount: Number(order.tax_amount),
+        discount_amount: Number(order.discount_amount),
+        total_amount: Number(order.total_amount)
       },
       notes: order.notes,
       estimated_delivery_time: order.estimated_delivery_time?.toISOString(),
@@ -584,5 +710,59 @@ export class OrderService {
       created_at: order.created_at.toISOString(),
       updated_at: order.updated_at.toISOString()
     };
+  }
+
+  /**
+   * Format customizations with names and prices
+   */
+  private async formatCustomizations(customizations: any[]) {
+    if (!customizations || customizations.length === 0) {
+      return [];
+    }
+
+    const formattedCustomizations = await Promise.all(
+      customizations.map(async (customization) => {
+        const { customization_group_id, selected_options } = customization;
+        
+        // Get customization group name first
+        const customizationGroup = await this.itemCustomizationGroupsRepository
+          .createQueryBuilder('icg')
+          .leftJoin('icg.customization_group', 'cg')
+          .where('cg.id = :groupId', { groupId: customization_group_id })
+          .select(['cg.name'])
+          .getOne();
+
+        if (!selected_options || selected_options.length === 0) {
+          return {
+            customization_group_id,
+            customization_group_name: customizationGroup?.customization_group?.name || 'Customizations',
+            selected_options: []
+          };
+        }
+
+        // Get selected options with names and prices
+        const selectedOptions = await this.itemRepository
+          .createQueryBuilder('item')
+          .leftJoin('item.prices', 'price')
+          .where('item.id IN (:...optionIds)', { optionIds: selected_options })
+          .andWhere('item.type = :type', { type: 'customization' })
+          .select(['item.id', 'item.name', 'price.base_price'])
+          .getMany();
+
+        const formattedOptions = selectedOptions.map(option => ({
+          id: option.id,
+          name: option.name,
+          price: Number(option.prices?.[0]?.base_price || 0)
+        }));
+
+        return {
+          customization_group_id,
+          customization_group_name: customizationGroup?.customization_group?.name || 'Customizations',
+          selected_options: formattedOptions
+        };
+      })
+    );
+
+    return formattedCustomizations;
   }
 }

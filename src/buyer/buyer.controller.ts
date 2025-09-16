@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Delete, Query, UseGuards, Req, Param, Body, UnauthorizedException, BadRequestException, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Query, UseGuards, Req, Param, Body, UnauthorizedException, BadRequestException, InternalServerErrorException, Logger, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiParam, ApiBody } from '@nestjs/swagger';
 import { BuyerService } from './buyer.service';
 import { JwtAuthGuard } from '../authentication/jwt-auth.guard';
@@ -16,6 +16,7 @@ import { CartService } from './cart.service';
 import { OrderService } from './order.service';
 import { NotificationService } from './notification.service';
 import { ReviewService } from './review.service';
+import { RazorpayService } from './razorpay.service';
 
 @ApiTags('Buyer App APIs')
 @Controller('api/buyer')
@@ -26,7 +27,8 @@ export class BuyerController {
     private readonly cartService: CartService,
     private readonly orderService: OrderService,
     private readonly notificationService: NotificationService,
-    private readonly reviewService: ReviewService
+    private readonly reviewService: ReviewService,
+    private readonly razorpayService: RazorpayService
   ) {}
 
   @Get('home')
@@ -889,35 +891,143 @@ export class BuyerController {
     return this.orderService.createPayment(userId, createPaymentDto);
   }
 
-  @Post('payments/verify')
+  @Post('payment/initiate/:orderId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
-    summary: 'Verify payment',
-    description: 'Verify Razorpay payment signature and update order status.',
+    summary: 'Initiate payment for an order',
+    description: 'Initiate payment for an order that is in pending_payment status'
   })
-  @ApiBody({ type: VerifyPaymentDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Payment verified successfully',
-    type: VerifyPaymentResponseDto
+  @ApiParam({
+    name: 'orderId',
+    description: 'Order ID to initiate payment for',
+    type: 'number',
+    example: 123
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Invalid payment signature',
+  @ApiBody({
+    description: 'Customer details for payment',
     schema: {
       type: 'object',
       properties: {
-        success: { type: 'boolean', example: false },
-        message: { type: 'string', example: 'Invalid payment signature' },
-        error: { type: 'string', example: 'BAD_REQUEST' }
+        name: { type: 'string', example: 'John Doe' },
+        email: { type: 'string', example: 'john@example.com' },
+        phone: { type: 'string', example: '9876543210' }
+      },
+      required: ['name', 'email', 'phone']
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment initiated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Payment initiated successfully' },
+        payment_details: {
+          type: 'object',
+          properties: {
+            razorpay_order_id: { type: 'string', example: 'order_29QQoUBi66xm2f' },
+            amount: { type: 'number', example: 68564 },
+            currency: { type: 'string', example: 'INR' },
+            key: { type: 'string', example: 'rzp_test_1DP5mmOlF5G5ag' },
+            name: { type: 'string', example: 'Restaurant Name' },
+            description: { type: 'string', example: 'Order #ORD-20250115-001' },
+            prefill: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', example: 'John Doe' },
+                email: { type: 'string', example: 'john@example.com' },
+                contact: { type: 'string', example: '9876543210' }
+              }
+            }
+          }
+        }
       }
     }
   })
-  async verifyPayment(@Req() req: any, @Body() verifyPaymentDto: VerifyPaymentDto) {
+  async initiatePayment(@Req() req: any, @Param('orderId') orderId: string, @Body() customerDetails: any) {
     const userId = req.user.id;
-    return this.orderService.verifyPayment(userId, verifyPaymentDto);
+    return this.orderService.initiatePayment(userId, parseInt(orderId), customerDetails);
   }
+
+  @Post('payment/failure/:orderId')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Handle payment failure',
+    description: 'Record payment failure and allow retry'
+  })
+  @ApiParam({
+    name: 'orderId',
+    description: 'Order ID where payment failed',
+    type: 'number',
+    example: 123
+  })
+  @ApiBody({
+    description: 'Payment failure details',
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', example: 'Payment declined by bank' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Payment failure recorded successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Payment failure recorded. You can retry payment.' },
+        order_id: { type: 'number', example: 123 },
+        can_retry: { type: 'boolean', example: true }
+      }
+    }
+  })
+  async handlePaymentFailure(@Req() req: any, @Param('orderId') orderId: string, @Body() failureData: any) {
+    const userId = req.user.id;
+    return this.orderService.handlePaymentFailure(userId, parseInt(orderId), failureData.reason);
+  }
+
+  @Get('orders/pending-payment')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get orders pending payment',
+    description: 'Retrieve orders that are waiting for payment completion'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Pending payment orders retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Pending payment orders retrieved successfully' },
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'number', example: 123 },
+              order_number: { type: 'string', example: 'ORD-20250115-001' },
+              status: { type: 'string', example: 'pending_payment' },
+              payment_status: { type: 'string', example: 'pending' },
+              total_amount: { type: 'number', example: 685.64 }
+            }
+          }
+        },
+        count: { type: 'number', example: 2 }
+      }
+    }
+  })
+  async getPendingPaymentOrders(@Req() req: any) {
+    const userId = req.user.id;
+    return this.orderService.getPendingPaymentOrders(userId);
+  }
+
 
   // ==================== NOTIFICATION ENDPOINTS ====================
 
@@ -1299,6 +1409,104 @@ export class BuyerController {
   async deleteItemReview(@Req() req: any, @Param('reviewId') reviewId: string) {
     const userId = req.user?.id;
     return this.reviewService.deleteItemReview(parseInt(reviewId), userId);
+  }
+
+  /**
+   * Razorpay webhook handler
+   */
+  @Post('webhook/razorpay')
+  async handleRazorpayWebhook(@Req() req: any, @Res() res: any) {
+    try {
+      const signature = req.headers['x-razorpay-signature'];
+      const body = JSON.stringify(req.body);
+
+      this.logger.log(`🔔 Received Razorpay webhook`);
+
+      // Verify webhook signature
+      const isValid = this.razorpayService.verifyWebhookSignature(body, signature);
+      
+      if (!isValid) {
+        this.logger.warn(`❌ Invalid webhook signature`);
+        return res.status(400).json({ error: 'Invalid signature' });
+      }
+
+      const event = req.body;
+      this.logger.log(`📨 Webhook event: ${event.event}`);
+
+      // Handle different webhook events
+      switch (event.event) {
+        case 'payment.captured':
+          await this.handlePaymentCaptured(event);
+          break;
+        case 'payment.failed':
+          await this.handlePaymentFailed(event);
+          break;
+        case 'order.paid':
+          await this.handleOrderPaid(event);
+          break;
+        default:
+          this.logger.log(`ℹ️ Unhandled webhook event: ${event.event}`);
+      }
+
+      return res.status(200).json({ success: true });
+    } catch (error) {
+      this.logger.error(`❌ Error handling webhook: ${error.message}`, error.stack);
+      return res.status(500).json({ error: 'Webhook processing failed' });
+    }
+  }
+
+  /**
+   * Verify payment manually (for mobile app)
+   */
+  @Post('payment/verify')
+  @UseGuards(JwtAuthGuard)
+  async verifyPayment(@Req() req: any, @Body() verifyPaymentDto: VerifyPaymentDto) {
+    const userId = req.user?.id;
+    return this.orderService.verifyPayment(userId, verifyPaymentDto);
+  }
+
+  private async handlePaymentCaptured(event: any) {
+    try {
+      const paymentId = event.payload.payment.entity.id;
+      const orderId = event.payload.payment.entity.order_id;
+      
+      this.logger.log(`💰 Payment captured: ${paymentId} for order: ${orderId}`);
+      
+      // Update order payment status
+      await this.orderService.updatePaymentStatus(parseInt(orderId), 'paid', paymentId);
+      
+    } catch (error) {
+      this.logger.error(`❌ Error handling payment captured: ${error.message}`, error.stack);
+    }
+  }
+
+  private async handlePaymentFailed(event: any) {
+    try {
+      const paymentId = event.payload.payment.entity.id;
+      const orderId = event.payload.payment.entity.order_id;
+      
+      this.logger.log(`❌ Payment failed: ${paymentId} for order: ${orderId}`);
+      
+      // Update order payment status
+      await this.orderService.updatePaymentStatus(parseInt(orderId), 'failed', paymentId);
+      
+    } catch (error) {
+      this.logger.error(`❌ Error handling payment failed: ${error.message}`, error.stack);
+    }
+  }
+
+  private async handleOrderPaid(event: any) {
+    try {
+      const orderId = event.payload.order.entity.id;
+      
+      this.logger.log(`✅ Order paid: ${orderId}`);
+      
+      // Update order status
+      await this.orderService.updateOrderStatus(parseInt(orderId), 'confirmed');
+      
+    } catch (error) {
+      this.logger.error(`❌ Error handling order paid: ${error.message}`, error.stack);
+    }
   }
 
 }
