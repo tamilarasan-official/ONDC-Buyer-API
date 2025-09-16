@@ -8,28 +8,6 @@ import { Store } from '../store/entities/store.entity';
 import { Item } from '../item/entities/item.entity';
 import { Order } from '../order/entities/order.entity';
 
-export interface CreateRestaurantReviewDto {
-  restaurant_id: number;
-  order_id: number;
-  rating: number;
-  title?: string;
-  comment?: string;
-  food_quality?: number;
-  delivery_time?: number;
-  packaging?: number;
-  value_for_money?: number;
-}
-
-export interface CreateItemReviewDto {
-  item_id: number;
-  order_id: number;
-  rating: number;
-  title?: string;
-  comment?: string;
-  taste?: number;
-  portion_size?: number;
-  value_for_money?: number;
-}
 
 export interface UpdateReviewDto {
   rating?: number;
@@ -41,6 +19,23 @@ export interface UpdateReviewDto {
   value_for_money?: number;
   taste?: number;
   portion_size?: number;
+}
+
+export interface CreateUnifiedReviewDto {
+  order_id: number;
+  overall_rating: number;
+  restaurant_rating?: number;
+  restaurant_comment?: string;
+  delivery_partner_rating?: number;
+  food_ratings?: Array<{
+    item_id: number;
+    rating: number;
+    comment?: string;
+  }>;
+  photos?: Array<{
+    url: string;
+    type: 'photo' | 'video';
+  }>;
 }
 
 @Injectable()
@@ -62,18 +57,22 @@ export class ReviewService {
     private readonly orderRepository: Repository<Order>,
   ) {}
 
+
+
   /**
-   * Create restaurant review
+   * Create unified review for complete order rating
    */
-  async createRestaurantReview(
+  async createUnifiedReview(
     userId: number,
-    createReviewDto: CreateRestaurantReviewDto
-  ): Promise<RestaurantReview> {
+    createReviewDto: CreateUnifiedReviewDto
+  ) {
     try {
+      this.logger.log(`Creating unified review for order ${createReviewDto.order_id}`);
+
       // Validate order belongs to user and is delivered
       const order = await this.orderRepository.findOne({
         where: { id: createReviewDto.order_id, user: { id: userId } },
-        relations: ['store'],
+        relations: ['store', 'order_items', 'order_items.item'],
       });
 
       if (!order) {
@@ -84,124 +83,100 @@ export class ReviewService {
         throw new Error('Can only review delivered orders');
       }
 
-      // Check if review already exists
-      const existingReview = await this.restaurantReviewRepository.findOne({
+      // Check if any review already exists for this order
+      const existingRestaurantReview = await this.restaurantReviewRepository.findOne({
         where: { user: { id: userId }, order: { id: createReviewDto.order_id } },
       });
 
-      if (existingReview) {
+      if (existingRestaurantReview) {
         throw new Error('Review already exists for this order');
       }
 
-      // Validate restaurant exists
-      const restaurant = await this.storeRepository.findOne({
-        where: { id: createReviewDto.restaurant_id },
-      });
+      const result = {
+        review_id: null as number | null,
+        order_id: createReviewDto.order_id,
+        overall_rating: createReviewDto.overall_rating,
+        restaurant_review_id: null as number | null,
+        item_review_ids: [] as number[],
+        delivery_rating: createReviewDto.delivery_partner_rating || null,
+      };
 
-      if (!restaurant) {
-        throw new Error('Restaurant not found');
+      // Create restaurant review if rating provided
+      if (createReviewDto.restaurant_rating) {
+        const restaurantReview = this.restaurantReviewRepository.create({
+          user: { id: userId },
+          store: { id: order.store.id },
+          order: { id: createReviewDto.order_id },
+          rating: createReviewDto.restaurant_rating,
+          title: createReviewDto.restaurant_comment ? createReviewDto.restaurant_comment.substring(0, 100) : undefined,
+          comment: createReviewDto.restaurant_comment,
+          food_quality: createReviewDto.restaurant_rating, // Use same rating as default
+          delivery_time: createReviewDto.delivery_partner_rating || createReviewDto.restaurant_rating,
+          packaging: createReviewDto.restaurant_rating,
+          value_for_money: createReviewDto.restaurant_rating,
+          is_verified: true,
+        });
+
+        const savedRestaurantReview = await this.restaurantReviewRepository.save(restaurantReview);
+        result.restaurant_review_id = savedRestaurantReview.id;
+        this.logger.log(`Created restaurant review: ${savedRestaurantReview.id}`);
       }
 
-      // Validate rating
-      if (createReviewDto.rating < 1 || createReviewDto.rating > 5) {
-        throw new Error('Rating must be between 1 and 5');
+      // Create item reviews if provided
+      if (createReviewDto.food_ratings && createReviewDto.food_ratings.length > 0) {
+        for (const foodRating of createReviewDto.food_ratings) {
+          // Validate item exists in the order
+          const orderItem = order.order_items.find(oi => oi.item.id === foodRating.item_id);
+          if (!orderItem) {
+            this.logger.warn(`Item ${foodRating.item_id} not found in order ${createReviewDto.order_id}`);
+            continue;
+          }
+
+          // Check if review already exists for this item
+          const existingItemReview = await this.itemReviewRepository.findOne({
+            where: { user: { id: userId }, order: { id: createReviewDto.order_id }, item: { id: foodRating.item_id } },
+          });
+
+          if (existingItemReview) {
+            this.logger.warn(`Review already exists for item ${foodRating.item_id} in order ${createReviewDto.order_id}`);
+            continue;
+          }
+
+          const itemReview = this.itemReviewRepository.create({
+            user: { id: userId },
+            item: { id: foodRating.item_id },
+            order: { id: createReviewDto.order_id },
+            rating: foodRating.rating,
+            title: foodRating.comment ? foodRating.comment.substring(0, 100) : undefined,
+            comment: foodRating.comment,
+            taste: foodRating.rating, // Use same rating as default
+            portion_size: foodRating.rating,
+            value_for_money: foodRating.rating,
+            is_verified: true,
+          });
+
+          const savedItemReview = await this.itemReviewRepository.save(itemReview);
+          result.item_review_ids.push(savedItemReview.id);
+          this.logger.log(`Created item review: ${savedItemReview.id} for item ${foodRating.item_id}`);
+        }
       }
 
-      const review = this.restaurantReviewRepository.create({
-        user: { id: userId },
-        store: { id: createReviewDto.restaurant_id },
-        order: { id: createReviewDto.order_id },
-        rating: createReviewDto.rating,
-        title: createReviewDto.title || '',
-        comment: createReviewDto.comment || '',
-        food_quality: createReviewDto.food_quality || createReviewDto.rating,
-        delivery_time: createReviewDto.delivery_time || createReviewDto.rating,
-        packaging: createReviewDto.packaging || createReviewDto.rating,
-        value_for_money: createReviewDto.value_for_money || createReviewDto.rating,
-        is_verified: true, // Verified since it's from a real order
-      });
+      // Store photos if provided (you might want to create a separate table for this)
+      if (createReviewDto.photos && createReviewDto.photos.length > 0) {
+        this.logger.log(`Received ${createReviewDto.photos.length} photos for review`);
+        // TODO: Implement photo storage logic
+        // You might want to create a ReviewPhotos table to store these
+      }
 
-      const savedReview = await this.restaurantReviewRepository.save(review);
-      
-      this.logger.log(`Restaurant review created for user ${userId}, restaurant ${createReviewDto.restaurant_id}`);
-      
-      // TODO: Update restaurant average rating
-      await this.updateRestaurantRating(createReviewDto.restaurant_id);
-      
-      return savedReview;
+      this.logger.log(`Unified review created successfully for order ${createReviewDto.order_id}`);
+      return {
+        success: true,
+        message: 'Review submitted successfully',
+        data: result
+      };
+
     } catch (error) {
-      this.logger.error(`Failed to create restaurant review: ${error.message}`, error.stack);
-      throw error;
-    }
-  }
-
-  /**
-   * Create item review
-   */
-  async createItemReview(
-    userId: number,
-    createReviewDto: CreateItemReviewDto
-  ): Promise<ItemReview> {
-    try {
-      // Validate order belongs to user and is delivered
-      const order = await this.orderRepository.findOne({
-        where: { id: createReviewDto.order_id, user: { id: userId } },
-      });
-
-      if (!order) {
-        throw new Error('Order not found or does not belong to user');
-      }
-
-      if (order.status !== 'delivered') {
-        throw new Error('Can only review delivered orders');
-      }
-
-      // Check if review already exists
-      const existingReview = await this.itemReviewRepository.findOne({
-        where: { user: { id: userId }, order: { id: createReviewDto.order_id }, item: { id: createReviewDto.item_id } },
-      });
-
-      if (existingReview) {
-        throw new Error('Review already exists for this item in this order');
-      }
-
-      // Validate item exists
-      const item = await this.itemRepository.findOne({
-        where: { id: createReviewDto.item_id },
-      });
-
-      if (!item) {
-        throw new Error('Item not found');
-      }
-
-      // Validate rating
-      if (createReviewDto.rating < 1 || createReviewDto.rating > 5) {
-        throw new Error('Rating must be between 1 and 5');
-      }
-
-      const review = this.itemReviewRepository.create({
-        user: { id: userId },
-        item: { id: createReviewDto.item_id },
-        order: { id: createReviewDto.order_id },
-        rating: createReviewDto.rating,
-        title: createReviewDto.title || '',
-        comment: createReviewDto.comment || '',
-        taste: createReviewDto.taste || createReviewDto.rating,
-        portion_size: createReviewDto.portion_size || createReviewDto.rating,
-        value_for_money: createReviewDto.value_for_money || createReviewDto.rating,
-        is_verified: true, // Verified since it's from a real order
-      });
-
-      const savedReview = await this.itemReviewRepository.save(review);
-      
-      this.logger.log(`Item review created for user ${userId}, item ${createReviewDto.item_id}`);
-      
-      // TODO: Update item average rating
-      await this.updateItemRating(createReviewDto.item_id);
-      
-      return savedReview;
-    } catch (error) {
-      this.logger.error(`Failed to create item review: ${error.message}`, error.stack);
+      this.logger.error(`Failed to create unified review: ${error.message}`, error.stack);
       throw error;
     }
   }

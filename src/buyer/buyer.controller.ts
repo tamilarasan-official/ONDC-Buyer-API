@@ -1229,37 +1229,122 @@ export class BuyerController {
 
   // ==================== REVIEW ENDPOINTS ====================
 
-  @Post('reviews/restaurant')
+  @Post('reviews/unified')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
   @ApiOperation({
-    summary: 'Create restaurant review',
-    description: 'Create a review for a restaurant based on a delivered order'
+    summary: 'Create unified review for order',
+    description: 'Create comprehensive review for restaurant, food items, and delivery partner in a single request'
+  })
+  @ApiBody({
+    description: 'Unified review data for complete order rating',
+    schema: {
+      type: 'object',
+      properties: {
+        order_id: { 
+          type: 'number', 
+          example: 123,
+          description: 'Order ID to review (mandatory)'
+        },
+        overall_rating: { 
+          type: 'number', 
+          example: 4, 
+          minimum: 1, 
+          maximum: 5,
+          description: 'Overall order rating (mandatory)'
+        },
+        restaurant_rating: { 
+          type: 'number', 
+          example: 4, 
+          minimum: 1, 
+          maximum: 5,
+          description: 'Restaurant rating (optional)'
+        },
+        restaurant_comment: { 
+          type: 'string', 
+          example: 'Great food and fast delivery!',
+          description: 'Restaurant review comment (optional)'
+        },
+        delivery_partner_rating: { 
+          type: 'number', 
+          example: 5, 
+          minimum: 1, 
+          maximum: 5,
+          description: 'Delivery partner rating (optional)'
+        },
+        food_ratings: {
+          type: 'array',
+          description: 'Individual food item ratings (optional)',
+          items: {
+            type: 'object',
+            properties: {
+              item_id: { type: 'number', example: 1 },
+              rating: { type: 'number', example: 5, minimum: 1, maximum: 5 },
+              comment: { type: 'string', example: 'Perfect crust and fresh ingredients!' }
+            },
+            required: ['item_id', 'rating']
+          }
+        },
+        photos: {
+          type: 'array',
+          description: 'Review photos/videos (optional)',
+          items: {
+            type: 'object',
+            properties: {
+              url: { type: 'string', example: 'https://example.com/photo1.jpg' },
+              type: { type: 'string', enum: ['photo', 'video'], example: 'photo' }
+            }
+          }
+        }
+      },
+      required: ['order_id', 'overall_rating']
+    }
   })
   @ApiResponse({
     status: 201,
-    description: 'Restaurant review created successfully'
+    description: 'Unified review created successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Review submitted successfully' },
+        data: {
+          type: 'object',
+          properties: {
+            review_id: { type: 'number', example: 1 },
+            order_id: { type: 'number', example: 123 },
+            overall_rating: { type: 'number', example: 4 },
+            restaurant_review_id: { type: 'number', example: 1 },
+            item_review_ids: { type: 'array', items: { type: 'number' }, example: [1, 2] },
+            delivery_rating: { type: 'number', example: 5 }
+          }
+        }
+      }
+    }
   })
-  async createRestaurantReview(@Req() req: any, @Body() createReviewDto: any) {
+  async createUnifiedReview(@Req() req: any, @Body() createReviewDto: any) {
     const userId = req.user?.id;
-    return this.reviewService.createRestaurantReview(userId, createReviewDto);
+    
+    // Validate required fields
+    if (!createReviewDto || !createReviewDto.order_id) {
+      return {
+        success: false,
+        message: 'order_id is required',
+        statusCode: 400
+      };
+    }
+    
+    if (!createReviewDto.overall_rating) {
+      return {
+        success: false,
+        message: 'overall_rating is required',
+        statusCode: 400
+      };
+    }
+    
+    return this.reviewService.createUnifiedReview(userId, createReviewDto);
   }
 
-  @Post('reviews/item')
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth('JWT-auth')
-  @ApiOperation({
-    summary: 'Create item review',
-    description: 'Create a review for a specific item based on a delivered order'
-  })
-  @ApiResponse({
-    status: 201,
-    description: 'Item review created successfully'
-  })
-  async createItemReview(@Req() req: any, @Body() createReviewDto: any) {
-    const userId = req.user?.id;
-    return this.reviewService.createItemReview(userId, createReviewDto);
-  }
 
   @Get('reviews/restaurant/:restaurantId')
   @UseGuards(JwtAuthGuard)
