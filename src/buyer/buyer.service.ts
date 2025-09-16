@@ -169,7 +169,7 @@ export class BuyerService {
           distanceSubquery
         ])
         .orderBy('distance', 'ASC')
-        .limit(20);
+        .addOrderBy('s.name', 'ASC'); // Secondary sort for same distances
 
       this.logger.log(`🔍 Executing restaurant query...`);
       const stores = await queryBuilder.getRawMany();
@@ -221,7 +221,21 @@ export class BuyerService {
         })
       );
       
-      this.logger.log(`✅ Successfully processed ${storesWithRatings.length} restaurants`);
+      // Sort by distance, then rating (highest first), then name
+      storesWithRatings.sort((a, b) => {
+        // First sort by distance
+        if (a.distance !== b.distance) {
+          return a.distance - b.distance;
+        }
+        // Then by rating (highest first)
+        if (a.rating !== b.rating) {
+          return b.rating - a.rating;
+        }
+        // Finally by name
+        return a.name.localeCompare(b.name);
+      });
+      
+      this.logger.log(`✅ Successfully processed and sorted ${storesWithRatings.length} restaurants`);
       return storesWithRatings;
     } catch (error) {
       this.logger.error(`❌ Error getting nearby restaurants: ${error.message}`, error.stack);
