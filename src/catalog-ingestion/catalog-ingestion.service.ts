@@ -137,11 +137,15 @@ export class CatalogIngestionService {
     this.logger.log(`Starting catalog ingestion for ${responses.length} provider response(s)`);
 
     // Collect all active store reference_ids from responses
+    // Only include stores that have valid data and should be active
     const allActiveStoreIds: string[] = [];
     responses.forEach(response => {
       const providers = response.message.catalog['bpp/providers'] || [];
       providers.forEach(provider => {
-        allActiveStoreIds.push(provider.id);
+        // Only add store to active list if it has valid data
+        if (this.isValidProvider(provider)) {
+          allActiveStoreIds.push(provider.id);
+        }
       });
     });
 
@@ -180,13 +184,21 @@ export class CatalogIngestionService {
 
     try {
       const providers = response.message.catalog['bpp/providers'] || [];
+      let validProvidersCount = 0;
       
       for (const provider of providers) {
-        await this.processProvider(provider, response.context, queryRunner, stats);
+        // Only process valid providers
+        if (this.isValidProvider(provider)) {
+          await this.processProvider(provider, response.context, queryRunner, stats);
+          validProvidersCount++;
+        } else {
+          this.logger.warn(`Skipping invalid provider: ${provider.id}`);
+          stats.providers_skipped = (stats.providers_skipped || 0) + 1;
+        }
       }
 
       await queryRunner.commitTransaction();
-      this.logger.log(`Successfully processed provider response with ${providers.length} provider(s)`);
+      this.logger.log(`Successfully processed provider response with ${validProvidersCount} valid provider(s) out of ${providers.length} total`);
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -796,6 +808,7 @@ export class CatalogIngestionService {
 
       // Mark stores as inactive (soft delete)
       for (const store of storesToDelete) {
+        this.logger.log(`Marking store as inactive: ${store.reference_id} (${store.name}) - Reason: Not present in current ONDC response`);
         store.status = false;
         await queryRunner.manager.save(Store, store);
         stats.stores_deleted++;
@@ -812,6 +825,62 @@ export class CatalogIngestionService {
       stats.errors.push(`Store deletion error: ${error.message}`);
     } finally {
       await queryRunner.release();
+    }
+  }
+
+  /**
+   * Validate if a provider should be considered active
+   * Only include stores with valid, complete data
+   */
+  private isValidProvider(provider: any): boolean {
+    try {
+      // Check if provider has required fields
+      if (!provider.id || !provider.descriptor?.name) {
+        this.logger.warn(`Provider missing required fields: ${JSON.stringify(provider)}`);
+        return false;
+      }
+
+      // Check if provider has valid descriptor
+      if (!provider.descriptor.name || provider.descriptor.name.trim().length < 2) {
+        this.logger.warn(`Provider has invalid name: ${provider.id}`);
+        return false;
+      }
+
+      // Check if provider has locations
+      if (!provider.locations || !Array.isArray(provider.locations) || provider.locations.length === 0) {
+        this.logger.warn(`Provider has no valid locations: ${provider.id}`);
+        return false;
+      }
+
+      // Check if provider has valid location data
+      const hasValidLocation = provider.locations.some((location: any) => 
+        location.gps && 
+        location.gps.lat && 
+        location.gps.lng &&
+        !isNaN(parseFloat(location.gps.lat)) &&
+        !isNaN(parseFloat(location.gps.lng))
+      );
+
+      if (!hasValidLocation) {
+        this.logger.warn(`Provider has no valid GPS coordinates: ${provider.id}`);
+        return false;
+      }
+
+      // Check if provider has categories or items (at least one should exist)
+      const hasCategories = provider.categories && Array.isArray(provider.categories) && provider.categories.length > 0;
+      const hasItems = provider.items && Array.isArray(provider.items) && provider.items.length > 0;
+
+      if (!hasCategories && !hasItems) {
+        this.logger.warn(`Provider has no categories or items: ${provider.id}`);
+        return false;
+      }
+
+      this.logger.log(`Provider ${provider.id} is valid and will be marked as active`);
+      return true;
+
+    } catch (error) {
+      this.logger.error(`Error validating provider ${provider.id}: ${error.message}`);
+      return false;
     }
   }
 

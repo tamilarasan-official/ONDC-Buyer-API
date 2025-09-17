@@ -38,7 +38,8 @@ export class StoreTransformer extends BaseTransformer {
       // Extract GST number from tags
       store.gst_number = this.extractGstNumber(provider.tags || []);
       
-      // Store status
+      // Store status - only set to true if provider data is valid
+      // The status will be validated by the catalog ingestion service
       store.status = true;
       
       this.logger.log(`Transformed store: ${store.reference_id} - ${store.name}`);
