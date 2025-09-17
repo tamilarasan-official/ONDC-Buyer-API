@@ -150,8 +150,8 @@ export class UserController {
             city: { type: 'string', example: 'Bangalore' },
             state: { type: 'string', example: 'Karnataka' },
             pincode: { type: 'string', example: '560001' },
-            latitude: { type: 'number', example: 12.9716 },
-            longitude: { type: 'number', example: 77.5946 },
+            latitude: { type: 'number', example: 9.9352300 },
+            longitude: { type: 'number', example: 78.1304040 },
             type: { type: 'string', example: 'home' },
             is_default: { type: 'boolean', example: false },
             created_at: { type: 'string', example: '2025-01-15T12:00:00Z' }
@@ -219,8 +219,8 @@ export class UserController {
             city: { type: 'string', example: 'Bangalore' },
             state: { type: 'string', example: 'Karnataka' },
             pincode: { type: 'string', example: '560001' },
-            latitude: { type: 'number', example: 12.9716 },
-            longitude: { type: 'number', example: 77.5946 },
+            latitude: { type: 'number', example: 9.9352300 },
+            longitude: { type: 'number', example: 78.1304040 },
             type: { type: 'string', example: 'home' },
             is_default: { type: 'boolean', example: true },
             updated_at: { type: 'string', example: '2025-01-15T12:30:00Z' }
@@ -297,8 +297,8 @@ export class UserController {
             city: { type: 'string', example: 'Bangalore' },
             state: { type: 'string', example: 'Karnataka' },
             pincode: { type: 'string', example: '560001' },
-            latitude: { type: 'number', example: 12.9716 },
-            longitude: { type: 'number', example: 77.5946 },
+            latitude: { type: 'number', example: 9.9352300 },
+            longitude: { type: 'number', example: 78.1304040 },
             type: { type: 'string', example: 'home' },
             is_default: { type: 'boolean', example: true }
           }

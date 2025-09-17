@@ -14,7 +14,7 @@ export class SearchRequestDto {
 
   @ApiProperty({
     description: 'Device latitude for location-based filtering',
-    example: 12.9716,
+    example: 9.9352300,
     required: false,
     type: 'number'
   })
@@ -25,7 +25,7 @@ export class SearchRequestDto {
 
   @ApiProperty({
     description: 'Device longitude for location-based filtering',
-    example: 77.5946,
+    example: 78.1304040,
     required: false,
     type: 'number'
   })
@@ -168,7 +168,7 @@ export class SearchRequestDto {
 export class LocationDto {
   @ApiProperty({
     description: 'Latitude coordinate',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   @IsOptional()
@@ -178,7 +178,7 @@ export class LocationDto {
 
   @ApiProperty({
     description: 'Longitude coordinate', 
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   @IsOptional()

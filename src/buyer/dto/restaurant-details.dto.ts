@@ -38,14 +38,14 @@ export class RestaurantLocationDto {
 
   @ApiProperty({
     description: 'Location latitude',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   lat: number;
 
   @ApiProperty({
     description: 'Location longitude',
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   lng: number;

@@ -80,8 +80,8 @@ export class BuyerService {
       } else {
         this.logger.log(`🔍 Using device location for guest user`);
         userLocation = { 
-          lat: deviceLat || 12.9716, 
-          lng: deviceLng || 77.5946, 
+          lat: deviceLat || 9.9352300, 
+          lng: deviceLng || 78.1304040, 
           source: 'device_location' as const 
         };
         this.logger.log(`📍 Guest location: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
@@ -432,7 +432,7 @@ export class BuyerService {
       // Get user location
       const userLocation = userId 
         ? await this.locationService.getUserLocation(userId, lat, lng)
-        : { lat: lat || 12.9716, lng: lng || 77.5946, source: 'device_location' };
+        : { lat: lat || 9.9352300, lng: lng || 78.1304040, source: 'device_location' };
 
       this.logger.log(`🔍 Search query: "${query}" | Location: ${userLocation.lat}, ${userLocation.lng} | Type: ${type}`);
 
@@ -872,7 +872,7 @@ export class BuyerService {
       // Get user location for distance calculation
       const userLocation = userId 
         ? await this.locationService.getUserLocation(userId, deviceLat, deviceLng)
-        : { lat: deviceLat || 12.9716, lng: deviceLng || 77.5946, source: 'device_location' };
+        : { lat: deviceLat || 9.9352300, lng: deviceLng || 78.1304040, source: 'device_location' };
 
       // Get restaurant basic info
       const restaurant = await this.storeRepository
@@ -1589,8 +1589,8 @@ export class BuyerService {
       } else {
         this.logger.log(`🔍 Using device location for guest user`);
         userLocation = { 
-          lat: location?.lat || 12.9716, 
-          lng: location?.lng || 77.5946, 
+          lat: location?.lat || 9.9352300, 
+          lng: location?.lng || 78.1304040, 
           source: 'device_location' as const 
         };
       }

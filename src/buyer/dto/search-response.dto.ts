@@ -36,8 +36,8 @@ export class SearchRestaurantDto {
     description: 'Restaurant location details',
     type: 'object',
     properties: {
-      lat: { type: 'number', example: 12.9716 },
-      lng: { type: 'number', example: 77.5946 },
+      lat: { type: 'number', example: 9.9352300 },
+      lng: { type: 'number', example: 78.1304040 },
       city: { type: 'string', example: 'Bangalore' },
       locality: { type: 'string', example: 'Koramangala' }
     }
@@ -295,8 +295,8 @@ export class SearchDataDto {
     description: 'User location information',
     type: 'object',
     properties: {
-      lat: { type: 'number', example: 12.9716 },
-      lng: { type: 'number', example: 77.5946 },
+      lat: { type: 'number', example: 9.9352300 },
+      lng: { type: 'number', example: 78.1304040 },
       source: { type: 'string', example: 'default_address' }
     }
   })

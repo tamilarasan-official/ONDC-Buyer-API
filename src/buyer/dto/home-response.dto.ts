@@ -3,14 +3,14 @@ import { ApiProperty } from '@nestjs/swagger';
 export class LocationDto {
   @ApiProperty({
     description: 'Latitude coordinate',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   lat: number;
 
   @ApiProperty({
     description: 'Longitude coordinate',
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   lng: number;
@@ -38,14 +38,14 @@ export class LocationDto {
 export class RestaurantLocationDto {
   @ApiProperty({
     description: 'Restaurant latitude',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   lat: number;
 
   @ApiProperty({
     description: 'Restaurant longitude',
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   lng: number;

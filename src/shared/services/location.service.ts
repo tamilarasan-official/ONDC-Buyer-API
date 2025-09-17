@@ -90,10 +90,10 @@ export class LocationService {
       };
     }
 
-    // Default to Bangalore if no location available
+    // Default to Madurai if no location available
     return {
-      lat: 12.9716,
-      lng: 77.5946,
+      lat: 9.9352300,
+      lng: 78.1304040,
       source: 'device_location'
     };
   }

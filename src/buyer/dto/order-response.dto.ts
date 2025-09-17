@@ -174,14 +174,14 @@ export class DeliveryAddressDto {
 
   @ApiProperty({
     description: 'Latitude',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   latitude: number;
 
   @ApiProperty({
     description: 'Longitude',
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   longitude: number;

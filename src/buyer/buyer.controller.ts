@@ -43,14 +43,14 @@ export class BuyerController {
     required: false,
     type: String,
     description: 'Device latitude for location-based filtering',
-    example: '12.9716'
+    example: '9.9352300'
   })
   @ApiQuery({
     name: 'lng',
     required: false,
     type: String,
     description: 'Device longitude for location-based filtering',
-    example: '77.5946'
+    example: '78.1304040'
   })
   @ApiQuery({
     name: 'veg_mode',
@@ -183,8 +183,8 @@ export class BuyerController {
         value: {
           query: 'pizza',
           location: {
-            lat: 12.9716,
-            lng: 77.5946
+            lat: 9.9352300,
+            lng: 78.1304040
           },
           filters: {
             dietary_preference: 'veg',
@@ -288,14 +288,14 @@ export class BuyerController {
     required: false,
     type: String,
     description: 'Device latitude for distance calculation',
-    example: '12.9716'
+    example: '9.9352300'
   })
   @ApiQuery({
     name: 'lng',
     required: false,
     type: String,
     description: 'Device longitude for distance calculation',
-    example: '77.5946'
+    example: '78.1304040'
   })
   @ApiQuery({
     name: 'search',

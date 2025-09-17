@@ -93,7 +93,7 @@ export class CreateAddressDto {
 
   @ApiProperty({
     description: 'Latitude coordinate',
-    example: 12.9716,
+    example: 9.9352300,
     type: 'number'
   })
   @IsNumber()
@@ -102,7 +102,7 @@ export class CreateAddressDto {
 
   @ApiProperty({
     description: 'Longitude coordinate',
-    example: 77.5946,
+    example: 78.1304040,
     type: 'number'
   })
   @IsNumber()
