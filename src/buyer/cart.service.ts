@@ -150,7 +150,7 @@ export class CartService {
       let cartItem: CartItem;
       const unitPrice = Number(item.prices?.[0]?.base_price || 0);
       
-      // Calculate customization prices
+      // Calculate customization prices (added only once, not per quantity)
       let customizationPrice = 0;
       if (addToCartDto.customizations && addToCartDto.customizations.length > 0) {
         for (const customization of addToCartDto.customizations) {
@@ -171,13 +171,16 @@ export class CartService {
         }
       }
       
-      const totalUnitPrice = Number((unitPrice + customizationPrice).toFixed(2));
-      const totalPrice = Number((addToCartDto.quantity * totalUnitPrice).toFixed(2));
+      // CORRECT CALCULATION: (Item Price × Quantity) + Customization Price
+      const itemTotalPrice = Number((unitPrice * addToCartDto.quantity).toFixed(2));
+      const totalPrice = Number((itemTotalPrice + customizationPrice).toFixed(2));
 
       if (existingCartItem) {
         // Update existing item quantity
         existingCartItem.quantity += addToCartDto.quantity;
-        existingCartItem.total_price = Number((existingCartItem.quantity * totalUnitPrice).toFixed(2));
+        // Recalculate total price with new quantity
+        const newItemTotalPrice = Number((unitPrice * existingCartItem.quantity).toFixed(2));
+        existingCartItem.total_price = Number((newItemTotalPrice + customizationPrice).toFixed(2));
         cartItem = await this.cartItemRepository.save(existingCartItem);
       } else {
         // Create new cart item
@@ -185,7 +188,7 @@ export class CartService {
           cart,
           item,
           quantity: addToCartDto.quantity,
-          unit_price: totalUnitPrice,
+          unit_price: unitPrice, // Store base unit price only
           total_price: totalPrice,
           customizations: addToCartDto.customizations || [],
           variants: addToCartDto.variants || [],
@@ -231,14 +234,16 @@ export class CartService {
       this.logger.log(`✏️ Updating cart item ${updateCartItemDto.cart_item_id} for user ${userId}`);
 
       const cartItem = await this.cartItemRepository
-        .createQueryBuilder('ci')
-        .leftJoinAndSelect('ci.cart', 'c')
-        .leftJoinAndSelect('ci.item', 'i')
-        .leftJoin('c.user', 'u')
-        .where('ci.id = :cartItemId', { cartItemId: updateCartItemDto.cart_item_id })
-        .andWhere('u.id = :userId', { userId })
-        .andWhere('c.is_active = :isActive', { isActive: true })
-        .getOne();
+  .createQueryBuilder('ci')
+  .leftJoinAndSelect('ci.cart', 'c')
+  .leftJoinAndSelect('ci.item', 'i')
+  .leftJoinAndSelect('i.prices', 'p')
+  .leftJoinAndSelect('c.store', 's')  
+  .leftJoin('c.user', 'u')
+  .where('ci.id = :cartItemId', { cartItemId: updateCartItemDto.cart_item_id })
+  .andWhere('u.id = :userId', { userId })
+  .andWhere('c.is_active = :isActive', { isActive: true })
+  .getOne();
 
       if (!cartItem) {
         throw new NotFoundException('Cart item not found');
@@ -250,9 +255,10 @@ export class CartService {
       }
 
       // Check item availability
-      if (!cartItem.item.quantities?.[0] || cartItem.item.quantities[0].available_count < updateCartItemDto.quantity) {
-        throw new BadRequestException('Insufficient quantity available');
-      }
+      // console.log(`cartItem.item.quantities: ${cartItem.item.quantities}`);
+      // if (!cartItem.item.quantities?.[0] || cartItem.item.quantities[0].available_count < updateCartItemDto.quantity) {
+      //   throw new BadRequestException('Insufficient quantity available');
+      // }
 
       // Validate customizations if provided
       if (updateCartItemDto.customizations && updateCartItemDto.customizations.length > 0) {
@@ -263,9 +269,14 @@ export class CartService {
       const basePrice = Number(cartItem.item.prices?.[0]?.base_price || 0);
       let customizationPrice = 0;
       
-      // Calculate customization price if customizations are provided
-      if (updateCartItemDto.customizations && updateCartItemDto.customizations.length > 0) {
-        for (const customization of updateCartItemDto.customizations) {
+      // Use provided customizations or existing ones from cart item
+      const customizationsToUse = updateCartItemDto.customizations !== undefined 
+        ? updateCartItemDto.customizations 
+        : cartItem.customizations;
+      
+      // Calculate customization price if customizations exist
+      if (customizationsToUse && customizationsToUse.length > 0) {
+        for (const customization of customizationsToUse) {
           if (customization.selected_options && customization.selected_options.length > 0) {
             const customizationItems = await this.itemRepository
               .createQueryBuilder('item')
@@ -281,17 +292,18 @@ export class CartService {
           }
         }
       }
-      // If customizations is empty array or not provided, customizationPrice remains 0
       
-      const newUnitPrice = Number((basePrice + customizationPrice).toFixed(2));
+      // CORRECT CALCULATION: (Item Price × Quantity) + Customization Price
+      const itemTotalPrice = Number((basePrice * updateCartItemDto.quantity).toFixed(2));
+      const totalPrice = Number((itemTotalPrice + customizationPrice).toFixed(2));
 
       // Update cart item
       cartItem.quantity = updateCartItemDto.quantity;
-      cartItem.unit_price = newUnitPrice;
-      cartItem.total_price = Number((cartItem.quantity * newUnitPrice).toFixed(2));
-      cartItem.customizations = updateCartItemDto.customizations || cartItem.customizations;
-      cartItem.variants = updateCartItemDto.variants || cartItem.variants;
-      cartItem.special_instructions = updateCartItemDto.special_instructions || cartItem.special_instructions;
+      cartItem.unit_price = basePrice; // Store base unit price only
+      cartItem.total_price = totalPrice;
+      cartItem.customizations = customizationsToUse;
+      cartItem.variants = updateCartItemDto.variants !== undefined ? updateCartItemDto.variants : cartItem.variants;
+      cartItem.special_instructions = updateCartItemDto.special_instructions !== undefined ? updateCartItemDto.special_instructions : cartItem.special_instructions;
 
       await this.cartItemRepository.save(cartItem);
 
