@@ -14,6 +14,7 @@ import { Item } from '../item/entities/item.entity';
 import { ItemCustomizationGroups } from '../item/entities/item-customization-groups.entity';
 import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
+import { SellerPushService } from './seller-push.service';
 import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
 
 @Injectable()
@@ -45,6 +46,7 @@ export class OrderService {
     private readonly itemCustomizationGroupsRepository: Repository<ItemCustomizationGroups>,
     private readonly razorpayService: RazorpayService,
     private readonly notificationService: NotificationService,
+    private readonly sellerPushService: SellerPushService,
   ) {}
 
   /**
@@ -127,6 +129,28 @@ export class OrderService {
 
       // Deactivate cart
       await this.cartRepository.update(cart.id, { is_active: false });
+
+      // 🚀 PUSH ORDER TO SELLER IMMEDIATELY
+      try {
+        // Get complete order data with relations for seller push
+        const orderWithRelations = await this.orderRepository
+          .createQueryBuilder('o')
+          .leftJoinAndSelect('o.user', 'u')
+          .leftJoinAndSelect('o.store', 's')
+          .leftJoinAndSelect('o.delivery_address', 'da')
+          .leftJoinAndSelect('o.order_items', 'oi')
+          .leftJoinAndSelect('oi.item', 'i')
+          .where('o.id = :orderId', { orderId: savedOrder.id })
+          .getOne();
+
+        if (orderWithRelations) {
+          await this.sellerPushService.pushOrderToSeller(orderWithRelations);
+          this.logger.log(`✅ Order ${savedOrder.order_number} pushed to seller successfully`);
+        }
+      } catch (sellerPushError) {
+        this.logger.error(`❌ Failed to push order to seller: ${sellerPushError.message}`);
+        // Don't fail order creation if seller push fails
+      }
 
       // Get complete order data
       const orderData = await this.getOrderById(savedOrder.id, userId);

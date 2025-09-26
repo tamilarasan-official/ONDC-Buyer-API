@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { HttpModule } from '@nestjs/axios';
 import { BuyerController } from './buyer.controller';
 import { BuyerService } from './buyer.service';
 import { CartService } from './cart.service';
@@ -7,6 +8,7 @@ import { OrderService } from './order.service';
 import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
 import { ReviewService } from './review.service';
+import { SellerPushService } from './seller-push.service';
 import { LocationService } from '../shared/services/location.service';
 import { FCMService } from './fcm.service';
 import { SharedNotificationModule } from '../shared/notification.module';
@@ -71,10 +73,14 @@ import { Dish } from '../dish/entities/dish.entity';
       UserDeviceToken,
       Dish,
     ]),
+    HttpModule.register({
+      timeout: 10000,
+      maxRedirects: 5,
+    }),
     SharedNotificationModule,
   ],
   controllers: [BuyerController],
-  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService, FCMService],
-  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, LocationService, FCMService],
+  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, LocationService, FCMService],
+  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, LocationService, FCMService],
 })
 export class BuyerModule {}
