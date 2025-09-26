@@ -9,6 +9,7 @@ import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
 import { ReviewService } from './review.service';
 import { SellerPushService } from './seller-push.service';
+import { SellerStatusService } from '../shared/services/seller-status.service';
 import { LocationService } from '../shared/services/location.service';
 import { FCMService } from './fcm.service';
 import { SharedNotificationModule } from '../shared/notification.module';
@@ -80,7 +81,7 @@ import { Dish } from '../dish/entities/dish.entity';
     SharedNotificationModule,
   ],
   controllers: [BuyerController],
-  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, LocationService, FCMService],
-  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, LocationService, FCMService],
+  providers: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, SellerStatusService, LocationService, FCMService],
+  exports: [BuyerService, CartService, OrderService, RazorpayService, NotificationService, ReviewService, SellerPushService, SellerStatusService, LocationService, FCMService],
 })
 export class BuyerModule {}

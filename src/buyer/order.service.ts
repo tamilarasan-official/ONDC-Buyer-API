@@ -15,7 +15,9 @@ import { ItemCustomizationGroups } from '../item/entities/item-customization-gro
 import { RazorpayService } from './razorpay.service';
 import { NotificationService } from './notification.service';
 import { SellerPushService } from './seller-push.service';
+import { SellerStatusService } from '../shared/services/seller-status.service';
 import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
+import { SellerStatusUpdateDto } from './dto/seller-status-update.dto';
 
 @Injectable()
 export class OrderService {
@@ -47,6 +49,7 @@ export class OrderService {
     private readonly razorpayService: RazorpayService,
     private readonly notificationService: NotificationService,
     private readonly sellerPushService: SellerPushService,
+    private readonly sellerStatusService: SellerStatusService,
   ) {}
 
   /**
@@ -788,5 +791,93 @@ export class OrderService {
     );
 
     return formattedCustomizations;
+  }
+
+  /**
+   * Update order status from seller webhook
+   */
+  async updateOrderStatusFromSeller(sellerStatusUpdateDto: SellerStatusUpdateDto) {
+    try {
+      this.logger.log(`🔄 Received seller status update for order ${sellerStatusUpdateDto.order_number}: ${sellerStatusUpdateDto.status}`);
+
+      // Find order by order_number
+      const order = await this.orderRepository
+        .createQueryBuilder('o')
+        .leftJoinAndSelect('o.user', 'u')
+        .leftJoinAndSelect('o.store', 's')
+        .where('o.order_number = :orderNumber', { orderNumber: sellerStatusUpdateDto.order_number })
+        .getOne();
+
+      if (!order) {
+        throw new NotFoundException(`Order with number ${sellerStatusUpdateDto.order_number} not found`);
+      }
+
+      // Validate status transition
+      this.sellerStatusService.validateSellerStatusUpdate(
+        sellerStatusUpdateDto.order_number,
+        order.status,
+        sellerStatusUpdateDto.status
+      );
+
+      // Update order status
+      const previousStatus = order.status;
+      order.status = sellerStatusUpdateDto.status;
+
+      // Set delivered_at timestamp if status is delivered
+      if (sellerStatusUpdateDto.status === 'delivered') {
+        order.delivered_at = new Date();
+      }
+
+      // Update estimated delivery time if provided
+      if (sellerStatusUpdateDto.estimated_delivery_time) {
+        order.estimated_delivery_time = new Date(sellerStatusUpdateDto.estimated_delivery_time);
+      }
+
+      await this.orderRepository.save(order);
+
+      // Create tracking entry
+      const statusMessage = this.sellerStatusService.getStatusMessage(sellerStatusUpdateDto.status);
+      const fullMessage = sellerStatusUpdateDto.message 
+        ? `${statusMessage}. ${sellerStatusUpdateDto.message}`
+        : statusMessage;
+
+      // Include agent details in message if provided
+      const trackingMessage = sellerStatusUpdateDto.agent_details 
+        ? `${fullMessage}. ${sellerStatusUpdateDto.agent_details}`
+        : fullMessage;
+
+      await this.createOrderTracking(
+        order.id, 
+        sellerStatusUpdateDto.status, 
+        trackingMessage
+      );
+
+      // Send notification to user
+      await this.notificationService.createNotification({
+        user_id: order.user.id,
+        title: `Order ${sellerStatusUpdateDto.status}`,
+        message: trackingMessage,
+        type: 'order',
+        data: {
+          order_number: order.order_number,
+          previous_status: previousStatus,
+          new_status: sellerStatusUpdateDto.status
+        }
+      });
+
+      this.logger.log(`✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${sellerStatusUpdateDto.status}`);
+
+      return {
+        success: true,
+        message: 'Order status updated successfully',
+        order_number: sellerStatusUpdateDto.order_number,
+        previous_status: previousStatus,
+        new_status: sellerStatusUpdateDto.status
+      };
+
+    } catch (error) {
+      this.logger.error(`❌ Error updating order status from seller: ${error.message}`, error.stack);
+      throw error;
+    }
   }
 }

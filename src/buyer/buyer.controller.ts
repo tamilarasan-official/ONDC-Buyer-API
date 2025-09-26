@@ -12,6 +12,7 @@ import { AddToCartDto, UpdateCartItemDto, RemoveFromCartDto, ApplyOfferDto } fro
 import { CartResponseDto, AddToCartResponseDto, UpdateCartResponseDto, RemoveFromCartResponseDto, ApplyOfferResponseDto } from './dto/cart-response.dto';
 import { CreateOrderDto, CreatePaymentDto, VerifyPaymentDto, UpdateOrderStatusDto, CancelOrderDto } from './dto/order-request.dto';
 import { CreateOrderResponseDto, OrderResponseDto, OrderListResponseDto, PaymentResponseDto, VerifyPaymentResponseDto } from './dto/order-response.dto';
+import { SellerStatusUpdateDto } from './dto/seller-status-update.dto';
 import { CartService } from './cart.service';
 import { OrderService } from './order.service';
 import { NotificationService } from './notification.service';
@@ -1592,6 +1593,84 @@ export class BuyerController {
     } catch (error) {
       this.logger.error(`❌ Error handling order paid: ${error.message}`, error.stack);
     }
+  }
+
+  @Post('webhook/seller-status')
+  @ApiOperation({
+    summary: 'Seller status update webhook',
+    description: 'Webhook endpoint to receive order status updates from sellers. This endpoint validates status transitions and updates order tracking.',
+  })
+  @ApiBody({
+    type: SellerStatusUpdateDto,
+    description: 'Seller status update payload',
+    examples: {
+      'billed': {
+        summary: 'Order billed',
+        value: {
+          order_number: 'ORD-20250102-001',
+          status: 'billed',
+          message: 'Order confirmed and billed by seller'
+        }
+      },
+      'packed': {
+        summary: 'Order packed',
+        value: {
+          order_number: 'ORD-20250102-001',
+          status: 'packed',
+          message: 'Order packed and ready for pickup'
+        }
+      },
+      'delivered': {
+        summary: 'Order delivered',
+        value: {
+          order_number: 'ORD-20250102-001',
+          status: 'delivered',
+          message: 'Order delivered successfully',
+          agent_details: 'Agent: John Doe, Phone: +91-9876543210'
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Status updated successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Order status updated successfully' },
+        order_number: { type: 'string', example: 'ORD-20250102-001' },
+        previous_status: { type: 'string', example: 'pending' },
+        new_status: { type: 'string', example: 'billed' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Invalid status transition or validation error',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Invalid status transition from pending to delivered' },
+        error: { type: 'string', example: 'Bad Request' }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Order not found',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Order with number ORD-20250102-001 not found' },
+        error: { type: 'string', example: 'Not Found' }
+      }
+    }
+  })
+  async updateOrderStatusFromSeller(@Body() sellerStatusUpdateDto: SellerStatusUpdateDto) {
+    return this.orderService.updateOrderStatusFromSeller(sellerStatusUpdateDto);
   }
 
 }
