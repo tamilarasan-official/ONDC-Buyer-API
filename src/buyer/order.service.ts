@@ -606,11 +606,27 @@ export class OrderService {
   /**
    * Create order tracking entry
    */
-  private async createOrderTracking(orderId: number, status: string, message: string) {
+  private async createOrderTracking(
+    orderId: number, 
+    status: string, 
+    message: string, 
+    agentDetails?: {
+      name?: string;
+      phone?: string;
+      vehicle_number?: string;
+      eta?: string;
+      photo_url?: string;
+    }
+  ) {
     const tracking = this.orderTrackingRepository.create({
       order: { id: orderId },
       status,
       message,
+      agent_name: agentDetails?.name,
+      agent_phone: agentDetails?.phone,
+      agent_vehicle_number: agentDetails?.vehicle_number,
+      agent_eta: agentDetails?.eta,
+      agent_photo_url: agentDetails?.photo_url,
       timestamp: new Date()
     });
 
@@ -841,22 +857,27 @@ export class OrderService {
         ? `${statusMessage}. ${sellerStatusUpdateDto.message}`
         : statusMessage;
 
-      // Include agent details in message if provided
-      const trackingMessage = sellerStatusUpdateDto.agent_details 
-        ? `${fullMessage}. ${sellerStatusUpdateDto.agent_details}`
-        : fullMessage;
+      // Prepare agent details for storage
+      const agentDetails = sellerStatusUpdateDto.agent_details ? {
+        name: sellerStatusUpdateDto.agent_details.name,
+        phone: sellerStatusUpdateDto.agent_details.phone,
+        vehicle_number: sellerStatusUpdateDto.agent_details.vehicle_number,
+        eta: sellerStatusUpdateDto.agent_details.eta,
+        photo_url: sellerStatusUpdateDto.agent_details.photo_url
+      } : undefined;
 
       await this.createOrderTracking(
         order.id, 
         sellerStatusUpdateDto.status, 
-        trackingMessage
+        fullMessage,
+        agentDetails
       );
 
       // Send notification to user
       await this.notificationService.createNotification({
         user_id: order.user.id,
         title: `Order ${sellerStatusUpdateDto.status}`,
-        message: trackingMessage,
+        message: fullMessage,
         type: 'order',
         data: {
           order_number: order.order_number,
