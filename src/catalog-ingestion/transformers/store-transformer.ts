@@ -38,9 +38,10 @@ export class StoreTransformer extends BaseTransformer {
       // Extract GST number from tags
       store.gst_number = this.extractGstNumber(provider.tags || []);
       
-      // Store status - only set to true if provider data is valid
-      // The status will be validated by the catalog ingestion service
-      store.status = true;
+      // Set store status based on ONDC time.label field
+      // "enable" -> true, "disable" -> false, default -> true
+      const statusLabel = provider.time?.label?.toLowerCase();
+      store.status = statusLabel === 'disable' ? false : true;
       
       this.logger.log(`Transformed store: ${store.reference_id} - ${store.name}`);
       

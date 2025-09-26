@@ -54,7 +54,8 @@ export class ItemTransformer extends BaseTransformer {
         }
       }
       
-      item.status = true;
+      const statusLabel = itemData.time?.label?.toLowerCase();
+      item.status = statusLabel === 'disable' ? false : true;
       
       this.logger.log(`Transformed item: ${item.reference_id} - ${item.name} (${item.type})`);
       
