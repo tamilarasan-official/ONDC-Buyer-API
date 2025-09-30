@@ -12,6 +12,8 @@ import { UserOtp } from "./entities/user-otp.entity";
 import { GenerateOtpDto } from "src/authentication/dto/generate-otp.dto";
 import { UserAddress } from "./entities/user-address.entity";
 import { NotificationService } from "../buyer/notification.service";
+import { OtpService } from "../otp/otp.service";
+import { OtpPurpose } from "../otp/entities/otp-verification.entity";
 
 @Injectable()
 export class UserService {
@@ -25,11 +27,26 @@ export class UserService {
     @InjectRepository(UserAddress)
     private readonly userAddressRepository: Repository<UserAddress>,
     
-    private readonly notificationService: NotificationService
+    private readonly notificationService: NotificationService,
+    private readonly otpService: OtpService
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
     try {
+      // Convert phone number to string format for OTP service
+      const phoneNumberString = `+91${generateOtpDto.phone_number}`;
+
+      // Send OTP using the new OTP service
+      const otpResponse = await this.otpService.sendOtp({
+        phone_number: phoneNumberString,
+        purpose: OtpPurpose.REGISTRATION
+      });
+
+      if (!otpResponse.success) {
+        throw new BadRequestException(otpResponse.message);
+      }
+
+      // Create or find user
       let user = await this.userRepository.findOne({
         where: { phone_number: generateOtpDto.phone_number },
       });
@@ -39,25 +56,24 @@ export class UserService {
         await this.userRepository.save(user);
       }
 
-      // const otp = Math.floor(1000 + Math.random() * 9000);
-      const otp = 1234;
-      user.otp = this.userOtpRepository.create({ otp, user });
-
-      await this.userOtpRepository.save(user.otp);
-
-      // Create OTP notification
+      // Create OTP notification for tracking (optional)
       try {
         await this.notificationService.createOTPNotification(
           user.id,
           generateOtpDto.phone_number,
-          otp.toString()
+          'OTP sent via SMS'
         );
       } catch (notificationError) {
         console.error('Failed to create OTP notification:', notificationError.message);
         // Don't throw error as OTP generation should still succeed
       }
 
-      return user;
+      return {
+        ...user,
+        otp_sent: true,
+        message: otpResponse.message,
+        expires_in_minutes: otpResponse.expires_in_minutes
+      };
     } catch (error) {
       throw new BadRequestException("Failed to generate OTP", error);
     }
@@ -65,25 +81,28 @@ export class UserService {
 
   async login(loginDto: LoginDto) {
     try {
-      const user = await this.userRepository.findOne({
-        where: { phone_number: loginDto.phone_number },
-        relations: ["otp"],
+      // Convert phone number to string format for OTP service
+      const phoneNumberString = `+91${loginDto.phone_number}`;
+
+      // Verify OTP using the new OTP service
+      const otpResponse = await this.otpService.verifyOtp({
+        phone_number: phoneNumberString,
+        otp: loginDto.otp.toString(),
+        purpose: OtpPurpose.REGISTRATION
       });
 
-      if (!user?.otp) {
-        throw new NotFoundException("OTP already expired or not found");
+      if (!otpResponse.success || !otpResponse.verified) {
+        throw new BadRequestException(otpResponse.message);
       }
 
-      if (user.otp.otp !== loginDto.otp) {
-        throw new BadRequestException("Invalid OTP");
+      // Find user
+      const user = await this.userRepository.findOne({
+        where: { phone_number: loginDto.phone_number },
+      });
+
+      if (!user) {
+        throw new NotFoundException("User not found");
       }
-
-      const otpEntity = user.otp;
-
-      user.otp = null;
-      await this.userRepository.save(user);
-
-      await this.userOtpRepository.remove(otpEntity);
 
       return user;
     } catch (error) {

@@ -6,11 +6,13 @@ import { User } from './entities/user.entity';
 import { UserOtp } from './entities/user-otp.entity';
 import { UserAddress } from './entities/user-address.entity';
 import { SharedNotificationModule } from '../shared/notification.module';
+import { OtpModule } from '../otp/otp.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserOtp, UserAddress]),
     SharedNotificationModule,
+    OtpModule,
   ],
   controllers: [UserController],
   providers: [UserService],

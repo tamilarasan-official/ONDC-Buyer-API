@@ -21,6 +21,7 @@ import { OfferModule } from './offer/offer.module';
 import { OndcSearchModule } from './ondc-search/ondc-search.module';
 import { CatalogSyncModule } from './catalog-sync/catalog-sync.module';
 import { BuyerModule } from './buyer/buyer.module';
+import { OtpModule } from './otp/otp.module';
 import 'dotenv/config';
 
 
@@ -87,6 +88,7 @@ import 'dotenv/config';
     CatalogIngestionModule,
     CatalogSyncModule,
     BuyerModule,
+    OtpModule,
   ],
   controllers: [AppController],
   providers: [AppService],
