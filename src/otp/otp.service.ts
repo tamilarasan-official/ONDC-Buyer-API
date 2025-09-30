@@ -309,7 +309,7 @@ export class OtpService {
 
     if (recentOtp) {
       const timeSinceLastOtp = Date.now() - recentOtp.created_at.getTime();
-      const rateLimitMinutes = 5;
+      const rateLimitMinutes = 1;
 
       if (timeSinceLastOtp < rateLimitMinutes * 60 * 1000) {
         const waitTime = Math.ceil(
