@@ -200,6 +200,19 @@ export interface Item {
   '@ondc/org/time_to_ship'?: string;
   '@ondc/org/available_on_cod'?: boolean;
   '@ondc/org/contact_details_consumer_care'?: string;
+  tax?: {
+    percent: number;
+  };
+  additional_information?: {
+    id?: number;
+    food_type?: string;
+    serving_info?: string;
+    tags?: any;
+    spice_levels?: any;
+    frosting?: any;
+    nutritional_info?: any;
+    [key: string]: any; // Allow for additional properties
+  };
   tags?: Tag[];
 }
 

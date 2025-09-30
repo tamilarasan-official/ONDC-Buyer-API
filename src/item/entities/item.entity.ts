@@ -119,6 +119,9 @@ export class Item {
   @Column({ type: "varchar", length: 20, nullable: true })
   hsn_code?: string; // HSN/SAC code for tax classification
 
+  @Column({ type: "json", nullable: true })
+  additional_information: any; // Store entire additional_information object from ONDC
+
   @Column({ type: "boolean", default: true })
   status: boolean;
 

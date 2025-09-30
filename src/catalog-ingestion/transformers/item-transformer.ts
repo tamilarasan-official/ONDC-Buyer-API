@@ -43,6 +43,9 @@ export class ItemTransformer extends BaseTransformer {
       // Parse tax information from ONDC response
       this.extractTaxInformation(itemData, item);
       
+      // Parse additional information from ONDC response
+      this.extractAdditionalInformation(itemData, item);
+      
       // Parse item code from descriptor.code or fallback to item ID
       item.code = this.sanitizeString(itemData.descriptor.code || itemData.id, 255);
       
@@ -133,6 +136,22 @@ export class ItemTransformer extends BaseTransformer {
   }
   
   /**
+   * Extract additional information from ONDC response
+   */
+  private extractAdditionalInformation(itemData: ONDCItem, item: Item): void {
+    if (itemData.additional_information) {
+      item.additional_information = itemData.additional_information;
+      this.logger.log(`Stored additional_information for item ${item.reference_id}`);
+      
+      // Log food_type if available
+      if (itemData.additional_information.food_type) {
+        const foodType = itemData.additional_information.food_type;
+        this.logger.log(`Found food_type: ${foodType} for item ${item.reference_id}`);
+      }
+    }
+  }
+  
+  /**
    * Sanitize tax type
    */
   private sanitizeTaxType(type: string): string | undefined {
@@ -166,7 +185,7 @@ export class ItemTransformer extends BaseTransformer {
   }
   
   /**
-   * Transform item attributes from tags
+   * Transform item attributes from tags and additional_information
    */
   transformAttributes(itemData: ONDCItem): Array<{
     attribute_code: string;
@@ -183,37 +202,63 @@ export class ItemTransformer extends BaseTransformer {
       display_order?: number;
     }> = [];
     
-    if (!Array.isArray(itemData.tags)) {
-      return attributes;
+    // Priority 1: Extract food_type from additional_information
+    if (itemData.additional_information?.food_type) {
+      const foodType = itemData.additional_information.food_type;
+      attributes.push({
+        attribute_code: 'veg_nonveg',
+        attribute_name: 'Food Type',
+        attribute_value: this.sanitizeString(foodType, 255),
+        attribute_group: 'dietary',
+        display_order: 1
+      });
     }
     
-    // Process different attribute groups
-    const attributeGroups = [
-      { tag: 'veg_nonveg', group: 'dietary' },
-      { tag: 'brand', group: 'product_info' },
-      { tag: 'material', group: 'product_info' },
-      { tag: 'color', group: 'product_info' },
-      { tag: 'size', group: 'product_info' },
-      { tag: 'statutory_reqs', group: 'regulatory' },
-      { tag: 'organic', group: 'dietary' },
-      { tag: 'allergen_info', group: 'dietary' },
-    ];
-    
-    attributeGroups.forEach((groupInfo, index) => {
-      const tagValues = this.extractTagValues(itemData.tags || [], groupInfo.tag);
-      
-      Object.entries(tagValues).forEach(([code, value]) => {
-        if (code && value) {
+    // Priority 2: Fall back to veg_nonveg from tags if food_type not available
+    if (!itemData.additional_information?.food_type && Array.isArray(itemData.tags)) {
+      const vegNonVegTag = itemData.tags.find(tag => tag.code === 'veg_nonveg');
+      if (vegNonVegTag && Array.isArray(vegNonVegTag.list)) {
+        const vegValue = vegNonVegTag.list.find(item => item.code === 'veg');
+        if (vegValue && vegValue.value) {
           attributes.push({
-            attribute_code: this.sanitizeString(code, 100),
-            attribute_name: this.formatAttributeName(code),
-            attribute_value: this.sanitizeString(value, 255),
-            attribute_group: groupInfo.group,
-            display_order: index + 1
+            attribute_code: 'veg_nonveg',
+            attribute_name: 'Food Type',
+            attribute_value: this.sanitizeString(vegValue.value, 255),
+            attribute_group: 'dietary',
+            display_order: 1
           });
         }
+      }
+    }
+    
+    // Process other attribute groups from tags
+    if (Array.isArray(itemData.tags)) {
+      const attributeGroups = [
+        { tag: 'brand', group: 'product_info' },
+        { tag: 'material', group: 'product_info' },
+        { tag: 'color', group: 'product_info' },
+        { tag: 'size', group: 'product_info' },
+        { tag: 'statutory_reqs', group: 'regulatory' },
+        { tag: 'organic', group: 'dietary' },
+        { tag: 'allergen_info', group: 'dietary' },
+      ];
+      
+      attributeGroups.forEach((groupInfo, index) => {
+        const tagValues = this.extractTagValues(itemData.tags || [], groupInfo.tag);
+        
+        Object.entries(tagValues).forEach(([code, value]) => {
+          if (code && value) {
+            attributes.push({
+              attribute_code: this.sanitizeString(code, 100),
+              attribute_name: this.formatAttributeName(code),
+              attribute_value: this.sanitizeString(value, 255),
+              attribute_group: groupInfo.group,
+              display_order: index + 2 // Start from 2 since food_type is 1
+            });
+          }
+        });
       });
-    });
+    }
     
     return attributes;
   }
