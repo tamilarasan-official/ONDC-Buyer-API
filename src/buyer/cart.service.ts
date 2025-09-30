@@ -535,7 +535,7 @@ export class CartService {
     });
 
     const subtotal = cartItems.reduce((sum, item) => sum + Number(item.total_price), 0);
-    const deliveryFee = subtotal > 200 ? 0 : 30; // Free delivery above 200
+    const deliveryFee = 0;
     
     // Calculate tax based on item's tax rate and type
     let taxAmount = 0;
