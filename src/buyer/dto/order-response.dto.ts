@@ -124,6 +124,41 @@ export class OrderTrackingResponseDto {
     example: '2025-01-02T10:30:00Z'
   })
   timestamp: string;
+
+  @ApiProperty({
+    description: 'Agent name',
+    example: 'John Doe',
+    required: false
+  })
+  agent_name?: string;
+
+  @ApiProperty({
+    description: 'Agent phone',
+    example: '+91-9876543210',
+    required: false
+  })
+  agent_phone?: string;
+
+  @ApiProperty({
+    description: 'Agent vehicle number',
+    example: 'KA-01-AB-1234',
+    required: false
+  })
+  agent_vehicle_number?: string;
+
+  @ApiProperty({
+    description: 'Agent ETA',
+    example: '15 minutes',
+    required: false
+  })
+  agent_eta?: string;
+
+  @ApiProperty({
+    description: 'Agent photo URL',
+    example: 'https://example.com/agent-photo.jpg',
+    required: false
+  })
+  agent_photo_url?: string;
 }
 
 export class DeliveryAddressDto {
@@ -362,6 +397,20 @@ export class OrderDataDto {
     example: '2025-01-02T10:35:00Z'
   })
   updated_at: string;
+
+  @ApiProperty({
+    description: 'Invoice information',
+    example: {
+      available: true,
+      download_url: '/api/buyer/invoice/download/123',
+      data_url: '/api/buyer/invoice/data/123'
+    }
+  })
+  invoice: {
+    available: boolean;
+    download_url: string | null;
+    data_url: string | null;
+  };
 }
 
 export class CreateOrderResponseDto {

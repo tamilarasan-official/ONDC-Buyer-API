@@ -748,10 +748,21 @@ export class OrderService {
         id: t.id,
         status: t.status,
         message: t.message,
-        timestamp: t.timestamp.toISOString()
+        timestamp: t.timestamp.toISOString(),
+        agent_name: t.agent_name,
+        agent_phone: t.agent_phone,
+        agent_vehicle_number: t.agent_vehicle_number,
+        agent_eta: t.agent_eta,
+        agent_photo_url: t.agent_photo_url
       })) || [],
       created_at: order.created_at.toISOString(),
-      updated_at: order.updated_at.toISOString()
+      updated_at: order.updated_at.toISOString(),
+      // Invoice information
+      invoice: {
+        available: order.status === 'delivered' && order.delivered_at ? true : false,
+        download_url: order.status === 'delivered' && order.delivered_at ? `/api/buyer/invoice/download/${order.id}` : null,
+        data_url: order.status === 'delivered' && order.delivered_at ? `/api/buyer/invoice/data/${order.id}` : null
+      }
     };
   }
 
