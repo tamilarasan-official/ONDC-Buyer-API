@@ -40,8 +40,8 @@ export class ItemTransformer extends BaseTransformer {
       // Parse item type from tags
       item.type = this.extractItemType(itemData.tags || []);
       
-      // Parse tax information from tags
-      this.extractTaxInformation(itemData.tags || [], item);
+      // Parse tax information from ONDC response
+      this.extractTaxInformation(itemData, item);
       
       // Parse item code from descriptor.code or fallback to item ID
       item.code = this.sanitizeString(itemData.descriptor.code || itemData.id, 255);
@@ -102,41 +102,14 @@ export class ItemTransformer extends BaseTransformer {
   }
   
   /**
-   * Extract tax information from tags
+   * Extract tax information from ONDC response
    */
-  private extractTaxInformation(tags: any[], item: Item): void {
-    if (!Array.isArray(tags)) {
-      return;
-    }
-    
-    // Extract tax information from various tag sources
-    const taxSources = ['tax', 'gst', 'tax_details', 'statutory_reqs'];
-    
-    for (const source of taxSources) {
-      const taxValues = this.extractTagValues(tags, source);
-      
-      // Parse tax rate
-      if (taxValues.tax_rate || taxValues.rate || taxValues.gst_rate) {
-        const rate = taxValues.tax_rate || taxValues.rate || taxValues.gst_rate;
-        item.tax_rate = this.parseTaxRate(rate);
-      }
-      
-      // Parse tax type
-      if (taxValues.tax_type || taxValues.type || taxValues.gst_type) {
-        const type = taxValues.tax_type || taxValues.type || taxValues.gst_type;
-        item.tax_type = this.sanitizeTaxType(type);
-      }
-      
-      // Parse HSN code
-      if (taxValues.hsn_code || taxValues.hsn || taxValues.sac_code) {
-        const hsn = taxValues.hsn_code || taxValues.hsn || taxValues.sac_code;
-        item.hsn_code = this.sanitizeHsnCode(hsn);
-      }
-      
-      // Break if we found tax information
-      if (item.tax_rate || item.tax_type || item.hsn_code) {
-        break;
-      }
+  private extractTaxInformation(itemData: any, item: Item): void {
+    // Extract tax.percent from direct tax object (always present in ONDC response)
+    if (itemData.tax && typeof itemData.tax === 'object' && itemData.tax.percent !== undefined) {
+      item.tax_rate = this.parseTaxRate(itemData.tax.percent.toString());
+      item.tax_type = 'percentage'; // Always percentage for tax.percent
+      this.logger.log(`Found tax.percent: ${itemData.tax.percent}% for item ${itemData.id}`);
     }
   }
   

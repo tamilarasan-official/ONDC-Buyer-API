@@ -23,18 +23,9 @@ export class AppController {
   @Post('on_search')
   async ondcWebhook(@Body() catalogData: any) {
     try {
-      this.logger.log(`🔔 ONDC Webhook received. Full data: ${JSON.stringify(catalogData, null, 2)}`);
-      this.logger.log(`🔔 ONDC Webhook received. Message ID: ${catalogData.context?.message_id}`);
       
-       // 🔍 COMPREHENSIVE LOGGING: Log the complete webhook payload structure
-       this.logger.log(`📋 Complete ONDC Webhook Payload Structure:`);
-       this.logger.log(`   Context: ${JSON.stringify(catalogData.context, null, 2)}`);
-       this.logger.log(`   Message Keys: ${JSON.stringify(Object.keys(catalogData.message || {}))}`);
-       
       // Check if this is a valid catalog response
       if (!catalogData.message) {
-        this.logger.log(`📭 ONDC sent response without 'message' field - likely ACK/NACK or error response`);
-        this.logger.log(`📋 Response type: ${JSON.stringify(Object.keys(catalogData))}`);
         
         // Send ACK back (ONDC expects acknowledgment even for these)
         return {
