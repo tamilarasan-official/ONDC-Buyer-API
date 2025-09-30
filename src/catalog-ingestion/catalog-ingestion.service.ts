@@ -138,16 +138,17 @@ export class CatalogIngestionService {
 
     // Collect all active store reference_ids from responses
     // Only include stores that have valid data and should be active
-    const allActiveStoreIds: string[] = [];
-    responses.forEach(response => {
-      const providers = response.message.catalog['bpp/providers'] || [];
-      providers.forEach(provider => {
-        // Only add store to active list if it has valid data
-        if (this.isValidProvider(provider)) {
-          allActiveStoreIds.push(provider.id);
-        }
-      });
-    });
+    // TODO: Commented out for individual store webhook processing
+    // const allActiveStoreIds: string[] = [];
+    // responses.forEach(response => {
+    //   const providers = response.message.catalog['bpp/providers'] || [];
+    //   providers.forEach(provider => {
+    //     // Only add store to active list if it has valid data
+    //     if (this.isValidProvider(provider)) {
+    //       allActiveStoreIds.push(provider.id);
+    //     }
+    //   });
+    // });
 
     // Process each provider response
     for (const response of responses) {
@@ -161,7 +162,8 @@ export class CatalogIngestionService {
     }
 
     // Handle store-level deletions (stores not present in any response)
-    await this.handleStoreDeletions(allActiveStoreIds, stats);
+    // TODO: Commented out for individual store webhook processing
+    // await this.handleStoreDeletions(allActiveStoreIds, stats);
 
     this.logger.log(`Catalog ingestion completed. Stats: ${JSON.stringify(stats)}`);
 
@@ -187,14 +189,15 @@ export class CatalogIngestionService {
       let validProvidersCount = 0;
       
       for (const provider of providers) {
-        // Only process valid providers
-        if (this.isValidProvider(provider)) {
+        // Process all providers (isValidProvider check commented out)
+        // TODO: Re-enable validation when GPS format is properly handled
+        // if (this.isValidProvider(provider)) {
           await this.processProvider(provider, response.context, queryRunner, stats);
           validProvidersCount++;
-        } else {
-          this.logger.warn(`Skipping invalid provider: ${provider.id}`);
-          stats.providers_skipped = (stats.providers_skipped || 0) + 1;
-        }
+        // } else {
+        //   this.logger.warn(`Skipping invalid provider: ${provider.id}`);
+        //   stats.providers_skipped = (stats.providers_skipped || 0) + 1;
+        // }
       }
 
       await queryRunner.commitTransaction();
@@ -265,7 +268,8 @@ export class CatalogIngestionService {
     await this.linkCustomizationItemsToCategories(store, queryRunner);
 
     // 10. Handle Deletions (Soft Delete)
-    await this.handleDeletions(provider, store, queryRunner, stats);
+    // TODO: Commented out for individual store webhook processing
+    // await this.handleDeletions(provider, store, queryRunner, stats);
   }
 
   /**
