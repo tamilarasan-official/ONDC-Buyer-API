@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Cart } from '../cart/entities/cart.entity';
@@ -10,6 +10,7 @@ import { Store } from '../store/entities/store.entity';
 import { User } from '../user/entities/user.entity';
 import { Offers } from '../offer/entities/offers.entity';
 import { AddToCartDto, UpdateCartItemDto, RemoveFromCartDto, ApplyOfferDto } from './dto/cart-request.dto';
+import { BuyerService } from './buyer.service';
 
 @Injectable()
 export class CartService {
@@ -32,6 +33,8 @@ export class CartService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Offers)
     private readonly offersRepository: Repository<Offers>,
+    @Inject(forwardRef(() => BuyerService))
+    private readonly buyerService: BuyerService,
   ) { }
 
   /**
@@ -604,8 +607,11 @@ export class CartService {
         const dietaryAttr = item.item.attributes?.find(attr => attr.attribute_code === 'veg_nonveg');
         const dietaryPref = dietaryAttr?.attribute_value || 'non-veg';
         
+        // Check if item has customizations available (using BuyerService method to avoid duplication)
+        const hasCustomizations = await this.buyerService.checkItemHasCustomizations(item.item.id);
+        
         // Debug log
-        this.logger.debug(`Item ${item.item.id} (${item.item.name}): dietary_preference = ${dietaryPref}, attributes count = ${item.item.attributes?.length || 0}`);
+        this.logger.debug(`Item ${item.item.id} (${item.item.name}): dietary_preference = ${dietaryPref}, has_customizations = ${hasCustomizations}`);
         
         return {
           id: item.id,
@@ -614,6 +620,7 @@ export class CartService {
           item_description: item.item.short_desc,
           item_images: item.item.images || [],
           dietary_preference: dietaryPref,
+          has_customizations: hasCustomizations,
           quantity: item.quantity,
           unit_price: Number(item.unit_price || 0),
           total_price: Number(item.total_price || 0),

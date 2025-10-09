@@ -1389,7 +1389,8 @@ export class BuyerService {
    * Check if item has customizations (efficient method)
    * Returns true if there are any customization items with parent_item = itemId
    */
-  private async checkItemHasCustomizations(itemId: number): Promise<boolean> {
+  // Made public so CartService can use it (avoiding code duplication)
+  async checkItemHasCustomizations(itemId: number): Promise<boolean> {
     try {
       this.logger.log(`🔍 Checking if item ${itemId} has customizations`);
       
