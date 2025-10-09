@@ -46,6 +46,8 @@ export class CartService {
         .leftJoinAndSelect('c.store', 's')
         .leftJoinAndSelect('c.cart_items', 'ci')
         .leftJoinAndSelect('ci.item', 'i')
+        .leftJoinAndSelect('i.attributes', 'ia')
+        .leftJoinAndSelect('i.quantities', 'iq')
         .leftJoin('c.user', 'u')
         .where('u.id = :userId', { userId })
         .andWhere('c.is_active = :isActive', { isActive: true })
@@ -598,12 +600,20 @@ export class CartService {
         // Format customizations with names and prices
         const formattedCustomizations = await this.formatCustomizations(item.customizations || []);
         
+        // Get dietary preference from item attributes
+        const dietaryAttr = item.item.attributes?.find(attr => attr.attribute_code === 'veg_nonveg');
+        const dietaryPref = dietaryAttr?.attribute_value || 'non-veg';
+        
+        // Debug log
+        this.logger.debug(`Item ${item.item.id} (${item.item.name}): dietary_preference = ${dietaryPref}, attributes count = ${item.item.attributes?.length || 0}`);
+        
         return {
           id: item.id,
           item_id: item.item.id,
           item_name: item.item.name,
           item_description: item.item.short_desc,
           item_images: item.item.images || [],
+          dietary_preference: dietaryPref,
           quantity: item.quantity,
           unit_price: Number(item.unit_price || 0),
           total_price: Number(item.total_price || 0),
