@@ -283,7 +283,7 @@ export class BuyerService {
       title: "Craving Something Delicious?",
       subtitle: "Get your favorite meals delivered hot & fast—right to your doorstep.",
       cta_button: "Order Now!",
-      image_url: "/images/promotional-thali.jpg",
+      image_url: "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
       background_color: "#14b8a6"
     };
   }
