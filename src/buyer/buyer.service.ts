@@ -512,7 +512,8 @@ export class BuyerService {
     dietaryPreference?: string, minPrice?: number, maxPrice?: number
   ) {
     try {
-      const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
+      const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
+      const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radius);
 
       let queryBuilder = this.storeRepository
         .createQueryBuilder('s')
@@ -521,16 +522,13 @@ export class BuyerService {
         .leftJoin('i.prices', 'p')
         .leftJoin('i.attributes', 'a')
         .where('s.status = :status', { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, { 
-          userLat, 
-          userLng, 
-          radius 
-        });
+        .andWhere(distanceFilter);
 
       // Apply search query
+      // NOTE: Extend matching to include item names as well, using partial (LIKE) match
       if (query) {
         queryBuilder = queryBuilder.andWhere(
-          '(LOWER(s.name) LIKE LOWER(:query) OR LOWER(s.description) LIKE LOWER(:query))',
+          '(LOWER(s.name) LIKE LOWER(:query) OR LOWER(s.description) LIKE LOWER(:query) OR LOWER(i.name) LIKE LOWER(:query))',
           { query: `%${query}%` }
         );
       }
@@ -563,16 +561,16 @@ export class BuyerService {
 
       queryBuilder = queryBuilder
         .select([
-          's.id',
-          's.name',
-          's.description',
-          's.logo_url',
-          's.fssai_license_no',
-          'sl.gps_lat',
-          'sl.gps_lng',
-          'sl.address_city',
-          'sl.address_locality',
-          `(${distanceSubquery}) as distance`
+          'DISTINCT s.id as s_id',
+          's.name as s_name',
+          's.description as s_description',
+          's.logo_url as s_logo_url',
+          's.fssai_license_no as s_fssai_license_no',
+          'sl.gps_lat as sl_gps_lat',
+          'sl.gps_lng as sl_gps_lng',
+          'sl.address_city as sl_address_city',
+          'sl.address_locality as sl_address_locality',
+          `${distanceQuery}`
         ])
         .groupBy('s.id, sl.id');
 
