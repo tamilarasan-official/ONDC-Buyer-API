@@ -465,6 +465,9 @@ export class BuyerService {
         results.categories = await this.searchCategories(query, category_id, limit);
       }
 
+      // Get top 5 highly rated restaurants (always included regardless of search query)
+      const topRatedRestaurants = await this.getTopRatedRestaurants(userLocation.lat, userLocation.lng, radius);
+
       // Calculate total results
       const totalResults = results.restaurants.length + results.items.length + results.categories.length;
       const totalPages = Math.ceil(totalResults / limit);
@@ -481,6 +484,7 @@ export class BuyerService {
           restaurants: results.restaurants,
           items: results.items,
           categories: results.categories,
+          top_rated_restaurants: topRatedRestaurants,
           meta: {
             page,
             limit,
@@ -1473,6 +1477,91 @@ export class BuyerService {
     } catch (error) {
       this.logger.warn(`Failed to calculate item rating for item ${itemId}: ${error.message}`);
       return { rating: 0, reviewCount: 0 };
+    }
+  }
+
+  /**
+   * Get top 5 highly rated restaurants within specified radius
+   */
+  private async getTopRatedRestaurants(userLat: number, userLng: number, radius: number = 10) {
+    try {
+      const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
+      const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radius);
+
+      // Get restaurants with their average ratings
+      const restaurants = await this.storeRepository
+        .createQueryBuilder('s')
+        .leftJoin('s.locations', 'sl')
+        .leftJoin('s.restaurant_reviews', 'rr')
+        .select([
+          's.id as s_id',
+          's.name as s_name',
+          's.description as s_description',
+          's.logo_url as s_logo_url',
+          's.fssai_license_no as s_fssai_license_no',
+          'sl.gps_lat as sl_gps_lat',
+          'sl.gps_lng as sl_gps_lng',
+          'sl.address_city as sl_address_city',
+          'sl.address_locality as sl_address_locality',
+          `${distanceQuery}`,
+          'AVG(rr.rating) as avg_rating',
+          'COUNT(rr.id) as review_count'
+        ])
+        .where('s.status = :status', { status: true })
+        .andWhere(distanceFilter)
+        .groupBy('s.id, sl.id')
+        .having('AVG(rr.rating) > 0') // Only include restaurants with at least one review
+        .orderBy('avg_rating', 'DESC')
+        .addOrderBy('review_count', 'DESC') // Secondary sort by review count
+        .limit(5)
+        .getRawMany();
+
+      // Process and enrich restaurant data
+      const topRatedRestaurants = await Promise.all(
+        restaurants.map(async (restaurant) => {
+          const distance = parseFloat(restaurant.distance);
+
+          // Check if store is open
+          const storeOpenData = await this.isStoreOpen(restaurant.s_id);
+
+          // Calculate delivery time
+          const deliveryTime = this.calculateDeliveryTime(distance, restaurant.s_id);
+
+          // Count items in this restaurant
+          const itemsCount = await this.itemRepository
+            .createQueryBuilder('i')
+            .where('i.storeId = :storeId', { storeId: restaurant.s_id })
+            .andWhere('i.status = :status', { status: true })
+            .getCount();
+
+          return {
+            id: restaurant.s_id,
+            name: restaurant.s_name,
+            description: restaurant.s_description,
+            logo_url: restaurant.s_logo_url,
+            fssai_license: restaurant.s_fssai_license_no,
+            location: {
+              lat: restaurant.sl_gps_lat,
+              lng: restaurant.sl_gps_lng,
+              city: restaurant.sl_address_city,
+              locality: restaurant.sl_address_locality
+            },
+            distance: Math.round(distance * 100) / 100,
+            rating: Math.round(parseFloat(restaurant.avg_rating) * 10) / 10,
+            review_count: parseInt(restaurant.review_count) || 0,
+            delivery_time: deliveryTime,
+            offers_count: 0,
+            items_count: itemsCount,
+            is_open: storeOpenData.isOpen
+          };
+        })
+      );
+
+      return topRatedRestaurants;
+
+    } catch (error) {
+      this.logger.error(`❌ Error getting top rated restaurants: ${error.message}`, error.stack);
+      return [];
     }
   }
 
