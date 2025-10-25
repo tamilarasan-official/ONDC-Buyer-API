@@ -249,7 +249,7 @@ export class UserService {
     }
   }
 
-  async updateAddress(user: any, updateAddressDto: any) {
+  async updateAddress(user: any, addressId: number, updateAddressDto: any) {
     try {
       const profile = await this.userRepository.findOne({
         where: { id: user.id },
@@ -261,17 +261,21 @@ export class UserService {
       }
 
       const address = await this.userAddressRepository.findOne({
-        where: { id: updateAddressDto.id, user: { id: user.id } },
+        where: { id: addressId, user: { id: user.id } },
       });
 
       if (!address) {
         throw new NotFoundException("Address not found");
       }
 
-      if (updateAddressDto.is_default) {
+      // If setting this address as default, unset all other addresses first
+      if (updateAddressDto.is_default === true) {
         for (const addr of profile.addresses) {
-          addr.is_default = false;
-          await this.userAddressRepository.save(addr);
+          // Skip the address being updated
+          if (addr.id !== addressId) {
+            addr.is_default = false;
+            await this.userAddressRepository.save(addr);
+          }
         }
       }
 

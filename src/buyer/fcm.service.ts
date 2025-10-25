@@ -37,10 +37,17 @@ export class FCMService {
         return;
       }
 
+      // Check if FCM credentials are configured
+      const projectId = this.configService.get<string>('FCM_PROJECT_ID');
+      if (!projectId || projectId === 'your-project-id') {
+        this.logger.warn('⚠️  Firebase credentials not configured. FCM notifications will be disabled. Set FCM_* environment variables to enable.');
+        return;
+      }
+
       // Initialize Firebase Admin SDK
       const serviceAccount = {
         type: 'service_account',
-        project_id: this.configService.get<string>('FCM_PROJECT_ID'),
+        project_id: projectId,
         private_key_id: this.configService.get<string>('FCM_PRIVATE_KEY_ID'),
         private_key: this.configService.get<string>('FCM_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
         client_email: this.configService.get<string>('FCM_CLIENT_EMAIL'),
@@ -53,13 +60,14 @@ export class FCMService {
 
       this.app = admin.initializeApp({
         credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
-        projectId: this.configService.get<string>('FCM_PROJECT_ID'),
+        projectId: projectId,
       });
 
       this.logger.log('Firebase Admin SDK initialized successfully');
     } catch (error) {
       this.logger.error('Failed to initialize Firebase Admin SDK:', error);
-      throw new Error('Firebase initialization failed');
+      this.logger.warn('⚠️  FCM notifications will be disabled due to initialization error.');
+      // Don't throw error - allow app to continue without FCM
     }
   }
 

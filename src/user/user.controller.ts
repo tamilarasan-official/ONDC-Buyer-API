@@ -265,8 +265,8 @@ export class UserController {
       }
     }
   })
-  async updateAddress(@Req() req, @Body() updateAddressDto: UpdateAddressDto) {
-    return this.userService.updateAddress(req.user, updateAddressDto);
+  async updateAddress(@Req() req, @Param('id') id: number, @Body() updateAddressDto: UpdateAddressDto) {
+    return this.userService.updateAddress(req.user, id, updateAddressDto);
   }
 
   @UseGuards(JwtAuthGuard)
