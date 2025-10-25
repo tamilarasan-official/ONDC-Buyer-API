@@ -91,6 +91,104 @@ export class SearchRestaurantDto {
   is_open: boolean;
 }
 
+export class TopRatedRestaurantDto {
+  @ApiProperty({
+    description: 'Restaurant ID',
+    example: 1,
+    type: 'number'
+  })
+  id: number;
+
+  @ApiProperty({
+    description: 'Restaurant name',
+    example: '6SUVAI Restaurant'
+  })
+  name: string;
+
+  @ApiProperty({
+    description: 'Restaurant description',
+    example: 'Best South Indian cuisine with authentic flavors'
+  })
+  description: string;
+
+  @ApiProperty({
+    description: 'Restaurant logo URL',
+    example: 'https://example.com/logo.jpg'
+  })
+  logo_url: string;
+
+  @ApiProperty({
+    description: 'FSSAI license number',
+    example: '12345678901234'
+  })
+  fssai_license: string;
+
+  @ApiProperty({
+    description: 'Restaurant location details',
+    type: 'object',
+    properties: {
+      lat: { type: 'number', example: 9.9352300 },
+      lng: { type: 'number', example: 78.1304040 },
+      city: { type: 'string', example: 'Madurai' },
+      locality: { type: 'string', example: 'Anna Nagar' }
+    }
+  })
+  location: {
+    lat: number;
+    lng: number;
+    city: string;
+    locality: string;
+  };
+
+  @ApiProperty({
+    description: 'Distance from user in kilometers',
+    example: 1.8,
+    type: 'number'
+  })
+  distance: number;
+
+  @ApiProperty({
+    description: 'Restaurant average rating (rounded to 1 decimal)',
+    example: 4.7,
+    type: 'number'
+  })
+  rating: number;
+
+  @ApiProperty({
+    description: 'Number of reviews received',
+    example: 142,
+    type: 'number'
+  })
+  review_count: number;
+
+  @ApiProperty({
+    description: 'Estimated delivery time',
+    example: '25-30 mins'
+  })
+  delivery_time: string;
+
+  @ApiProperty({
+    description: 'Number of active offers',
+    example: 2,
+    type: 'number'
+  })
+  offers_count: number;
+
+  @ApiProperty({
+    description: 'Number of items available',
+    example: 38,
+    type: 'number'
+  })
+  items_count: number;
+
+  @ApiProperty({
+    description: 'Is restaurant currently open',
+    example: true,
+    type: 'boolean'
+  })
+  is_open: boolean;
+}
+
 export class SearchItemDto {
   @ApiProperty({
     description: 'Item ID',
@@ -323,6 +421,34 @@ export class SearchDataDto {
     type: [SearchCategoryDto]
   })
   categories: SearchCategoryDto[];
+
+  @ApiProperty({
+    description: 'Top 5 highly rated restaurants within the search radius (always included regardless of search query)',
+    type: [TopRatedRestaurantDto],
+    example: [
+      {
+        id: 1,
+        name: '6SUVAI Restaurant',
+        description: 'Best South Indian cuisine with authentic flavors',
+        logo_url: 'https://example.com/6suvai-logo.jpg',
+        fssai_license: '12345678901234',
+        location: {
+          lat: 9.9352300,
+          lng: 78.1304040,
+          city: 'Madurai',
+          locality: 'Anna Nagar'
+        },
+        distance: 1.8,
+        rating: 4.7,
+        review_count: 142,
+        delivery_time: '25-30 mins',
+        offers_count: 2,
+        items_count: 38,
+        is_open: true
+      }
+    ]
+  })
+  top_rated_restaurants: TopRatedRestaurantDto[];
 
   @ApiProperty({
     description: 'Pagination and search metadata',
