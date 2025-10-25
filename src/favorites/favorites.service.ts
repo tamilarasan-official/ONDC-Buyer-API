@@ -98,7 +98,7 @@ export class FavoritesService {
           const item = favorite.item;
 
           // Get item price
-          const price = item.prices?.[0]?.value || 0;
+          const price = item.prices?.[0]?.base_price || 0;
 
           // Get item images
           const images = item.images ? JSON.parse(item.images as any) : [];
@@ -107,12 +107,12 @@ export class FavoritesService {
           const rating = 0; // TODO: Calculate from reviews
 
           // Get availability
-          const is_available = item.status && (item.quantities?.[0]?.available?.count || 0) > 0;
+          const is_available = item.status && (item.quantities?.[0]?.available_count || 0) > 0;
 
           return {
             id: item.id,
             name: item.name,
-            description: item.description,
+            description: item.short_desc || item.long_desc,
             images,
             price,
             restaurant: {
