@@ -82,20 +82,13 @@ export class AuthenticationController {
         data: {
           type: 'object',
           properties: {
-            user: {
-              type: 'object',
-              properties: {
-                id: { type: 'number', example: 1 },
-                name: { type: 'string', example: 'John Doe' },
-                email: { type: 'string', example: 'john@example.com' },
-                phone_number: { type: 'number', example: 9876543210 },
-                status: { type: 'boolean', example: true }
-              }
-            },
             access_token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
             refresh_token: { type: 'string', example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...' },
-            token_type: { type: 'string', example: 'Bearer' },
-            expires_in: { type: 'number', example: 3600 }
+            existing_user: {
+              type: 'boolean',
+              example: false,
+              description: 'Indicates if the user has completed their profile (added name and email). False for new users, true for existing users with complete profile.'
+            }
           }
         }
       }

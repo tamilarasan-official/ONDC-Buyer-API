@@ -40,6 +40,7 @@ export class AuthenticationService {
       return {
         access_token: generateAccessToken(payload),
         refresh_token: generateRefreshToken(payload),
+        existing_user: !!(user.name && user.email),
       }
 
     } catch (error) {
