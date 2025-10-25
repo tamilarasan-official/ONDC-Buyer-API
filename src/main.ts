@@ -52,7 +52,7 @@ async function bootstrap() {
       },
       'JWT-auth',
     )
-    .addServer('http://localhost:3000', 'Development server')
+    .addServer('http://localhost:3002', 'Development server')
     .addServer('https://devapi.tazty.in', 'Production server')
     .build();
 
