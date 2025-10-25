@@ -20,6 +20,7 @@ import { ItemVariants } from '../variant/entities/item-variants.entity';
 import { Dish } from '../dish/entities/dish.entity';
 import { RestaurantReview } from '../review/entities/restaurant-review.entity';
 import { ItemReview } from '../review/entities/item-review.entity';
+import { UserFavoriteRestaurant } from '../favorites/entities/user-favorite-restaurant.entity';
 
 @Injectable()
 export class BuyerService {
@@ -60,6 +61,8 @@ export class BuyerService {
     private readonly restaurantReviewRepository: Repository<RestaurantReview>,
     @InjectRepository(ItemReview)
     private readonly itemReviewRepository: Repository<ItemReview>,
+    @InjectRepository(UserFavoriteRestaurant)
+    private readonly favoriteRestaurantRepository: Repository<UserFavoriteRestaurant>,
     private readonly locationService: LocationService,
   ) {}
 
@@ -94,7 +97,7 @@ export class BuyerService {
       // Get all data in parallel
       this.logger.log(`🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`);
       const [nearbyRestaurants, whatsOnYourMind, promotionalBanner] = await Promise.all([
-        this.getFeaturedRestaurants(userLocation.lat, userLocation.lng, radiusKm, vegMode),
+        this.getFeaturedRestaurants(userLocation.lat, userLocation.lng, radiusKm, vegMode, userId),
         this.getWhatsOnYourMind(),
         this.getPromotionalBanner()
       ]);
@@ -124,7 +127,7 @@ export class BuyerService {
   /**
    * Get nearby restaurants (was getFeaturedRestaurants)
    */
-  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean) {
+  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean, userId?: number) {
     try {
       this.logger.log(`🔍 Getting nearby restaurants within ${radiusKm}km of ${userLat}, ${userLng}`);
       this.logger.log(`🥬 Veg mode: ${vegMode ? 'enabled' : 'disabled'}`);
@@ -187,6 +190,18 @@ export class BuyerService {
         return [];
       }
 
+      // Get user's favorite restaurant IDs
+      let favoriteStoreIds: Set<number> = new Set();
+      if (userId) {
+        const favorites = await this.favoriteRestaurantRepository.find({
+          where: { user: { id: userId } },
+          select: ['store'],
+          relations: ['store']
+        });
+        favoriteStoreIds = new Set(favorites.map(f => f.store.id));
+        this.logger.log(`❤️ User has ${favoriteStoreIds.size} favorite restaurants`);
+      }
+
       this.logger.log(`🔍 Processing ${stores.length} restaurants...`);
       // Calculate ratings, open status, and delivery times for each restaurant
       const storesWithRatings = await Promise.all(
@@ -223,7 +238,8 @@ export class BuyerService {
             distance: Math.round(distance * 100) / 100,
             rating: ratingData.rating,
             delivery_time: deliveryTime,
-            offers_count: 0 // Will be calculated separately
+            offers_count: 0, // Will be calculated separately
+            is_favorite: favoriteStoreIds.has(store.s_id)
           };
         })
       );
