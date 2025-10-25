@@ -40,6 +40,7 @@ async function bootstrap() {
     .addTag('User Management', 'User profile and address management')
     .addTag('Dish Management', 'Dish CRUD operations')
     .addTag('Category Management', 'Category CRUD operations')
+    .addTag('Favorites', 'User favorites management for items and restaurants')
     .addBearerAuth(
       {
         type: 'http',
