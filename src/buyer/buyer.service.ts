@@ -1324,11 +1324,8 @@ export class BuyerService {
             ])
             .getMany();
 
-          // Get customizations if requested
-          let customizations: any[] = [];
-          if (params.include_customizations) {
-            customizations = await this.getCustomizationGroups(item.i_id);
-          }
+          // Always get customizations for menu items
+          const customizations = await this.getCustomizationGroups(item.i_id);
 
           // Get variants if requested
           let variants: any[] = [];
