@@ -334,6 +334,13 @@ export class MenuItemDto {
     required: false
   })
   hsn_code?: string;
+
+  @ApiProperty({
+    description: 'Is item marked as favorite by the logged-in user',
+    example: false,
+    type: 'boolean'
+  })
+  is_favorite: boolean;
 }
 
 export class MenuCategoryDto {

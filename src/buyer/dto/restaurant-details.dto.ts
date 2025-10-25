@@ -305,6 +305,13 @@ export class RestaurantItemDto {
     required: false
   })
   customizations?: ItemCustomizationGroupDto[];
+
+  @ApiProperty({
+    description: 'Is item marked as favorite by the logged-in user',
+    example: false,
+    type: 'boolean'
+  })
+  is_favorite: boolean;
 }
 
 export class RestaurantCategoryDto {
