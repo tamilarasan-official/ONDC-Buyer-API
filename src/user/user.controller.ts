@@ -269,6 +269,61 @@ export class UserController {
     return this.userService.updateAddress(req.user, updateAddressDto);
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get("address")
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({
+    summary: 'Get all addresses',
+    description: 'Retrieve all delivery addresses for the authenticated user. Addresses are sorted by default status and creation date.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Addresses retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: true },
+        message: { type: 'string', example: 'Addresses retrieved successfully' },
+        data: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'number', example: 1 },
+              address1: { type: 'string', example: '123 Main Street' },
+              address2: { type: 'string', example: 'Apartment 4B' },
+              address3: { type: 'string', example: 'Near City Mall' },
+              city: { type: 'string', example: 'Bangalore' },
+              state: { type: 'string', example: 'Karnataka' },
+              pincode: { type: 'string', example: '560001' },
+              latitude: { type: 'number', example: 9.9352300 },
+              longitude: { type: 'number', example: 78.1304040 },
+              type: { type: 'string', example: 'home' },
+              is_default: { type: 'boolean', example: true },
+              created_at: { type: 'string', example: '2025-01-15T12:00:00Z' },
+              updated_at: { type: 'string', example: '2025-01-15T12:00:00Z' }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Unauthorized - Invalid or missing JWT token',
+    schema: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean', example: false },
+        message: { type: 'string', example: 'Unauthorized' },
+        error: { type: 'string', example: 'UNAUTHORIZED' }
+      }
+    }
+  })
+  async getAllAddresses(@Req() req) {
+    return this.userService.getAllAddresses(req.user);
+  }
+
   @Get("address/:id")
   @ApiOperation({
     summary: 'Get address by ID',

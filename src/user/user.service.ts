@@ -214,6 +214,19 @@ export class UserService {
     }
   }
 
+  async getAllAddresses(user: any) {
+    try {
+      const addresses = await this.userAddressRepository.find({
+        where: { user: { id: user.id } },
+        order: { is_default: 'DESC', created_at: 'DESC' },
+      });
+
+      return addresses;
+    } catch (error) {
+      throw new BadRequestException("Failed to retrieve addresses", error);
+    }
+  }
+
   async getAddress(id: number) {
     try {
       const address = await this.userAddressRepository.findOne({
