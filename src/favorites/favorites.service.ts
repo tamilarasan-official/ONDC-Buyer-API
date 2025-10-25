@@ -100,8 +100,23 @@ export class FavoritesService {
           // Get item price
           const price = item.prices?.[0]?.base_price || 0;
 
-          // Get item images
-          const images = item.images ? JSON.parse(item.images as any) : [];
+          // Get item images - handle different formats
+          let images: string[] = [];
+          if (item.images) {
+            if (Array.isArray(item.images)) {
+              // Already parsed as array
+              images = item.images;
+            } else if (typeof item.images === 'string') {
+              try {
+                // Try to parse as JSON
+                const parsed = JSON.parse(item.images);
+                images = Array.isArray(parsed) ? parsed : [parsed];
+              } catch (e) {
+                // If parsing fails, treat as single URL string
+                images = [item.images];
+              }
+            }
+          }
 
           // Get item rating (you may need to join with item_review table)
           const rating = 0; // TODO: Calculate from reviews

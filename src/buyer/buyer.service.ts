@@ -21,6 +21,7 @@ import { Dish } from '../dish/entities/dish.entity';
 import { RestaurantReview } from '../review/entities/restaurant-review.entity';
 import { ItemReview } from '../review/entities/item-review.entity';
 import { UserFavoriteRestaurant } from '../favorites/entities/user-favorite-restaurant.entity';
+import { UserFavoriteItem } from '../favorites/entities/user-favorite-item.entity';
 
 @Injectable()
 export class BuyerService {
@@ -63,6 +64,8 @@ export class BuyerService {
     private readonly itemReviewRepository: Repository<ItemReview>,
     @InjectRepository(UserFavoriteRestaurant)
     private readonly favoriteRestaurantRepository: Repository<UserFavoriteRestaurant>,
+    @InjectRepository(UserFavoriteItem)
+    private readonly favoriteItemRepository: Repository<UserFavoriteItem>,
     private readonly locationService: LocationService,
   ) {}
 
@@ -452,6 +455,27 @@ export class BuyerService {
 
       this.logger.log(`🔍 Search query: "${query}" | Location: ${userLocation.lat}, ${userLocation.lng} | Type: ${type}`);
 
+      // Fetch user's favorite restaurants if userId is provided
+      let favoriteStoreIds: Set<number> = new Set();
+      let favoriteItemIds: Set<number> = new Set();
+      if (userId) {
+        const [favoriteStores, favoriteItems] = await Promise.all([
+          this.favoriteRestaurantRepository.find({
+            where: { user: { id: userId } },
+            select: ['store'],
+            relations: ['store']
+          }),
+          this.favoriteItemRepository.find({
+            where: { user: { id: userId } },
+            select: ['item'],
+            relations: ['item']
+          })
+        ]);
+        favoriteStoreIds = new Set(favoriteStores.map(f => f.store.id));
+        favoriteItemIds = new Set(favoriteItems.map(f => f.item.id));
+        this.logger.log(`❤️ User has ${favoriteStoreIds.size} favorite restaurants and ${favoriteItemIds.size} favorite items for search`);
+      }
+
       const results = {
         restaurants: [] as any[],
         items: [] as any[],
@@ -461,9 +485,9 @@ export class BuyerService {
       // Search restaurants
       if (type === 'all' || type === 'restaurant') {
         results.restaurants = await this.searchRestaurants(
-          query, userLocation.lat, userLocation.lng, radius, 
+          query, userLocation.lat, userLocation.lng, radius,
           category_id, store_id, sort_by, sort_order, page, limit,
-          dietary_preference, min_price, max_price
+          dietary_preference, min_price, max_price, favoriteStoreIds
         );
       }
 
@@ -472,7 +496,7 @@ export class BuyerService {
         results.items = await this.searchItems(
           query, userLocation.lat, userLocation.lng, radius,
           category_id, store_id, sort_by, sort_order, page, limit,
-          dietary_preference, min_price, max_price
+          dietary_preference, min_price, max_price, favoriteItemIds
         );
       }
 
@@ -482,7 +506,7 @@ export class BuyerService {
       }
 
       // Get top 5 highly rated restaurants (always included regardless of search query)
-      const topRatedRestaurants = await this.getTopRatedRestaurants(userLocation.lat, userLocation.lng, radius);
+      const topRatedRestaurants = await this.getTopRatedRestaurants(userLocation.lat, userLocation.lng, radius, favoriteStoreIds);
 
       // Calculate total results
       const totalResults = results.restaurants.length + results.items.length + results.categories.length;
@@ -529,7 +553,8 @@ export class BuyerService {
     query: string, userLat: number, userLng: number, radius: number,
     categoryId?: number, storeId?: number, sortBy: string = 'distance',
     sortOrder: string = 'asc', page: number = 1, limit: number = 20,
-    dietaryPreference?: string, minPrice?: number, maxPrice?: number
+    dietaryPreference?: string, minPrice?: number, maxPrice?: number,
+    favoriteStoreIds: Set<number> = new Set()
   ) {
     try {
       const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
@@ -649,7 +674,8 @@ export class BuyerService {
             delivery_time: deliveryTime,
             offers_count: 0,
             items_count: itemsCount,
-            is_open: storeOpenData.isOpen
+            is_open: storeOpenData.isOpen,
+            is_favorite: favoriteStoreIds.has(restaurant.s_id)
           };
         })
       );
@@ -669,7 +695,8 @@ export class BuyerService {
     query: string, userLat: number, userLng: number, radius: number,
     categoryId?: number, storeId?: number, sortBy: string = 'distance',
     sortOrder: string = 'asc', page: number = 1, limit: number = 20,
-    dietaryPreference?: string, minPrice?: number, maxPrice?: number
+    dietaryPreference?: string, minPrice?: number, maxPrice?: number,
+    favoriteItemIds: Set<number> = new Set()
   ) {
     try {
       const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
@@ -787,7 +814,8 @@ export class BuyerService {
               id: item.c_id,
               name: item.c_name
             },
-            is_available: (item.q_available_count || 0) > 0
+            is_available: (item.q_available_count || 0) > 0,
+            is_favorite: favoriteItemIds.has(item.i_id)
           };
         })
       );
@@ -1007,13 +1035,26 @@ export class BuyerService {
       // Add categorized items if requested
       if (includeItems) {
         this.logger.log(`🍽️ Fetching categorized items for restaurant ${restaurantId}`);
-        
+
+        // Fetch user's favorite items if userId is provided
+        let favoriteItemIds: Set<number> = new Set();
+        if (userId) {
+          const favoriteItems = await this.favoriteItemRepository.find({
+            where: { user: { id: userId } },
+            select: ['item'],
+            relations: ['item']
+          });
+          favoriteItemIds = new Set(favoriteItems.map(f => f.item.id));
+          this.logger.log(`❤️ User has ${favoriteItemIds.size} favorite items for restaurant detail`);
+        }
+
         const categorizedItems = await this.getCategorizedItems(
-          restaurantId, 
-          search, 
-          dietaryPreference
+          restaurantId,
+          search,
+          dietaryPreference,
+          favoriteItemIds
         );
-        
+
         restaurantDetails.categories = categorizedItems;
         restaurantDetails.applied_filters = {
           search: search || undefined,
@@ -1082,7 +1123,7 @@ export class BuyerService {
   /**
    * Get restaurant menu
    */
-  async getRestaurantMenu(restaurantId: number, menuParams: any) {
+  async getRestaurantMenu(restaurantId: number, menuParams: any, userId?: number) {
     try {
       this.logger.log(`📜 Getting menu for restaurant ID: ${restaurantId}`);
 
@@ -1098,8 +1139,20 @@ export class BuyerService {
         throw new Error('Restaurant not found');
       }
 
+      // Fetch user's favorite items if userId is provided
+      let favoriteItemIds: Set<number> = new Set();
+      if (userId) {
+        const favoriteItems = await this.favoriteItemRepository.find({
+          where: { user: { id: userId } },
+          select: ['item'],
+          relations: ['item']
+        });
+        favoriteItemIds = new Set(favoriteItems.map(f => f.item.id));
+        this.logger.log(`❤️ User has ${favoriteItemIds.size} favorite items for menu`);
+      }
+
       // Get menu categories with items
-      const categories = await this.getMenuCategories(restaurantId, menuParams);
+      const categories = await this.getMenuCategories(restaurantId, menuParams, favoriteItemIds);
 
       // Calculate totals
       const totalItems = categories.reduce((total, category) => total + category.items.length, 0);
@@ -1137,7 +1190,7 @@ export class BuyerService {
   /**
    * Get menu categories with items
    */
-  private async getMenuCategories(restaurantId: number, menuParams: any) {
+  private async getMenuCategories(restaurantId: number, menuParams: any, favoriteItemIds: Set<number> = new Set()) {
     try {
       let categoryQuery = this.categoryRepository
         .createQueryBuilder('c')
@@ -1168,7 +1221,7 @@ export class BuyerService {
       // Get items for each category
       const categoriesWithItems = await Promise.all(
         categories.map(async (category) => {
-          const items = await this.getMenuItems(restaurantId, category.id, menuParams);
+          const items = await this.getMenuItems(restaurantId, category.id, menuParams, favoriteItemIds);
           
           return {
             id: category.id,
@@ -1194,7 +1247,7 @@ export class BuyerService {
   /**
    * Get menu items for a category
    */
-  private async getMenuItems(restaurantId: number, categoryId: number, params: any) {
+  private async getMenuItems(restaurantId: number, categoryId: number, params: any, favoriteItemIds: Set<number> = new Set()) {
     try {
       let itemQuery = this.itemRepository
         .createQueryBuilder('i')
@@ -1315,7 +1368,8 @@ export class BuyerService {
             is_recommended: item.i_is_recommended || false,
             tax_rate: parseFloat(item.i_tax_rate) || null,
             tax_type: item.i_tax_type || null,
-            hsn_code: item.i_hsn_code || null
+            hsn_code: item.i_hsn_code || null,
+            is_favorite: favoriteItemIds.has(item.i_id)
           };
         })
       );
@@ -1499,7 +1553,7 @@ export class BuyerService {
   /**
    * Get top 5 highly rated restaurants within specified radius
    */
-  private async getTopRatedRestaurants(userLat: number, userLng: number, radius: number = 10) {
+  private async getTopRatedRestaurants(userLat: number, userLng: number, radius: number = 10, favoriteStoreIds: Set<number> = new Set()) {
     try {
       const distanceQuery = this.locationService.buildDistanceQuery(userLat, userLng, radius);
       const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radius);
@@ -1568,7 +1622,8 @@ export class BuyerService {
             delivery_time: deliveryTime,
             offers_count: 0,
             items_count: itemsCount,
-            is_open: storeOpenData.isOpen
+            is_open: storeOpenData.isOpen,
+            is_favorite: favoriteStoreIds.has(restaurant.s_id)
           };
         })
       );
@@ -1893,9 +1948,10 @@ export class BuyerService {
    * Get categorized items for a restaurant with filtering and sorting
    */
   private async getCategorizedItems(
-    restaurantId: number, 
-    search?: string, 
-    dietaryPreference?: string
+    restaurantId: number,
+    search?: string,
+    dietaryPreference?: string,
+    favoriteItemIds: Set<number> = new Set()
   ) {
     try {
       this.logger.log(`🍽️ Getting categorized items for restaurant ${restaurantId}`);
@@ -1982,7 +2038,8 @@ export class BuyerService {
             is_available: item.status,
             is_recommended: item.is_recommended,
             dietary_preference: dietaryPref,
-            has_customizations: hasCustomizations
+            has_customizations: hasCustomizations,
+            is_favorite: favoriteItemIds.has(item.id)
           });
         }
 

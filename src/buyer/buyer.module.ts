@@ -45,6 +45,7 @@ import { ItemReview } from '../review/entities/item-review.entity';
 import { UserDeviceToken } from '../user/entities/user-device-token.entity';
 import { Dish } from '../dish/entities/dish.entity';
 import { UserFavoriteRestaurant } from '../favorites/entities/user-favorite-restaurant.entity';
+import { UserFavoriteItem } from '../favorites/entities/user-favorite-item.entity';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { UserFavoriteRestaurant } from '../favorites/entities/user-favorite-rest
       UserDeviceToken,
       Dish,
       UserFavoriteRestaurant,
+      UserFavoriteItem,
     ]),
     HttpModule.register({
       timeout: 10000,

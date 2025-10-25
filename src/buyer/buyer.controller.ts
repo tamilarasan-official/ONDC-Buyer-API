@@ -418,9 +418,11 @@ export class BuyerController {
   })
   async getRestaurantMenu(
     @Param('id') restaurantId: string,
-    @Query() menuParams: MenuRequestDto
+    @Query() menuParams: MenuRequestDto,
+    @Req() req?: any
   ) {
-    return this.buyerService.getRestaurantMenu(parseInt(restaurantId), menuParams);
+    const userId = req?.user?.id;
+    return this.buyerService.getRestaurantMenu(parseInt(restaurantId), menuParams, userId);
   }
 
   @Get('items/:id/customizations')
