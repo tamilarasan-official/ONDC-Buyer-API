@@ -2018,8 +2018,9 @@ export class BuyerService {
           const basePrice = item.prices?.[0]?.base_price || 0;
           const currency = item.prices?.[0]?.currency || 'INR';
 
-          // Check if item has customizations (more efficient)
-          const hasCustomizations = await this.checkItemHasCustomizations(item.id);
+          // Always get customizations for restaurant detail items
+          const customizations = await this.getCustomizationGroups(item.id);
+          const hasCustomizations = customizations.length > 0;
 
           items.push({
             id: item.id,
@@ -2036,6 +2037,7 @@ export class BuyerService {
             is_recommended: item.is_recommended,
             dietary_preference: dietaryPref,
             has_customizations: hasCustomizations,
+            customizations: customizations,
             is_favorite: favoriteItemIds.has(item.id)
           });
         }

@@ -300,11 +300,10 @@ export class RestaurantItemDto {
   has_customizations: boolean;
 
   @ApiProperty({
-    description: 'Customization groups',
-    type: [ItemCustomizationGroupDto],
-    required: false
+    description: 'Customization groups (always included in response)',
+    type: [ItemCustomizationGroupDto]
   })
-  customizations?: ItemCustomizationGroupDto[];
+  customizations: ItemCustomizationGroupDto[];
 
   @ApiProperty({
     description: 'Is item marked as favorite by the logged-in user',
