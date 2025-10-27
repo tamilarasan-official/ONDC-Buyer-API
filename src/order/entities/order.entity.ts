@@ -63,6 +63,9 @@ export class Order {
   @Column({ type: "timestamp", nullable: true })
   delivered_at: Date;
 
+  @Column({ type: "decimal", precision: 3, scale: 2, nullable: true })
+  overall_rating: number; // 1.00 - 5.00 rating
+
   @CreateDateColumn()
   created_at: Date;
 

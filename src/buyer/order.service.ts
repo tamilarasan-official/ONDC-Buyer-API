@@ -711,6 +711,7 @@ export class OrderService {
       id: order.id,
       order_number: order.order_number,
       status: order.status,
+      overall_rating: order.overall_rating ? Number(order.overall_rating) : null,
       payment_method: order.payment_method,
       payment_status: order.payment_status,
       restaurant: {

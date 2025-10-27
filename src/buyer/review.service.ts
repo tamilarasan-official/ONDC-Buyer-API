@@ -168,6 +168,13 @@ export class ReviewService {
         // You might want to create a ReviewPhotos table to store these
       }
 
+      // Save overall rating to order
+      await this.orderRepository.update(
+        { id: createReviewDto.order_id },
+        { overall_rating: createReviewDto.overall_rating }
+      );
+      this.logger.log(`Saved overall rating ${createReviewDto.overall_rating} to order ${createReviewDto.order_id}`);
+
       this.logger.log(`Unified review created successfully for order ${createReviewDto.order_id}`);
       return {
         success: true,
