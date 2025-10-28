@@ -584,12 +584,21 @@ export class OrderService {
     try {
       this.logger.log(`💳 Updating payment status for order ${orderId}: ${paymentStatus}`);
 
-      const updateData: any = { payment_status: paymentStatus };
-      if (paymentId) {
-        updateData.payment_id = paymentId;
-      }
+      // Update order payment status (Order table only has payment_status field)
+      await this.orderRepository.update(orderId, {
+        payment_status: paymentStatus
+      });
 
-      await this.orderRepository.update(orderId, updateData);
+      // If paymentId is provided, update it in the Payment table (not Order table)
+      if (paymentId) {
+        await this.paymentRepository.update(
+          { order: { id: orderId } },
+          {
+            payment_id: paymentId,
+            payment_status: paymentStatus === 'paid' ? 'success' : paymentStatus
+          }
+        );
+      }
 
       // Create tracking entry
       await this.createOrderTracking(orderId, paymentStatus, `Payment ${paymentStatus}`);
