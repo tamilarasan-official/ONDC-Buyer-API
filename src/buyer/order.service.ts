@@ -442,6 +442,7 @@ export class OrderService {
   async verifyPayment(userId: number, verifyPaymentDto: VerifyPaymentDto) {
     try {
       this.logger.log(`🔍 Verifying payment for user ${userId}`);
+      this.logger.log(`🔍 Payment details: razorpay_order_id=${verifyPaymentDto.razorpay_order_id}, razorpay_payment_id=${verifyPaymentDto.razorpay_payment_id}`);
 
       const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = verifyPaymentDto;
 
@@ -453,26 +454,42 @@ export class OrderService {
       );
 
       if (!isValid) {
+        this.logger.error(`❌ Invalid payment signature`);
         throw new BadRequestException('Invalid payment signature');
       }
 
-      // Find order by Razorpay order ID
-      const order = await this.orderRepository
-        .createQueryBuilder('o')
+      this.logger.log(`✅ Payment signature verified`);
+
+      // Find payment record by Razorpay order ID (payment_id temporarily stores razorpay_order_id)
+      const payment = await this.paymentRepository
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.order', 'o')
         .leftJoin('o.user', 'u')
-        .where('o.order_number = :orderNumber', { orderNumber: razorpay_order_id })
+        .where('p.payment_id = :razorpayOrderId', { razorpayOrderId: razorpay_order_id })
         .andWhere('u.id = :userId', { userId })
         .getOne();
 
-      if (!order) {
+      if (!payment || !payment.order) {
+        this.logger.error(`❌ Order not found for razorpay_order_id: ${razorpay_order_id}`);
         throw new NotFoundException('Order not found');
       }
+
+      const order = payment.order;
+      this.logger.log(`✅ Found order ${order.order_number} (ID: ${order.id})`);
+
+      // Update payment record with actual payment ID
+      await this.paymentRepository.update(payment.id, {
+        payment_id: razorpay_payment_id,
+        payment_status: 'paid'
+      });
 
       // Update payment status
       await this.updatePaymentStatus(order.id, 'paid', razorpay_payment_id);
 
       // Update order status
       await this.updateOrderStatus(order.id, 'confirmed');
+
+      this.logger.log(`✅ Payment verified successfully for order ${order.order_number}`);
 
       // Get updated order data
       const orderData = await this.getOrderById(order.id, userId);
