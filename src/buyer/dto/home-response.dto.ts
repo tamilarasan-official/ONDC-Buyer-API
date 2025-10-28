@@ -1,5 +1,33 @@
 import { ApiProperty } from '@nestjs/swagger';
 
+export class RestaurantTimingDto {
+  @ApiProperty({
+    description: 'Day of week (1-7, Monday to Sunday)',
+    example: 1,
+    type: 'number'
+  })
+  day: number;
+
+  @ApiProperty({
+    description: 'Opening time in HHMM format',
+    example: '0900'
+  })
+  open_time: string;
+
+  @ApiProperty({
+    description: 'Closing time in HHMM format',
+    example: '2200'
+  })
+  close_time: string;
+
+  @ApiProperty({
+    description: 'Is restaurant open on this day',
+    example: true,
+    type: 'boolean'
+  })
+  is_open: boolean;
+}
+
 export class LocationDto {
   @ApiProperty({
     description: 'Latitude coordinate',
@@ -116,6 +144,13 @@ export class NearbyRestaurantDto {
   rating: number;
 
   @ApiProperty({
+    description: 'Total number of reviews',
+    example: 150,
+    type: 'number'
+  })
+  total_reviews: number;
+
+  @ApiProperty({
     description: 'Estimated delivery time',
     example: '25-30 mins'
   })
@@ -127,6 +162,12 @@ export class NearbyRestaurantDto {
     type: 'number'
   })
   offers_count: number;
+
+  @ApiProperty({
+    description: 'Restaurant timings',
+    type: [RestaurantTimingDto]
+  })
+  timings: RestaurantTimingDto[];
 }
 
 export class PopularCategoryDto {
@@ -305,12 +346,55 @@ export class PromotionalBannerDto {
   background_color: string;
 }
 
+export class PaginationMetaDto {
+  @ApiProperty({
+    description: 'Current page number',
+    example: 1,
+    type: 'number'
+  })
+  current_page: number;
+
+  @ApiProperty({
+    description: 'Total number of pages',
+    example: 5,
+    type: 'number'
+  })
+  total_pages: number;
+
+  @ApiProperty({
+    description: 'Total number of restaurants',
+    example: 87,
+    type: 'number'
+  })
+  total_count: number;
+
+  @ApiProperty({
+    description: 'Number of restaurants per page',
+    example: 20,
+    type: 'number'
+  })
+  page_size: number;
+
+  @ApiProperty({
+    description: 'Whether there are more restaurants to load',
+    example: true,
+    type: 'boolean'
+  })
+  has_more: boolean;
+}
+
 export class HomeDataDto {
   @ApiProperty({
     description: 'Nearby restaurants within radius',
     type: [NearbyRestaurantDto]
   })
   nearby_restaurants: NearbyRestaurantDto[];
+
+  @ApiProperty({
+    description: 'Pagination metadata for nearby restaurants',
+    type: PaginationMetaDto
+  })
+  pagination: PaginationMetaDto;
 
   @ApiProperty({
     description: '"What\'s On Your Mind?" dish categories',

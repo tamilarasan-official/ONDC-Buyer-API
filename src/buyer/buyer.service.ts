@@ -72,8 +72,8 @@ export class BuyerService {
   /**
    * Get home page data with nearby restaurants, trending items, and promotional banner
    */
-  async getHomeData(userId?: number, deviceLat?: number, deviceLng?: number, vegMode?: boolean) {
-    this.logger.log(`🏠 Getting home page data for user: ${userId || 'guest'}`);
+  async getHomeData(userId?: number, deviceLat?: number, deviceLng?: number, vegMode?: boolean, page: number = 1, limit: number = 20) {
+    this.logger.log(`🏠 Getting home page data for user: ${userId || 'guest'} (page: ${page}, limit: ${limit})`);
     this.logger.log(`📍 Input location - deviceLat: ${deviceLat}, deviceLng: ${deviceLng}`);
 
     try {
@@ -85,10 +85,10 @@ export class BuyerService {
         this.logger.log(`📍 User location from service: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
       } else {
         this.logger.log(`🔍 Using device location for guest user`);
-        userLocation = { 
-          lat: deviceLat || 9.9352300, 
-          lng: deviceLng || 78.1304040, 
-          source: 'device_location' as const 
+        userLocation = {
+          lat: deviceLat || 9.9352300,
+          lng: deviceLng || 78.1304040,
+          source: 'device_location' as const
         };
         this.logger.log(`📍 Guest location: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`);
       }
@@ -99,22 +99,29 @@ export class BuyerService {
 
       // Get all data in parallel
       this.logger.log(`🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`);
-      const [nearbyRestaurants, whatsOnYourMind, promotionalBanner] = await Promise.all([
-        this.getFeaturedRestaurants(userLocation.lat, userLocation.lng, radiusKm, vegMode, userId),
+      const [restaurantsResult, whatsOnYourMind, promotionalBanner] = await Promise.all([
+        this.getFeaturedRestaurants(userLocation.lat, userLocation.lng, radiusKm, vegMode, userId, page, limit),
         this.getWhatsOnYourMind(),
         this.getPromotionalBanner()
       ]);
 
-      this.logger.log(`📊 Results - Restaurants: ${nearbyRestaurants.length}, Dishes: ${whatsOnYourMind.length}`);
+      this.logger.log(`📊 Results - Restaurants: ${restaurantsResult.restaurants.length}/${restaurantsResult.total}, Dishes: ${whatsOnYourMind.length}`);
 
       const data = {
-        nearby_restaurants: nearbyRestaurants,
+        nearby_restaurants: restaurantsResult.restaurants,
+        pagination: {
+          current_page: page,
+          total_pages: Math.ceil(restaurantsResult.total / limit),
+          total_count: restaurantsResult.total,
+          page_size: limit,
+          has_more: page * limit < restaurantsResult.total
+        },
         whats_on_your_mind: whatsOnYourMind,
         promotional_banner: promotionalBanner
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);
-      
+
       return {
         success: true,
         message: 'Home page data retrieved successfully',
@@ -130,9 +137,9 @@ export class BuyerService {
   /**
    * Get nearby restaurants (was getFeaturedRestaurants)
    */
-  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean, userId?: number) {
+  private async getFeaturedRestaurants(userLat: number, userLng: number, radiusKm: number, vegMode?: boolean, userId?: number, page: number = 1, limit: number = 20) {
     try {
-      this.logger.log(`🔍 Getting nearby restaurants within ${radiusKm}km of ${userLat}, ${userLng}`);
+      this.logger.log(`🔍 Getting nearby restaurants within ${radiusKm}km of ${userLat}, ${userLng} (page: ${page}, limit: ${limit})`);
       this.logger.log(`🥬 Veg mode: ${vegMode ? 'enabled' : 'disabled'}`);
 
       // First, let's check total stores in database
@@ -153,7 +160,7 @@ export class BuyerService {
 
       const distanceFilter = this.locationService.buildDistanceFilter(userLat, userLng, radiusKm);
       const distanceSubquery = this.locationService.buildDistanceQuery(userLat, userLng, radiusKm);
-      
+
       this.logger.log(`🔍 Distance filter: ${distanceFilter}`);
       this.logger.log(`🔍 Distance subquery: ${distanceSubquery}`);
 
@@ -180,18 +187,24 @@ export class BuyerService {
         .addOrderBy('s.name', 'ASC'); // Secondary sort for same distances
 
       this.logger.log(`🔍 Executing restaurant query...`);
-      const stores = await queryBuilder.getRawMany();
-      this.logger.log(`🏪 Found ${stores.length} nearby restaurants`);
-      
-      // Debug: Log all found stores
-      stores.forEach((store, index) => {
-        this.logger.log(`🏪 Store ${index + 1}: ${store.s_name} (ID: ${store.s_id}) - Distance: ${store.distance}km - Lat: ${store.sl_gps_lat}, Lng: ${store.sl_gps_lng}`);
-      });
+      const allStores = await queryBuilder.getRawMany();
+      const totalCount = allStores.length;
+      this.logger.log(`🏪 Found ${totalCount} nearby restaurants in total`);
 
-      if (stores.length === 0) {
+      if (totalCount === 0) {
         this.logger.warn(`⚠️ No restaurants found within ${radiusKm}km of ${userLat}, ${userLng}`);
-        return [];
+        return { restaurants: [], total: 0 };
       }
+
+      // Apply pagination
+      const skip = (page - 1) * limit;
+      const stores = allStores.slice(skip, skip + limit);
+      this.logger.log(`📄 Returning page ${page}: ${stores.length} restaurants (${skip + 1}-${skip + stores.length} of ${totalCount})`);
+
+      // Debug: Log paginated stores
+      stores.forEach((store, index) => {
+        this.logger.log(`🏪 Store ${skip + index + 1}: ${store.s_name} (ID: ${store.s_id}) - Distance: ${store.distance}km - Lat: ${store.sl_gps_lat}, Lng: ${store.sl_gps_lng}`);
+      });
 
       // Get user's favorite restaurant IDs
       let favoriteStoreIds: Set<number> = new Set();
@@ -210,21 +223,28 @@ export class BuyerService {
       const storesWithRatings = await Promise.all(
         stores.map(async (store, index) => {
           this.logger.log(`🔍 Processing restaurant ${index + 1}/${stores.length}: ${store.s_name} (ID: ${store.s_id})`);
-          
+
           const distance = store.distance;
           this.logger.log(`📍 Distance: ${distance}km`);
-          
+
           // Get rating data
           const ratingData = await this.calculateRestaurantRating(store.s_id);
           this.logger.log(`⭐ Rating: ${ratingData.rating} (${ratingData.reviewCount} reviews)`);
-          
+
           // Check if store is open
           const storeOpenData = await this.isStoreOpen(store.s_id);
           this.logger.log(`🕐 Store open: ${storeOpenData.isOpen}`);
-          
+
           // Calculate delivery time
           const deliveryTime = this.calculateDeliveryTime(distance, store.s_id);
           this.logger.log(`🚚 Delivery time: ${deliveryTime}`);
+
+          // Fetch timings for the restaurant
+          const timings = await this.storeTimingsRepository.find({
+            where: { store: { id: store.s_id } },
+            order: { day_from: 'ASC' }
+          });
+          this.logger.log(`🕐 Found ${timings.length} timing entries for restaurant ${store.s_id}`);
 
           return {
             id: store.s_id,
@@ -240,9 +260,16 @@ export class BuyerService {
             },
             distance: Math.round(distance * 100) / 100,
             rating: ratingData.rating,
+            total_reviews: ratingData.reviewCount,
             delivery_time: deliveryTime,
             offers_count: 0, // Will be calculated separately
-            is_favorite: favoriteStoreIds.has(store.s_id)
+            is_favorite: favoriteStoreIds.has(store.s_id),
+            timings: timings.map(timing => ({
+              day: timing.day_from,
+              open_time: timing.time_from,
+              close_time: timing.time_to,
+              is_open: this.isDayOpen(timing.day_from, timing.time_from, timing.time_to)
+            }))
           };
         })
       );
@@ -260,12 +287,12 @@ export class BuyerService {
         // Finally by name
         return a.name.localeCompare(b.name);
       });
-      
+
       this.logger.log(`✅ Successfully processed and sorted ${storesWithRatings.length} restaurants`);
-      return storesWithRatings;
+      return { restaurants: storesWithRatings, total: totalCount };
     } catch (error) {
       this.logger.error(`❌ Error getting nearby restaurants: ${error.message}`, error.stack);
-      return [];
+      return { restaurants: [], total: 0 };
     }
   }
 

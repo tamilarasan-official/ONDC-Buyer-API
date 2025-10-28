@@ -60,6 +60,20 @@ export class BuyerController {
     description: 'Filter for vegetarian-only restaurants and items',
     example: false
   })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number for pagination (default: 1)',
+    example: 1
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Number of restaurants per page (default: 20)',
+    example: 20
+  })
   @ApiResponse({
     status: 200,
     description: 'Home page data retrieved successfully',
@@ -105,14 +119,18 @@ export class BuyerController {
     @Query('lat') deviceLat?: string,
     @Query('lng') deviceLng?: string,
     @Query('veg_mode') vegMode?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
     @Req() req?: any
   ) {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
     const isVegMode = vegMode === 'true';
+    const pageNum = page ? parseInt(page) : 1;
+    const limitNum = limit ? parseInt(limit) : 20;
 
-    return this.buyerService.getHomeData(userId, lat, lng, isVegMode);
+    return this.buyerService.getHomeData(userId, lat, lng, isVegMode, pageNum, limitNum);
   }
 
   @Get('search')
