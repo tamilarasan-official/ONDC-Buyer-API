@@ -1,4 +1,5 @@
 import { IsBoolean, IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { Transform } from "class-transformer";
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateDishDto {
@@ -21,19 +22,25 @@ export class CreateDishDto {
   description?: string;
 
   @ApiProperty({
-    description: 'Icon URL for the dish',
-    example: 'https://example.com/pizza-icon.png',
-    required: false
+    description: 'Food type of the dish',
+    example: 'Italian',
+    required: true
   })
-  @IsOptional()
   @IsString()
-  icon?: string;
+  @IsNotEmpty()
+  food_type: string;
 
   @ApiProperty({
     description: 'Status of the dish (active/inactive)',
     example: true,
     required: false,
     default: true
+  })
+  @Transform(({ value }) => {
+    if (typeof value === 'string') {
+      return value.toLowerCase() === 'true';
+    }
+    return value;
   })
   @IsBoolean()
   @IsOptional()
