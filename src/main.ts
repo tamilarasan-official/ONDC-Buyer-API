@@ -38,7 +38,7 @@ async function bootstrap() {
     .addTag('Buyer App APIs', 'Core buyer application endpoints')
     .addTag('Authentication', 'User authentication and authorization')
     .addTag('User Management', 'User profile and address management')
-    .addTag('Dish Management', 'Dish CRUD operations')
+    .addTag('Dish Management', 'Dish CRUD operations with file upload support (jpg, png, webp)')
     .addTag('Category Management', 'Category CRUD operations')
     .addTag('Favorites', 'User favorites management for items and restaurants')
     .addBearerAuth(
@@ -52,7 +52,7 @@ async function bootstrap() {
       },
       'JWT-auth',
     )
-    .addServer('http://localhost:3002', 'Development server')
+    .addServer('http://localhost:3008', 'Development server')
     .addServer('https://devapi.tazty.in', 'Production server')
     .build();
 
@@ -76,7 +76,7 @@ async function bootstrap() {
     `,
   });
 
-  const port = process.env.PORT ?? 3000;
+  const port = process.env.PORT ?? 3008;
   await app.listen(port);
   
   console.log(`🚀 Application is running on: http://localhost:${port}`);

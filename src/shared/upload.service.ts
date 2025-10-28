@@ -58,6 +58,60 @@ export class UploadService {
   
     return `${this.bucketUrl}/${this.bucketName}/${this.envName}/${key}`;
   }
+
+  get bucketBaseUrl():string {
+    return `${this.bucketUrl}/${this.bucketName}`;
+  }
+
+  async deleteFile(key: string) {
+    await this.s3.deleteObject({
+      Bucket: this.bucketName || '',
+      Key: `${this.envName}/${key}`,
+    }).promise();
+  }
+
+  async deleteFileFromUrl(url: string) {
+    try {
+      // Handle both URL formats:
+      // Format 1: https://bucket.your-endpoint.com/path/to/file
+      // Format 2: https://your-endpoint.com/bucket/path/to/file
+      
+      let key = '';
+      
+      // Try to extract key from new format (with bucket in URL)
+      if (url.includes(this.bucketBaseUrl)) {
+        key = url.split(this.bucketBaseUrl + '/')[1] || url.split(this.bucketBaseUrl)[1];
+      } 
+      // Handle older format where bucket is in path (database format)
+      else if (url.includes(`/${this.bucketName}/`)) {
+        key = url.split(`/${this.bucketName}/`)[1];
+      } 
+      // Fallback: try to find bucket name in URL
+      else {
+        const urlParts = url.split('/');
+        const bucketIndex = urlParts.findIndex(part => part === this.bucketName);
+        if (bucketIndex !== -1 && bucketIndex < urlParts.length - 1) {
+          key = urlParts.slice(bucketIndex + 1).join('/');
+        }
+      }
+      
+      if (!key) {
+        console.error('Failed to extract S3 key from URL:', url);
+        return false;
+      }
+
+      // The key should already include env path (e.g., "production/stores/1/logo/file.jpg")
+      await this.s3.deleteObject({
+        Bucket: this.bucketName || '',
+        Key: key,
+      }).promise();
+      
+      return true;
+    } catch (error) {
+      console.error('Error deleting file from S3:', error);
+      return false;
+    }
+  }
 }
 
 

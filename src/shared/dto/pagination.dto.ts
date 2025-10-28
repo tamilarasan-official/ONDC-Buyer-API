@@ -6,14 +6,14 @@ export class PaginationDto {
   @Type(() => Number)
   @IsPositive()
   @Min(1)
-  page?: number = 1;
+  page?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsPositive()
   @Min(1)
   @Max(100)
-  limit?: number = 10;
+  limit?: number;
 
   @IsOptional()
   search?: string;
@@ -26,6 +26,9 @@ export class PaginationDto {
 
   @IsOptional()
   status?: boolean;
+
+  @IsOptional()
+  food_type?: string;
 
   @IsOptional()
   relations?: string;
