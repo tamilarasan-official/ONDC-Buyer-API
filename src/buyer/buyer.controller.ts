@@ -91,7 +91,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get home page data",
     description:
-      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner. Uses location-based filtering with Haversine formula for distance calculation.',
+      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner (dynamically fetched from banner management system). Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants.',
   })
   @ApiQuery({
     name: "lat",

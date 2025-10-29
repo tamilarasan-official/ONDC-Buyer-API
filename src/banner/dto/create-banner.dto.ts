@@ -45,7 +45,7 @@ export class CreateBannerDto {
   background_color?: string;
 
   @ApiProperty({
-    description: 'Promotion type (restaurant_id, category_id, or url)',
+    description: 'Promotion type - defines what happens when user clicks the banner: restaurant_id (navigates to restaurant detail page), category_id (navigates to category listing), url (opens external link)',
     example: 'restaurant_id',
     enum: ['restaurant_id', 'category_id', 'url'],
     required: false
@@ -55,7 +55,7 @@ export class CreateBannerDto {
   promotion_type?: string;
 
   @ApiProperty({
-    description: 'Promotion link (URL or ID based on promotion_type)',
+    description: 'Promotion link value - must correspond to promotion_type: numeric ID for restaurant_id/category_id, or full URL for url type (e.g., "123" for restaurant, "https://example.com" for url)',
     example: '1',
     required: false
   })

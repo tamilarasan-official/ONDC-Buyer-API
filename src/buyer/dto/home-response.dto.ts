@@ -431,7 +431,7 @@ export class HomeDataDto {
   whats_on_your_mind: WhatsOnYourMindDto[];
 
   @ApiProperty({
-    description: 'Promotional banner information',
+    description: 'Promotional banner information (fetched from banner management system - returns first active banner ordered by sequence, or default banner if none available)',
     type: PromotionalBannerDto
   })
   promotional_banner: PromotionalBannerDto;
