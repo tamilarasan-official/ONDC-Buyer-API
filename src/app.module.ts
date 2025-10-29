@@ -23,6 +23,7 @@ import { CatalogSyncModule } from './catalog-sync/catalog-sync.module';
 import { BuyerModule } from './buyer/buyer.module';
 import { OtpModule } from './otp/otp.module';
 import { FavoritesModule } from './favorites/favorites.module';
+import { BannerModule } from './banner/banner.module';
 import 'dotenv/config';
 
 
@@ -91,6 +92,7 @@ import 'dotenv/config';
     BuyerModule,
     OtpModule,
     FavoritesModule,
+    BannerModule,
   ],
   controllers: [AppController],
   providers: [AppService],
