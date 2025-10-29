@@ -30,33 +30,38 @@ export class RestaurantTimingDto {
 
 export class ItemTimingDto {
   @ApiProperty({
-    description: "Starting day of week (1-7, Monday to Sunday)",
+    description:
+      "Starting day of week (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)",
     example: 1,
     type: "number",
   })
   day_from: number;
 
   @ApiProperty({
-    description: "Ending day of week (1-7, Monday to Sunday)",
+    description:
+      "Ending day of week (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday). Can be same as day_from for single day, or wrap around (e.g., 5-1 for Fri-Mon)",
     example: 5,
     type: "number",
   })
   day_to: number;
 
   @ApiProperty({
-    description: "Available from time in HHMM format",
+    description:
+      "Available from time in 24-hour HHMM format (e.g., '0900' for 9:00 AM, '1430' for 2:30 PM, '0000' for midnight)",
     example: "0900",
   })
   time_from: string;
 
   @ApiProperty({
-    description: "Available to time in HHMM format",
+    description:
+      "Available to time in 24-hour HHMM format (e.g., '2200' for 10:00 PM, '0200' for 2:00 AM). Can be less than time_from for overnight periods (e.g., '2200'-'0200')",
     example: "2200",
   })
   time_to: string;
 
   @ApiProperty({
-    description: "Is item currently available based on this timing",
+    description:
+      "Real-time availability indicator - true if the current server time falls within this timing window (considers both day and time). Calculated dynamically for each request.",
     example: true,
     type: "boolean",
   })
@@ -363,9 +368,18 @@ export class RestaurantItemDto {
   is_favorite: boolean;
 
   @ApiProperty({
-    description: "Item availability timings",
+    description: "Item availability timings - defines when this item is available for order. Each timing object represents a time window with day range and time range. Example: breakfast items available Mon-Fri 6AM-11AM, or all-day items available Mon-Sun 24 hours. Empty array means no specific timing restrictions.",
     type: [ItemTimingDto],
     required: false,
+    example: [
+      {
+        day_from: 1,
+        day_to: 5,
+        time_from: "0600",
+        time_to: "1100",
+        is_available_now: true,
+      },
+    ],
   })
   timings?: ItemTimingDto[];
 }
