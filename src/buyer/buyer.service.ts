@@ -357,6 +357,7 @@ export class BuyerService {
               close_time: timing.time_to,
               is_open: this.isDayOpen(
                 timing.day_from,
+                timing.day_to,
                 timing.time_from,
                 timing.time_to,
               ),
@@ -1306,6 +1307,7 @@ export class BuyerService {
             close_time: timing.time_to,
             is_open: this.isDayOpen(
               timing.day_from,
+              timing.day_to,
               timing.time_from,
               timing.time_to,
             ),
@@ -1420,19 +1422,37 @@ export class BuyerService {
   }
 
   /**
-   * Check if specific day is open
+   * Check if restaurant is open now based on timing window
+   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
+   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
+   * @param openTime - Opening time in HHMM format
+   * @param closeTime - Closing time in HHMM format
    */
-  private isDayOpen(day: number, openTime: string, closeTime: string): boolean {
+  private isDayOpen(dayFrom: number, dayTo: number, openTime: string, closeTime: string): boolean {
     const now = new Date();
-    const currentDay = now.getDay();
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
+    let currentDay = now.getDay();
+    currentDay = currentDay === 0 ? 7 : currentDay; // Convert Sunday from 0 to 7
 
-    if (day !== currentDay) return false;
+    // Check if current day is within the day range
+    let isDayInRange = false;
+    if (dayFrom <= dayTo) {
+      // Normal range (e.g., Monday to Friday: 1-5)
+      isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
+    } else {
+      // Wrapped range (e.g., Friday to Monday: 5-1)
+      isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
+    }
 
+    if (!isDayInRange) return false;
+
+    // Check if current time is within operating hours
     const currentTime = now.getHours() * 100 + now.getMinutes();
     const open = parseInt(openTime);
     const close = parseInt(closeTime);
 
     if (close < open) {
+      // Overnight hours (e.g., 2200 to 0200)
       return currentTime >= open || currentTime <= close;
     }
 
@@ -2096,7 +2116,9 @@ export class BuyerService {
   ): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
     try {
       const now = new Date();
-      const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
+      let currentDay = now.getDay();
+      currentDay = currentDay === 0 ? 7 : currentDay; // Convert Sunday from 0 to 7
       const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
       // Check regular timings
