@@ -41,6 +41,7 @@ async function bootstrap() {
     .addTag('Dish Management', 'Dish CRUD operations with file upload support (jpg, png, webp)')
     .addTag('Category Management', 'Category CRUD operations')
     .addTag('Favorites', 'User favorites management for items and restaurants')
+    .addTag('ONDC Search', 'ONDC network search and catalog webhook endpoints')
     .addBearerAuth(
       {
         type: 'http',

@@ -1,4 +1,5 @@
-import { IsOptional, IsString, IsObject } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsArray, IsISO8601, IsOptional, IsString, ValidateNested } from 'class-validator';
 
 export class ONDCSearchRequestDto {
   context: {
@@ -88,6 +89,8 @@ export interface Provider {
     short_desc?: string;
     long_desc?: string;
     images?: string[];
+    food_type?: string;
+    tags?: string[];
   };
   '@ondc/org/fssai_license_no'?: string;
   ttl?: string;
@@ -244,6 +247,46 @@ export interface TagItem {
   value: string;
 }
 
+export class ContextDto {
+  @IsString() domain: string;
+  @IsString() country: string;
+  @IsString() city: string;
+  @IsString() action: string;
+  @IsString() core_version: string;
+  @IsString() bap_id: string;
+  @IsString() bap_uri: string;
+  @IsString() bpp_id: string;
+  @IsString() bpp_uri: string;
+  @IsString() transaction_id: string;
+  @IsString() message_id: string;
+  @IsISO8601() timestamp: string;
+}
+
+export class BppDescriptorDto {
+  @IsString() name: string;
+  @IsOptional() @IsString() symbol?: string;
+  @IsOptional() @IsString() short_desc?: string;
+  @IsOptional() @IsString() long_desc?: string;
+  @IsOptional() @IsArray() images?: string[];
+  @IsOptional() tags?: any[]; // If you have a Tag shape, replace 'any' with it.
+}
+
+export class CatalogDto {
+
+  @ValidateNested() @Type(() => BppDescriptorDto)
+  "bpp/descriptor": BppDescriptorDto;
+
+  @IsOptional() bpp_fulfillments?: any[]; 
+  
+  @IsArray() "bpp/providers": any[];       
+}
+
+export class MessageDto {
+  @ValidateNested() @Type(() => CatalogDto)
+  catalog: CatalogDto;
+}
+
+
 // New DTOs for ONDC protocol flow
 export class ONDCSearchAckDto {
   context: {
@@ -274,33 +317,9 @@ export class ONDCSearchAckDto {
 }
 
 export class ONDCOnSearchResponseDto {
-  context: {
-    domain: string;
-    country: string;
-    city: string;
-    action: string;
-    core_version: string;
-    bap_id: string;
-    bap_uri: string;
-    bpp_id: string;
-    bpp_uri: string;
-    transaction_id: string;
-    message_id: string;
-    timestamp: string;
-  };
+  @ValidateNested() @Type(() => ContextDto)
+  context: ContextDto;
 
-  message: {
-    catalog: {
-      'bpp/descriptor': {
-        name: string;
-        symbol?: string;
-        short_desc?: string;
-        long_desc?: string;
-        images?: string[];
-        tags?: Tag[];
-      };
-      'bpp/fulfillments'?: Fulfillment[];
-      'bpp/providers': Provider[];
-    };
-  };
+  @ValidateNested() @Type(() => MessageDto)
+  message: MessageDto;
 }
