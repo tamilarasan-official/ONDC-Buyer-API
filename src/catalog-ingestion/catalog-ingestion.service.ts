@@ -239,26 +239,65 @@ export class CatalogIngestionService {
 
     // 5. Upsert Categories
     if (provider.categories) {
+      // First, mark all existing categories as inactive
+      await queryRunner.manager.update(Category, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
+
+      // Then process current categories and mark them as active
       for (const category of provider.categories) {
         await this.upsertCategory(category, store, queryRunner);
         stats.categories_upserted++;
       }
+    } else {
+      // If no categories in current data, mark all existing categories as inactive
+      await queryRunner.manager.update(Category, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
     }
 
     // 6. Upsert Items
     if (provider.items) {
+      // First, mark all existing items as inactive
+      await queryRunner.manager.update(Item, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
+
+      // Then process current items and mark them as active
       for (const item of provider.items) {
         await this.upsertItem(item, store, provider, queryRunner);
         stats.items_upserted++;
       }
+    } else {
+      // If no items in current data, mark all existing items as inactive
+      await queryRunner.manager.update(Item, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
     }
 
     // 7. Upsert Offers
     if (provider.offers) {
+      // First, mark all existing offers as inactive
+      await queryRunner.manager.update(Offers, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
+
+      // Then process current offers and mark them as active
       for (const offer of provider.offers) {
         await this.upsertOffer(offer, store, queryRunner);
         stats.offers_upserted++;
       }
+    } else {
+      // If no offers in current data, mark all existing offers as inactive
+      await queryRunner.manager.update(Offers, 
+        { store: { id: store.id } }, 
+        { status: false }
+      );
     }
 
     // 8. Post-process customization parent_item relationships
@@ -464,6 +503,9 @@ export class CatalogIngestionService {
       // Use transformer to transform and validate data
       category = this.categoryTransformer.transform(categoryData, store, category);
       
+      // Ensure category is marked as active since it's in current data
+      category.status = true;
+      
       // Validate transformed data
       const validation = this.categoryTransformer.validateCategory(category);
       if (!validation.isValid) {
@@ -539,6 +581,9 @@ export class CatalogIngestionService {
     try {
       // Use transformer to transform and validate data
       item = this.itemTransformer.transform(itemData, store, item);
+      
+      // Ensure item is marked as active since it's in current data
+      item.status = true;
       
       // Validate transformed data
       const validation = this.itemTransformer.validateItem(item);
@@ -663,6 +708,9 @@ export class CatalogIngestionService {
     try {
       // Use transformer to transform and validate data
       offer = this.offerTransformer.transform(offerData, store, offer);
+      
+      // Ensure offer is marked as active since it's in current data
+      offer.status = true;
       
       // Validate transformed data
       const validation = this.offerTransformer.validateOffer(offer);

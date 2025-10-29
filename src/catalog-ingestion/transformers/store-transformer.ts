@@ -38,6 +38,12 @@ export class StoreTransformer extends BaseTransformer {
       // Extract GST number from tags
       store.gst_number = this.extractGstNumber(provider.tags || []);
       
+      // Extract food type from descriptor
+      store.food_type = this.sanitizeFoodType(provider.descriptor.food_type);
+      
+      // Extract and process tags from descriptor
+      store.tags = this.processStoreTags(provider.descriptor.tags || []);
+      
       // Set store status based on ONDC time.label field
       // "enable" -> true, "disable" -> false, default -> true
       const statusLabel = provider.time?.label?.toLowerCase();
@@ -136,6 +142,49 @@ export class StoreTransformer extends BaseTransformer {
     return '';
   }
   
+  /**
+   * Sanitize and validate food type
+   */
+  private sanitizeFoodType(foodType: string | undefined): string {
+    if (!foodType || typeof foodType !== 'string') {
+      return '';
+    }
+    
+    // Common food types
+    const validFoodTypes = ['Veg', 'Non Veg', 'Vegan', 'Vegetarian', 'Non-Vegetarian'];
+    const normalized = foodType.trim();
+    
+    // Check if it matches any valid food type (case insensitive)
+    const matched = validFoodTypes.find(type => 
+      type.toLowerCase() === normalized.toLowerCase()
+    );
+    
+    if (matched) {
+      return matched;
+    }
+    
+    // If not in predefined list, sanitize and return
+    return this.sanitizeString(foodType, 50);
+  }
+  
+  /**
+   * Process store tags from descriptor
+   */
+  private processStoreTags(tags: string[]): string[] {
+    if (!Array.isArray(tags) || tags.length === 0) {
+      return [];
+    }
+    
+    // Sanitize each tag and filter out empty ones
+    const sanitizedTags = tags
+      .filter(tag => tag && typeof tag === 'string')
+      .map(tag => this.sanitizeString(tag.trim(), 100))
+      .filter(tag => tag.length > 0);
+    
+    // Return as string array
+    return sanitizedTags;
+  }
+
   /**
    * Validate store data completeness
    */

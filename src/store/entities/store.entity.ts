@@ -48,6 +48,12 @@ export class Store {
   @Column({ type: "varchar", length: 15, nullable: true })
   gst_number?: string; // GST registration number like "22AAAAA0000A1Z5"
 
+  @Column({ type: "varchar", length: 50, nullable: true })
+  food_type?: string; // Food type like "Veg", "Non Veg", "Vegan"
+
+  @Column({ type: "text", array: true, nullable: true })
+  tags?: string[]; // Array of cuisine tags like ["South Indian", "North Indian", "Chinese"]
+
   @Column({ type: "boolean", default: true })
   status: boolean;
 
