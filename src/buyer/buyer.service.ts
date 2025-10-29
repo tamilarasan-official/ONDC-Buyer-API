@@ -177,6 +177,8 @@ export class BuyerService {
           's.description as s_description',
           's.logo_url as s_logo_url',
           's.fssai_license_no as s_fssai_license_no',
+          's.food_type as s_food_type',
+          's.tags as s_tags',
           'sl.gps_lat as sl_gps_lat',
           'sl.gps_lng as sl_gps_lng',
           'sl.address_city as sl_address_city',
@@ -252,6 +254,8 @@ export class BuyerService {
             description: store.s_description,
             logo_url: store.s_logo_url,
             fssai_license: store.s_fssai_license_no,
+            food_type: store.s_food_type || '',
+            cuisine_tags: store.s_tags ? store.s_tags.join(', ') : '',
             location: {
               lat: store.sl_gps_lat,
               lng: store.sl_gps_lng,
@@ -363,6 +367,8 @@ export class BuyerService {
           's.id',
           's.name',
           's.logo_url',
+          's.food_type',
+          's.tags',
           'p.base_price',
           'p.currency',
           `(${distanceSubquery}) as distance`
@@ -397,7 +403,9 @@ export class BuyerService {
               currency: item.p_currency || 'INR'
             },
             distance: Math.round(distance * 100) / 100,
-            rating: ratingData.rating
+            rating: ratingData.rating,
+            food_type: item.s_food_type || undefined,
+            cuisine_tags: item.s_tags ? item.s_tags.join(', ') : undefined
           };
         })
       );
@@ -786,6 +794,8 @@ export class BuyerService {
           's.id',
           's.name',
           's.logo_url',
+          's.food_type',
+          's.tags',
           'p.base_price',
           'p.currency',
           'c.id',
@@ -842,7 +852,9 @@ export class BuyerService {
               name: item.c_name
             },
             is_available: (item.q_available_count || 0) > 0,
-            is_favorite: favoriteItemIds.has(item.i_id)
+            is_favorite: favoriteItemIds.has(item.i_id),
+            food_type: item.s_food_type || undefined,
+            cuisine_tags: item.s_tags ? item.s_tags.join(', ') : undefined
           };
         })
       );
@@ -1016,6 +1028,8 @@ export class BuyerService {
         logo_url: restaurant.logo_url,
         fssai_license: restaurant.fssai_license_no,
         gst_number: restaurant.gst_number,
+        food_type: restaurant.food_type || '',
+        cuisine_tags: restaurant.tags ? restaurant.tags.join(', ') : '',
         locations: restaurant.locations?.map(location => ({
           id: location.id,
           lat: location.gps_lat,
@@ -1079,7 +1093,8 @@ export class BuyerService {
           restaurantId,
           search,
           dietaryPreference,
-          favoriteItemIds
+          favoriteItemIds,
+          restaurant // Pass store information for food_type and tags
         );
 
         restaurantDetails.categories = categorizedItems;
@@ -1159,7 +1174,7 @@ export class BuyerService {
         .createQueryBuilder('s')
         .where('s.id = :id', { id: restaurantId })
         .andWhere('s.status = :status', { status: true })
-        .select(['s.id', 's.name'])
+        .select(['s.id', 's.name', 's.food_type', 's.tags'])
         .getOne();
 
       if (!restaurant) {
@@ -1188,6 +1203,8 @@ export class BuyerService {
       const menuData = {
         restaurant_id: restaurant.id,
         restaurant_name: restaurant.name,
+        food_type: restaurant.food_type || '',
+        cuisine_tags: restaurant.tags ? restaurant.tags.join(', ') : '',
         categories,
         total_items: totalItems,
         total_categories: totalCategories,
@@ -1593,6 +1610,8 @@ export class BuyerService {
           's.description as s_description',
           's.logo_url as s_logo_url',
           's.fssai_license_no as s_fssai_license_no',
+          's.food_type as s_food_type',
+          's.tags as s_tags',
           'sl.gps_lat as sl_gps_lat',
           'sl.gps_lng as sl_gps_lng',
           'sl.address_city as sl_address_city',
@@ -1634,6 +1653,8 @@ export class BuyerService {
             description: restaurant.s_description,
             logo_url: restaurant.s_logo_url,
             fssai_license: restaurant.s_fssai_license_no,
+            food_type: restaurant.s_food_type || '',
+            cuisine_tags: restaurant.s_tags ? restaurant.s_tags.join(', ') : '',
             location: {
               lat: restaurant.sl_gps_lat,
               lng: restaurant.sl_gps_lng,
@@ -1834,6 +1855,8 @@ export class BuyerService {
             's.name',
             's.description', 
             's.logo_url',
+            's.food_type as s_food_type',
+            's.tags as s_tags',
             'sl.gps_lat',
             'sl.gps_lng',
             'sl.address_city',
@@ -1864,6 +1887,8 @@ export class BuyerService {
             icon: restaurant.s_logo_url,
             image: restaurant.s_logo_url,
             distance: restaurant.distance,
+            food_type: restaurant.s_food_type || '',
+            cuisine_tags: restaurant.s_tags ? restaurant.s_tags.join(', ') : '',
             location: {
               lat: restaurant.sl_gps_lat,
               lng: restaurant.sl_gps_lng,
@@ -1975,7 +2000,8 @@ export class BuyerService {
     restaurantId: number,
     search?: string,
     dietaryPreference?: string,
-    favoriteItemIds: Set<number> = new Set()
+    favoriteItemIds: Set<number> = new Set(),
+    store?: any
   ) {
     try {
       this.logger.log(`🍽️ Getting categorized items for restaurant ${restaurantId}`);
@@ -2063,6 +2089,8 @@ export class BuyerService {
             is_available: item.status,
             is_recommended: item.is_recommended,
             dietary_preference: dietaryPref,
+            food_type: store?.food_type || undefined,
+            cuisine_tags: store?.tags ? store.tags.join(', ') : undefined,
             has_customizations: hasCustomizations,
             customizations: customizations,
             is_favorite: favoriteItemIds.has(item.id)

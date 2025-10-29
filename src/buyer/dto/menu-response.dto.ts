@@ -405,6 +405,20 @@ export class MenuDataDto {
   restaurant_name: string;
 
   @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
+
+  @ApiProperty({
     description: 'Menu categories with items',
     type: [MenuCategoryDto]
   })

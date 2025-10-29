@@ -293,6 +293,20 @@ export class RestaurantItemDto {
   dietary_preference: string;
 
   @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
+
+  @ApiProperty({
     description: 'Has customizations',
     example: true,
     type: 'boolean'
@@ -427,6 +441,20 @@ export class RestaurantDetailsDto {
     example: '22AAAAA0000A1Z5'
   })
   gst_number: string;
+
+  @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
 
   @ApiProperty({
     description: 'Restaurant locations',
