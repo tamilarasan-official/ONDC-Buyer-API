@@ -46,6 +46,7 @@ import { UserDeviceToken } from '../user/entities/user-device-token.entity';
 import { Dish } from '../dish/entities/dish.entity';
 import { UserFavoriteRestaurant } from '../favorites/entities/user-favorite-restaurant.entity';
 import { UserFavoriteItem } from '../favorites/entities/user-favorite-item.entity';
+import { Banner } from '../banner/entities/banner.entity';
 
 @Module({
   imports: [
@@ -79,6 +80,7 @@ import { UserFavoriteItem } from '../favorites/entities/user-favorite-item.entit
       Dish,
       UserFavoriteRestaurant,
       UserFavoriteItem,
+      Banner,
     ]),
     HttpModule.register({
       timeout: 10000,
