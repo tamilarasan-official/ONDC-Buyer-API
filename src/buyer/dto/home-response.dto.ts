@@ -118,6 +118,20 @@ export class NearbyRestaurantDto {
   logo_url: string;
 
   @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
+
+  @ApiProperty({
     description: 'FSSAI license number',
     example: '12345678901234'
   })
@@ -285,6 +299,20 @@ export class TrendingItemDto {
     type: 'number'
   })
   rating: number;
+
+  @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
 }
 
 export class WhatsOnYourMindDto {

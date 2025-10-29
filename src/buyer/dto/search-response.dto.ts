@@ -284,6 +284,20 @@ export class SearchItemDto {
     type: 'boolean'
   })
   is_favorite: boolean;
+
+  @ApiProperty({
+    description: 'Food type',
+    example: 'Veg',
+    required: false
+  })
+  food_type?: string;
+
+  @ApiProperty({
+    description: 'Cuisine tags',
+    example: 'South Indian, North Indian, Chinese',
+    required: false
+  })
+  cuisine_tags?: string;
 }
 
 export class SearchCategoryDto {
