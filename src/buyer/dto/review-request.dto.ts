@@ -1,29 +1,36 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsString, IsOptional, Min, Max, IsEnum } from 'class-validator';
+import { ApiProperty } from "@nestjs/swagger";
+import {
+  IsNumber,
+  IsString,
+  IsOptional,
+  Min,
+  Max,
+  IsEnum,
+} from "class-validator";
 
 export class CreateRestaurantReviewDto {
   @ApiProperty({
-    description: 'Restaurant ID to review',
+    description: "Restaurant ID to review",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @IsNumber()
   restaurant_id: number;
 
   @ApiProperty({
-    description: 'Order ID for this review',
+    description: "Order ID for this review",
     example: 123,
-    type: 'number'
+    type: "number",
   })
   @IsNumber()
   order_id: number;
 
   @ApiProperty({
-    description: 'Overall rating (1-5)',
+    description: "Overall rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -31,30 +38,30 @@ export class CreateRestaurantReviewDto {
   rating: number;
 
   @ApiProperty({
-    description: 'Review title',
-    example: 'Great food and fast delivery!',
-    required: false
+    description: "Review title",
+    example: "Great food and fast delivery!",
+    required: false,
   })
   @IsOptional()
   @IsString()
   title?: string;
 
   @ApiProperty({
-    description: 'Review comment',
-    example: 'The pizza was delicious and arrived hot. Delivery was quick too!',
-    required: false
+    description: "Review comment",
+    example: "The pizza was delicious and arrived hot. Delivery was quick too!",
+    required: false,
   })
   @IsOptional()
   @IsString()
   comment?: string;
 
   @ApiProperty({
-    description: 'Food quality rating (1-5)',
+    description: "Food quality rating (1-5)",
     example: 5,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -63,12 +70,12 @@ export class CreateRestaurantReviewDto {
   food_quality?: number;
 
   @ApiProperty({
-    description: 'Delivery time rating (1-5)',
+    description: "Delivery time rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -77,12 +84,12 @@ export class CreateRestaurantReviewDto {
   delivery_time?: number;
 
   @ApiProperty({
-    description: 'Packaging rating (1-5)',
+    description: "Packaging rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -91,12 +98,12 @@ export class CreateRestaurantReviewDto {
   packaging?: number;
 
   @ApiProperty({
-    description: 'Value for money rating (1-5)',
+    description: "Value for money rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -107,27 +114,27 @@ export class CreateRestaurantReviewDto {
 
 export class CreateItemReviewDto {
   @ApiProperty({
-    description: 'Item ID to review',
+    description: "Item ID to review",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @IsNumber()
   item_id: number;
 
   @ApiProperty({
-    description: 'Order ID for this review',
+    description: "Order ID for this review",
     example: 123,
-    type: 'number'
+    type: "number",
   })
   @IsNumber()
   order_id: number;
 
   @ApiProperty({
-    description: 'Overall rating (1-5)',
+    description: "Overall rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
-    maximum: 5
+    maximum: 5,
   })
   @IsNumber()
   @Min(1)
@@ -135,30 +142,30 @@ export class CreateItemReviewDto {
   rating: number;
 
   @ApiProperty({
-    description: 'Review title',
-    example: 'Amazing Margherita Pizza!',
-    required: false
+    description: "Review title",
+    example: "Amazing Margherita Pizza!",
+    required: false,
   })
   @IsOptional()
   @IsString()
   title?: string;
 
   @ApiProperty({
-    description: 'Review comment',
-    example: 'Perfect crust, fresh ingredients, and great taste!',
-    required: false
+    description: "Review comment",
+    example: "Perfect crust, fresh ingredients, and great taste!",
+    required: false,
   })
   @IsOptional()
   @IsString()
   comment?: string;
 
   @ApiProperty({
-    description: 'Taste rating (1-5)',
+    description: "Taste rating (1-5)",
     example: 5,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -167,12 +174,12 @@ export class CreateItemReviewDto {
   taste?: number;
 
   @ApiProperty({
-    description: 'Portion size rating (1-5)',
+    description: "Portion size rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -181,12 +188,12 @@ export class CreateItemReviewDto {
   portion_size?: number;
 
   @ApiProperty({
-    description: 'Value for money rating (1-5)',
+    description: "Value for money rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -197,12 +204,12 @@ export class CreateItemReviewDto {
 
 export class UpdateReviewDto {
   @ApiProperty({
-    description: 'Overall rating (1-5)',
+    description: "Overall rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -211,30 +218,30 @@ export class UpdateReviewDto {
   rating?: number;
 
   @ApiProperty({
-    description: 'Review title',
-    example: 'Updated review title',
-    required: false
+    description: "Review title",
+    example: "Updated review title",
+    required: false,
   })
   @IsOptional()
   @IsString()
   title?: string;
 
   @ApiProperty({
-    description: 'Review comment',
-    example: 'Updated review comment',
-    required: false
+    description: "Review comment",
+    example: "Updated review comment",
+    required: false,
   })
   @IsOptional()
   @IsString()
   comment?: string;
 
   @ApiProperty({
-    description: 'Food quality rating (1-5)',
+    description: "Food quality rating (1-5)",
     example: 5,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -243,12 +250,12 @@ export class UpdateReviewDto {
   food_quality?: number;
 
   @ApiProperty({
-    description: 'Delivery time rating (1-5)',
+    description: "Delivery time rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -257,12 +264,12 @@ export class UpdateReviewDto {
   delivery_time?: number;
 
   @ApiProperty({
-    description: 'Packaging rating (1-5)',
+    description: "Packaging rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -271,12 +278,12 @@ export class UpdateReviewDto {
   packaging?: number;
 
   @ApiProperty({
-    description: 'Value for money rating (1-5)',
+    description: "Value for money rating (1-5)",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -285,12 +292,12 @@ export class UpdateReviewDto {
   value_for_money?: number;
 
   @ApiProperty({
-    description: 'Taste rating (1-5) - for item reviews',
+    description: "Taste rating (1-5) - for item reviews",
     example: 5,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()
@@ -299,12 +306,12 @@ export class UpdateReviewDto {
   taste?: number;
 
   @ApiProperty({
-    description: 'Portion size rating (1-5) - for item reviews',
+    description: "Portion size rating (1-5) - for item reviews",
     example: 4,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 5,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsNumber()

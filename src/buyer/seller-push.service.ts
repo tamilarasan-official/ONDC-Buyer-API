@@ -1,10 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { firstValueFrom } from 'rxjs';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Order } from '../order/entities/order.entity';
-import { Item } from '../item/entities/item.entity';
+import { Injectable, Logger } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { firstValueFrom } from "rxjs";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Order } from "../order/entities/order.entity";
+import { Item } from "../item/entities/item.entity";
 
 @Injectable()
 export class SellerPushService {
@@ -13,7 +13,7 @@ export class SellerPushService {
   constructor(
     private readonly httpService: HttpService,
     @InjectRepository(Item)
-    private readonly itemRepository: Repository<Item>
+    private readonly itemRepository: Repository<Item>,
   ) {}
 
   /**
@@ -24,9 +24,10 @@ export class SellerPushService {
       this.logger.log(`🚀 Pushing order ${order.order_number} to seller`);
 
       const payload = await this.transformOrderToSellerPayload(order);
-      
+
       // Get seller API URL from environment
-      const sellerApiUrl = process.env.SELLER_API_URL || 'http://localhost:3001';
+      const sellerApiUrl =
+        process.env.SELLER_API_URL || "http://localhost:3001";
       const endpoint = `${sellerApiUrl}/orders`;
 
       this.logger.log(`Sending order to seller endpoint: ${endpoint}`);
@@ -37,22 +38,28 @@ export class SellerPushService {
       const response = await firstValueFrom(
         this.httpService.post(endpoint, payload, {
           headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            "Content-Type": "application/json",
+            Accept: "application/json",
           },
-          timeout: 10000 // 10 second timeout
-        })
+          timeout: 10000, // 10 second timeout
+        }),
       );
 
-      this.logger.log(`✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`);
-      
+      this.logger.log(
+        `✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`,
+      );
     } catch (error) {
-      this.logger.error(`❌ Failed to push order ${order.order_number} to seller: ${error.message}`, error.stack);
-      
+      this.logger.error(
+        `❌ Failed to push order ${order.order_number} to seller: ${error.message}`,
+        error.stack,
+      );
+
       // Don't throw error - we don't want to fail order creation if seller push fails
       // Just log the error for monitoring
       if (error.response) {
-        this.logger.error(`Seller API Error Response: ${JSON.stringify(error.response.data)}`);
+        this.logger.error(
+          `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
+        );
       }
     }
   }
@@ -62,19 +69,22 @@ export class SellerPushService {
    */
   private async buildItemsArray(orderItems: any[]): Promise<any[]> {
     const items: any[] = [];
-    
+
     for (const orderItem of orderItems) {
       // Add main item
       items.push({
         product_id: orderItem.item.reference_id,
         quantity: orderItem.quantity,
-        price: Number(orderItem.unit_price || 0).toFixed(2)
+        price: Number(orderItem.unit_price || 0).toFixed(2),
       });
-      
+
       // Add customization items if they exist
       if (orderItem.customizations && Array.isArray(orderItem.customizations)) {
         for (const customization of orderItem.customizations) {
-          if (customization.selected_options && Array.isArray(customization.selected_options)) {
+          if (
+            customization.selected_options &&
+            Array.isArray(customization.selected_options)
+          ) {
             // Get customization item details for each selected option
             for (const optionId of customization.selected_options) {
               try {
@@ -86,18 +96,22 @@ export class SellerPushService {
                   items.push({
                     product_id: customizationItem.reference_id,
                     quantity: orderItem.quantity, // Customization quantity matches main item quantity
-                    price: Number(customizationItem.prices?.[0]?.base_price || 0).toFixed(2)
+                    price: Number(
+                      customizationItem.prices?.[0]?.base_price || 0,
+                    ).toFixed(2),
                   });
                 }
               } catch (error) {
-                this.logger.warn(`Could not find customization item with ID ${optionId}: ${error.message}`);
+                this.logger.warn(
+                  `Could not find customization item with ID ${optionId}: ${error.message}`,
+                );
               }
             }
           }
         }
       }
     }
-    
+
     return items;
   }
 
@@ -107,9 +121,9 @@ export class SellerPushService {
   private async getItemById(itemId: number): Promise<Item | null> {
     try {
       return await this.itemRepository
-        .createQueryBuilder('item')
-        .leftJoinAndSelect('item.prices', 'price')
-        .where('item.id = :id', { id: itemId })
+        .createQueryBuilder("item")
+        .leftJoinAndSelect("item.prices", "price")
+        .where("item.id = :id", { id: itemId })
         .getOne();
     } catch (error) {
       this.logger.error(`Error fetching item ${itemId}: ${error.message}`);
@@ -121,41 +135,50 @@ export class SellerPushService {
    * Transform order data to seller payload format
    */
   private async transformOrderToSellerPayload(order: Order) {
-    const address = order.delivery_address;
-    
+    const address = {
+      address1: order.delivery_address_line1,
+      address2: order.delivery_address_line2,
+      address3: order.delivery_address_line3,
+      city: order.delivery_city,
+      state: order.delivery_state,
+      pincode: order.delivery_pincode,
+      latitude: order.delivery_latitude,
+      longitude: order.delivery_longitude,
+    };
+
     return {
       contact_number: order.user.phone_number.toString(),
       store_id: order.store.reference_id,
       items: await this.buildItemsArray(order.order_items),
       billing: {
-        name: order.user.name || 'Customer',
-        email: order.user.email || order.user.phone_number + '@tazty.com', // Use phone as fallback email
+        name: order.user.name || "Customer",
+        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
-          address2: address.address2 || '',
-          address3: address.address3 || '',
+          address2: address.address2 || "",
+          address3: address.address3 || "",
           city: address.city,
           state: address.state,
-          country: 'IND', // Default to India
+          country: "IND", // Default to India
           pincode: address.pincode.toString(), // Ensure pincode is string
-          gps: `${Number(address.latitude || 0)},${Number(address.longitude || 0)}`
-        }
+          gps: `${Number(address.latitude || 0)},${Number(address.longitude || 0)}`,
+        },
       },
       shipping: {
-        name: order.user.name || 'Customer',
-        email: order.user.email || order.user.phone_number + '@tazty.com', // Use phone as fallback email
+        name: order.user.name || "Customer",
+        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
-          address2: address.address2 || '',
-          address3: address.address3 || '',
+          address2: address.address2 || "",
+          address3: address.address3 || "",
           city: address.city,
           state: address.state,
-          country: 'IND', // Default to India
+          country: "IND", // Default to India
           pincode: address.pincode.toString(), // Ensure pincode is string
-          gps: `${Number(address.latitude || 0)},${Number(address.longitude || 0)}`
-        }
+          gps: `${Number(address.latitude || 0)},${Number(address.longitude || 0)}`,
+        },
       },
       delivery_type: "Delivery",
       instructions: order.notes,
@@ -165,7 +188,7 @@ export class SellerPushService {
       delivery_charge: Number(order.delivery_fee).toFixed(2),
       total_amount: Number(order.total_amount).toFixed(2),
       external_order_no: order.order_number,
-      order_through: "tazty"
+      order_through: "tazty",
     };
   }
 
@@ -180,8 +203,8 @@ export class SellerPushService {
         {
           product_id: "test_item_456",
           quantity: 1,
-          price: "30.00"
-        }
+          price: "30.00",
+        },
       ],
       billing: {
         name: "Test Customer",
@@ -195,8 +218,8 @@ export class SellerPushService {
           state: "Tamil Nadu",
           country: "IND",
           pincode: "625002",
-          gps: "9.938019,78.127190"
-        }
+          gps: "9.938019,78.127190",
+        },
       },
       shipping: {
         name: "Test Customer",
@@ -210,8 +233,8 @@ export class SellerPushService {
           state: "Tamil Nadu",
           country: "IND",
           pincode: "625002",
-          gps: "9.938019,78.127190"
-        }
+          gps: "9.938019,78.127190",
+        },
       },
       delivery_type: "Delivery",
       pickup_date_time: "",
@@ -220,31 +243,35 @@ export class SellerPushService {
       delivery_charge: "84.96",
       total_amount: "254.96",
       external_order_no: "2025-09-16-510562",
-      order_through: "tazty"
+      order_through: "tazty",
     };
 
     try {
-      const sellerApiUrl = process.env.SELLER_API_URL || 'http://localhost:3001';
+      const sellerApiUrl =
+        process.env.SELLER_API_URL || "http://localhost:3001";
       const endpoint = `${sellerApiUrl}/orders`;
 
       this.logger.log(`🧪 Testing seller push to: ${endpoint}`);
-      
+
       const response = await firstValueFrom(
         this.httpService.post(endpoint, testPayload, {
           headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            "Content-Type": "application/json",
+            Accept: "application/json",
           },
-          timeout: 10000
-        })
+          timeout: 10000,
+        }),
       );
 
-      this.logger.log(`✅ Test seller push successful. Status: ${response.status}`);
-      
+      this.logger.log(
+        `✅ Test seller push successful. Status: ${response.status}`,
+      );
     } catch (error) {
       this.logger.error(`❌ Test seller push failed: ${error.message}`);
       if (error.response) {
-        this.logger.error(`Seller API Error Response: ${JSON.stringify(error.response.data)}`);
+        this.logger.error(
+          `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
+        );
       }
     }
   }

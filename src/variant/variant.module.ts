@@ -1,6 +1,6 @@
-import { Module } from '@nestjs/common';
-import { VariantService } from './variant.service';
-import { VariantController } from './variant.controller';
+import { Module } from "@nestjs/common";
+import { VariantService } from "./variant.service";
+import { VariantController } from "./variant.controller";
 
 @Module({
   controllers: [VariantController],

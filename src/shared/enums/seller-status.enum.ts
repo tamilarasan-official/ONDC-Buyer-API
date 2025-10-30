@@ -1,11 +1,11 @@
 export enum SellerStatus {
-  BILLED = 'billed',
-  PACKED = 'packed',
-  AGENT_ASSIGNED = 'agent-assigned',
-  PICKED = 'picked',
-  OUT_OF_DELIVERY = 'out-of-delivery',
-  DELIVERED = 'delivered',
-  CANCELLED = 'cancelled'
+  BILLED = "billed",
+  PACKED = "packed",
+  AGENT_ASSIGNED = "agent-assigned",
+  PICKED = "picked",
+  OUT_OF_DELIVERY = "out-of-delivery",
+  DELIVERED = "delivered",
+  CANCELLED = "cancelled",
 }
 
 export const SELLER_STATUS_FLOW = [
@@ -14,10 +14,10 @@ export const SELLER_STATUS_FLOW = [
   SellerStatus.AGENT_ASSIGNED,
   SellerStatus.PICKED,
   SellerStatus.OUT_OF_DELIVERY,
-  SellerStatus.DELIVERED
+  SellerStatus.DELIVERED,
 ];
 
 export const SELLER_STATUS_TERMINAL = [
   SellerStatus.DELIVERED,
-  SellerStatus.CANCELLED
+  SellerStatus.CANCELLED,
 ];

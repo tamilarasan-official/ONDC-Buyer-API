@@ -1,10 +1,12 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class CreateOtpVerificationsTable1759217400000 implements MigrationInterface {
-    name = 'CreateOtpVerificationsTable1759217400000'
+export class CreateOtpVerificationsTable1759217400000
+  implements MigrationInterface
+{
+  name = "CreateOtpVerificationsTable1759217400000";
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "otp_verifications" (
                 "id" SERIAL NOT NULL,
                 "phone_number" character varying(15),
@@ -20,14 +22,14 @@ export class CreateOtpVerificationsTable1759217400000 implements MigrationInterf
                 CONSTRAINT "PK_otp_verifications" PRIMARY KEY ("id")
             )
         `);
-        
-        await queryRunner.query(`
+
+    await queryRunner.query(`
             CREATE INDEX "IDX_otp_verifications_purpose" ON "otp_verifications" ("purpose")
         `);
-    }
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "IDX_otp_verifications_purpose"`);
-        await queryRunner.query(`DROP TABLE "otp_verifications"`);
-    }
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`DROP INDEX "IDX_otp_verifications_purpose"`);
+    await queryRunner.query(`DROP TABLE "otp_verifications"`);
+  }
 }

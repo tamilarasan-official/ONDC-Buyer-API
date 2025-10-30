@@ -1,12 +1,19 @@
-import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from "class-validator";
 import { Transform } from "class-transformer";
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class CreateBannerDto {
   @ApiProperty({
-    description: 'Banner title',
-    example: 'Craving Something Delicious?',
-    maxLength: 255
+    description: "Banner title",
+    example: "Craving Something Delicious?",
+    maxLength: 255,
   })
   @IsString()
   @IsNotEmpty()
@@ -14,19 +21,20 @@ export class CreateBannerDto {
   title: string;
 
   @ApiProperty({
-    description: 'Banner subtitle',
-    example: 'Get your favorite meals delivered hot & fast—right to your doorstep.',
-    required: false
+    description: "Banner subtitle",
+    example:
+      "Get your favorite meals delivered hot & fast—right to your doorstep.",
+    required: false,
   })
   @IsOptional()
   @IsString()
   subtitle?: string;
 
   @ApiProperty({
-    description: 'Call-to-action button text',
-    example: 'Order Now!',
+    description: "Call-to-action button text",
+    example: "Order Now!",
     required: false,
-    maxLength: 100
+    maxLength: 100,
   })
   @IsOptional()
   @IsString()
@@ -34,10 +42,10 @@ export class CreateBannerDto {
   cta_button?: string;
 
   @ApiProperty({
-    description: 'Background color in hex format',
-    example: '#14b8a6',
+    description: "Background color in hex format",
+    example: "#14b8a6",
     required: false,
-    maxLength: 20
+    maxLength: 20,
   })
   @IsOptional()
   @IsString()
@@ -45,33 +53,35 @@ export class CreateBannerDto {
   background_color?: string;
 
   @ApiProperty({
-    description: 'Promotion type - defines what happens when user clicks the banner: restaurant_id (navigates to restaurant detail page), category_id (navigates to category listing), url (opens external link)',
-    example: 'restaurant_id',
-    enum: ['restaurant_id', 'category_id', 'url'],
-    required: false
+    description:
+      "Promotion type - defines what happens when user clicks the banner: restaurant_id (navigates to restaurant detail page), category_id (navigates to category listing), url (opens external link)",
+    example: "restaurant_id",
+    enum: ["restaurant_id", "category_id", "url"],
+    required: false,
   })
   @IsOptional()
-  @IsEnum(['restaurant_id', 'category_id', 'url'])
+  @IsEnum(["restaurant_id", "category_id", "url"])
   promotion_type?: string;
 
   @ApiProperty({
-    description: 'Promotion link value - must correspond to promotion_type: numeric ID for restaurant_id/category_id, or full URL for url type (e.g., "123" for restaurant, "https://example.com" for url)',
-    example: '1',
-    required: false
+    description:
+      'Promotion link value - must correspond to promotion_type: numeric ID for restaurant_id/category_id, or full URL for url type (e.g., "123" for restaurant, "https://example.com" for url)',
+    example: "1",
+    required: false,
   })
   @IsOptional()
   @IsString()
   promotion_link?: string;
 
   @ApiProperty({
-    description: 'Status of the banner (active/inactive)',
+    description: "Status of the banner (active/inactive)",
     example: true,
     required: false,
-    default: true
+    default: true,
   })
   @Transform(({ value }) => {
-    if (typeof value === 'string') {
-      return value.toLowerCase() === 'true';
+    if (typeof value === "string") {
+      return value.toLowerCase() === "true";
     }
     return value;
   })
@@ -79,4 +89,3 @@ export class CreateBannerDto {
   @IsOptional()
   status?: boolean;
 }
-

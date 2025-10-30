@@ -30,7 +30,7 @@ import { RestaurantReview } from "../review/entities/restaurant-review.entity";
 import { ItemReview } from "../review/entities/item-review.entity";
 import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-restaurant.entity";
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
-import { Banner } from '../banner/entities/banner.entity';
+import { Banner } from "../banner/entities/banner.entity";
 
 @Injectable()
 export class BuyerService {
@@ -421,18 +421,20 @@ export class BuyerService {
       // Get the first active banner ordered by sequence
       const banner = await this.bannerRepository.findOne({
         where: { status: true },
-        order: { sequence: 'ASC' }
+        order: { sequence: "ASC" },
       });
 
       // Return default banner if no active banner found
       if (!banner) {
-        this.logger.warn('No active banner found, returning default banner');
+        this.logger.warn("No active banner found, returning default banner");
         return {
           title: "Craving Something Delicious?",
-          subtitle: "Get your favorite meals delivered hot & fast—right to your doorstep.",
+          subtitle:
+            "Get your favorite meals delivered hot & fast—right to your doorstep.",
           cta_button: "Order Now!",
-          image_url: "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-          background_color: "#14b8a6"
+          image_url:
+            "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
+          background_color: "#14b8a6",
         };
       }
 
@@ -442,17 +444,22 @@ export class BuyerService {
         subtitle: banner.subtitle || undefined,
         cta_button: banner.cta_button || undefined,
         image_url: banner.image_url,
-        background_color: banner.background_color || undefined
+        background_color: banner.background_color || undefined,
       };
     } catch (error) {
-      this.logger.error(`Error fetching promotional banner: ${error.message}`, error.stack);
+      this.logger.error(
+        `Error fetching promotional banner: ${error.message}`,
+        error.stack,
+      );
       // Return default banner on error
       return {
         title: "Craving Something Delicious?",
-        subtitle: "Get your favorite meals delivered hot & fast—right to your doorstep.",
+        subtitle:
+          "Get your favorite meals delivered hot & fast—right to your doorstep.",
         cta_button: "Order Now!",
-        image_url: "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-        background_color: "#14b8a6"
+        image_url:
+          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
+        background_color: "#14b8a6",
       };
     }
   }
@@ -1428,7 +1435,12 @@ export class BuyerService {
    * @param openTime - Opening time in HHMM format
    * @param closeTime - Closing time in HHMM format
    */
-  private isDayOpen(dayFrom: number, dayTo: number, openTime: string, closeTime: string): boolean {
+  private isDayOpen(
+    dayFrom: number,
+    dayTo: number,
+    openTime: string,
+    closeTime: string,
+  ): boolean {
     const now = new Date();
     // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
     let currentDay = now.getDay();

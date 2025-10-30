@@ -9,7 +9,6 @@ import {
 } from "typeorm";
 import { User } from "../../user/entities/user.entity";
 import { Store } from "../../store/entities/store.entity";
-import { UserAddress } from "../../user/entities/user-address.entity";
 import { OrderItem } from "./order-item.entity";
 import { OrderTracking } from "./order-tracking.entity";
 
@@ -27,8 +26,36 @@ export class Order {
   @ManyToOne(() => Store, { onDelete: "CASCADE" })
   store: Store;
 
-  @ManyToOne(() => UserAddress, { onDelete: "CASCADE" })
-  delivery_address: UserAddress;
+  // Delivery Address Fields (denormalized for data integrity)
+  @Column({ type: "text", nullable: false })
+  delivery_address_line1: string;
+
+  @Column({ type: "text", nullable: true })
+  delivery_address_line2: string;
+
+  @Column({ type: "text", nullable: true })
+  delivery_address_line3: string;
+
+  @Column({ type: "varchar", length: 255, nullable: false })
+  delivery_city: string;
+
+  @Column({ type: "varchar", length: 255, nullable: false })
+  delivery_state: string;
+
+  @Column({ type: "integer", nullable: false })
+  delivery_pincode: string;
+
+  @Column({ type: "decimal", precision: 10, scale: 7, nullable: false })
+  delivery_latitude: number;
+
+  @Column({ type: "decimal", precision: 10, scale: 7, nullable: false })
+  delivery_longitude: number;
+
+  @Column({ type: "varchar", length: 255, nullable: false })
+  delivery_address_type: string;
+
+  @Column({ type: "bigint", nullable: true })
+  delivery_alternate_phone: number;
 
   @Column({ type: "varchar", length: 20, default: "pending" })
   status: string; // pending, confirmed, preparing, out_for_delivery, delivered, cancelled

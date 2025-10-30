@@ -18,9 +18,13 @@ export class ItemVariants {
   })
   item: Item;
 
-  @ManyToOne(() => VariantGroups, (variantGroup) => variantGroup.item_variants, {
-    onDelete: "CASCADE",
-  })
+  @ManyToOne(
+    () => VariantGroups,
+    (variantGroup) => variantGroup.item_variants,
+    {
+      onDelete: "CASCADE",
+    },
+  )
   variant_group: VariantGroups;
 
   @Column({ type: "boolean", default: false })

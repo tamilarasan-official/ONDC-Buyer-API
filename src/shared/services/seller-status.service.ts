@@ -1,5 +1,9 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { SellerStatus, SELLER_STATUS_FLOW, SELLER_STATUS_TERMINAL } from '../enums/seller-status.enum';
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import {
+  SellerStatus,
+  SELLER_STATUS_FLOW,
+  SELLER_STATUS_TERMINAL,
+} from "../enums/seller-status.enum";
 
 @Injectable()
 export class SellerStatusService {
@@ -11,7 +15,9 @@ export class SellerStatusService {
   validateStatusTransition(currentStatus: string, newStatus: string): boolean {
     // If order is already in terminal state, no further transitions allowed
     if (SELLER_STATUS_TERMINAL.includes(currentStatus as SellerStatus)) {
-      this.logger.warn(`Cannot transition from terminal status ${currentStatus} to ${newStatus}`);
+      this.logger.warn(
+        `Cannot transition from terminal status ${currentStatus} to ${newStatus}`,
+      );
       return false;
     }
 
@@ -21,12 +27,17 @@ export class SellerStatusService {
     }
 
     // Check if new status follows the proper flow
-    const currentIndex = SELLER_STATUS_FLOW.indexOf(currentStatus as SellerStatus);
+    const currentIndex = SELLER_STATUS_FLOW.indexOf(
+      currentStatus as SellerStatus,
+    );
     const newIndex = SELLER_STATUS_FLOW.indexOf(newStatus as SellerStatus);
 
     // If current status is not in flow (e.g., 'pending'), allow any valid status
     if (currentIndex === -1) {
-      return SELLER_STATUS_FLOW.includes(newStatus as SellerStatus) || newStatus === SellerStatus.CANCELLED;
+      return (
+        SELLER_STATUS_FLOW.includes(newStatus as SellerStatus) ||
+        newStatus === SellerStatus.CANCELLED
+      );
     }
 
     // New status must be after current status in the flow
@@ -41,8 +52,10 @@ export class SellerStatusService {
       return []; // No further transitions from terminal states
     }
 
-    const currentIndex = SELLER_STATUS_FLOW.indexOf(currentStatus as SellerStatus);
-    
+    const currentIndex = SELLER_STATUS_FLOW.indexOf(
+      currentStatus as SellerStatus,
+    );
+
     if (currentIndex === -1) {
       // If current status is not in flow, return all valid statuses
       return [...SELLER_STATUS_FLOW, SellerStatus.CANCELLED];
@@ -65,13 +78,13 @@ export class SellerStatusService {
    */
   getStatusMessage(status: string): string {
     const statusMessages = {
-      [SellerStatus.BILLED]: 'Order confirmed and billed by seller',
-      [SellerStatus.PACKED]: 'Order packed and ready for pickup',
-      [SellerStatus.AGENT_ASSIGNED]: 'Delivery agent assigned',
-      [SellerStatus.PICKED]: 'Order picked up by delivery agent',
-      [SellerStatus.OUT_OF_DELIVERY]: 'Order out for delivery',
-      [SellerStatus.DELIVERED]: 'Order delivered successfully',
-      [SellerStatus.CANCELLED]: 'Order cancelled'
+      [SellerStatus.BILLED]: "Order confirmed and billed by seller",
+      [SellerStatus.PACKED]: "Order packed and ready for pickup",
+      [SellerStatus.AGENT_ASSIGNED]: "Delivery agent assigned",
+      [SellerStatus.PICKED]: "Order picked up by delivery agent",
+      [SellerStatus.OUT_OF_DELIVERY]: "Order out for delivery",
+      [SellerStatus.DELIVERED]: "Order delivered successfully",
+      [SellerStatus.CANCELLED]: "Order cancelled",
     };
 
     return statusMessages[status as SellerStatus] || `Order status: ${status}`;
@@ -80,19 +93,27 @@ export class SellerStatusService {
   /**
    * Validate seller status update
    */
-  validateSellerStatusUpdate(orderNumber: string, currentStatus: string, newStatus: string): void {
+  validateSellerStatusUpdate(
+    orderNumber: string,
+    currentStatus: string,
+    newStatus: string,
+  ): void {
     if (!Object.values(SellerStatus).includes(newStatus as SellerStatus)) {
-      throw new BadRequestException(`Invalid seller status: ${newStatus}. Valid statuses are: ${Object.values(SellerStatus).join(', ')}`);
+      throw new BadRequestException(
+        `Invalid seller status: ${newStatus}. Valid statuses are: ${Object.values(SellerStatus).join(", ")}`,
+      );
     }
 
     if (!this.validateStatusTransition(currentStatus, newStatus)) {
       const validStatuses = this.getNextValidStatuses(currentStatus);
       throw new BadRequestException(
         `Invalid status transition from '${currentStatus}' to '${newStatus}'. ` +
-        `Valid next statuses are: ${validStatuses.join(', ')}`
+          `Valid next statuses are: ${validStatuses.join(", ")}`,
       );
     }
 
-    this.logger.log(`✅ Valid status transition for order ${orderNumber}: ${currentStatus} → ${newStatus}`);
+    this.logger.log(
+      `✅ Valid status transition for order ${orderNumber}: ${currentStatus} → ${newStatus}`,
+    );
   }
 }

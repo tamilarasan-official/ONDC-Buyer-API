@@ -74,9 +74,15 @@ export class Category {
   @OneToMany(() => ItemCategories, (itemCategory) => itemCategory.category)
   item_categories: ItemCategories[];
 
-  @OneToMany(() => ItemCustomizationGroups, (itemCustomizationGroup) => itemCustomizationGroup.customization_group)
+  @OneToMany(
+    () => ItemCustomizationGroups,
+    (itemCustomizationGroup) => itemCustomizationGroup.customization_group,
+  )
   itemCustomizationGroups: ItemCustomizationGroups[];
 
-  @OneToMany(() => CustomizationRelationships, (relationship) => relationship.child_customization_group)
+  @OneToMany(
+    () => CustomizationRelationships,
+    (relationship) => relationship.child_customization_group,
+  )
   customizationRelationships: CustomizationRelationships[];
 }

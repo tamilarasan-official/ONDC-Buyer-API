@@ -1,5 +1,5 @@
-import { Injectable } from '@nestjs/common';
-import { MailerService } from '@nestjs-modules/mailer';
+import { Injectable } from "@nestjs/common";
+import { MailerService } from "@nestjs-modules/mailer";
 
 @Injectable()
 export class MailService {
@@ -9,16 +9,16 @@ export class MailService {
     try {
       await this.mailerService.sendMail({
         to,
-        subject: 'Your Store has been created!',
-        template: 'store-registration',
+        subject: "Your Store has been created!",
+        template: "store-registration",
         context: {
           store: storeDetails,
         },
       });
 
-      console.log('Email sent successfully');
+      console.log("Email sent successfully");
     } catch (error) {
-      console.error('Error sending email:', error);
+      console.error("Error sending email:", error);
     }
   }
 
@@ -26,17 +26,17 @@ export class MailService {
     try {
       await this.mailerService.sendMail({
         to,
-        subject: 'Password reset requested',
-        template: 'forgot-password',
+        subject: "Password reset requested",
+        template: "forgot-password",
         context: {
           resetLink: userDetails.resetLink,
           userName: userDetails.userName,
         },
       });
 
-      console.log('Email sent successfully');
+      console.log("Email sent successfully");
     } catch (error) {
-      console.error('Error sending email:', error);
+      console.error("Error sending email:", error);
     }
   }
 }

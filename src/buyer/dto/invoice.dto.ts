@@ -1,26 +1,26 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, IsEnum } from 'class-validator';
+import { ApiProperty } from "@nestjs/swagger";
+import { IsOptional, IsString, IsEnum } from "class-validator";
 
 export enum InvoiceFormat {
-  PDF = 'pdf',
-  JSON = 'json',
+  PDF = "pdf",
+  JSON = "json",
 }
 
 export class GenerateInvoiceDto {
   @ApiProperty({
-    description: 'Invoice format',
+    description: "Invoice format",
     enum: InvoiceFormat,
     default: InvoiceFormat.PDF,
-    example: 'pdf'
+    example: "pdf",
   })
   @IsOptional()
   @IsEnum(InvoiceFormat)
   format?: InvoiceFormat = InvoiceFormat.PDF;
 
   @ApiProperty({
-    description: 'Additional notes for the invoice',
+    description: "Additional notes for the invoice",
     required: false,
-    example: 'Thank you for your order!'
+    example: "Thank you for your order!",
   })
   @IsOptional()
   @IsString()
@@ -29,77 +29,77 @@ export class GenerateInvoiceDto {
 
 export class InvoiceItemDto {
   @ApiProperty({
-    description: 'Item name',
-    example: 'Margherita Pizza'
+    description: "Item name",
+    example: "Margherita Pizza",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Item description',
-    example: 'Classic pizza with tomato and mozzarella'
+    description: "Item description",
+    example: "Classic pizza with tomato and mozzarella",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Quantity ordered',
-    example: 2
+    description: "Quantity ordered",
+    example: 2,
   })
   quantity: number;
 
   @ApiProperty({
-    description: 'Unit price',
-    example: 299.99
+    description: "Unit price",
+    example: 299.99,
   })
   unit_price: number;
 
   @ApiProperty({
-    description: 'Total price for this item',
-    example: 599.98
+    description: "Total price for this item",
+    example: 599.98,
   })
   total_price: number;
 
   @ApiProperty({
-    description: 'Customizations applied',
-    example: ['Extra Cheese', 'Thin Crust'],
-    required: false
+    description: "Customizations applied",
+    example: ["Extra Cheese", "Thin Crust"],
+    required: false,
   })
   customizations?: string[];
 
   @ApiProperty({
-    description: 'Special instructions',
-    example: 'No onions please',
-    required: false
+    description: "Special instructions",
+    example: "No onions please",
+    required: false,
   })
   special_instructions?: string;
 }
 
 export class InvoiceResponseDto {
   @ApiProperty({
-    description: 'Invoice number',
-    example: 'INV-20250102-001'
+    description: "Invoice number",
+    example: "INV-20250102-001",
   })
   invoice_number: string;
 
   @ApiProperty({
-    description: 'Order number',
-    example: 'ORD-20250102-001'
+    description: "Order number",
+    example: "ORD-20250102-001",
   })
   order_number: string;
 
   @ApiProperty({
-    description: 'Invoice date',
-    example: '2025-01-02T10:30:00Z'
+    description: "Invoice date",
+    example: "2025-01-02T10:30:00Z",
   })
   invoice_date: string;
 
   @ApiProperty({
-    description: 'Order date',
-    example: '2025-01-02T10:00:00Z'
+    description: "Order date",
+    example: "2025-01-02T10:00:00Z",
   })
   order_date: string;
 
   @ApiProperty({
-    description: 'Customer information'
+    description: "Customer information",
   })
   customer: {
     name: string;
@@ -115,7 +115,7 @@ export class InvoiceResponseDto {
   };
 
   @ApiProperty({
-    description: 'Store information'
+    description: "Store information",
   })
   store: {
     name: string;
@@ -133,13 +133,13 @@ export class InvoiceResponseDto {
   };
 
   @ApiProperty({
-    description: 'Order items',
-    type: [InvoiceItemDto]
+    description: "Order items",
+    type: [InvoiceItemDto],
   })
   items: InvoiceItemDto[];
 
   @ApiProperty({
-    description: 'Pricing breakdown'
+    description: "Pricing breakdown",
   })
   pricing: {
     subtotal: number;
@@ -150,7 +150,7 @@ export class InvoiceResponseDto {
   };
 
   @ApiProperty({
-    description: 'Payment information'
+    description: "Payment information",
   })
   payment: {
     method: string;
@@ -159,7 +159,7 @@ export class InvoiceResponseDto {
   };
 
   @ApiProperty({
-    description: 'Delivery information'
+    description: "Delivery information",
   })
   delivery: {
     estimated_time?: string;
@@ -169,8 +169,8 @@ export class InvoiceResponseDto {
   };
 
   @ApiProperty({
-    description: 'Additional notes',
-    required: false
+    description: "Additional notes",
+    required: false,
   })
   notes?: string;
 }

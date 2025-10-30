@@ -1,14 +1,14 @@
-import { Type } from 'class-transformer';
-import { IsNumber, IsNotEmpty } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { Type } from "class-transformer";
+import { IsNumber, IsNotEmpty } from "class-validator";
+import { ApiProperty } from "@nestjs/swagger";
 
 export class LoginDto {
   @ApiProperty({
-    description: 'Phone number for authentication',
+    description: "Phone number for authentication",
     example: 9876543210,
-    type: 'number',
+    type: "number",
     minimum: 1000000000,
-    maximum: 9999999999
+    maximum: 9999999999,
   })
   @IsNumber()
   @IsNotEmpty()
@@ -16,11 +16,11 @@ export class LoginDto {
   phone_number: number;
 
   @ApiProperty({
-    description: 'One-time password (OTP) received via SMS',
+    description: "One-time password (OTP) received via SMS",
     example: 123456,
-    type: 'number',
+    type: "number",
     minimum: 100000,
-    maximum: 999999
+    maximum: 999999,
   })
   @IsNumber()
   @IsNotEmpty()

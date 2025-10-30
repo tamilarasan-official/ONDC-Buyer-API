@@ -21,7 +21,13 @@ export class ItemQuantities {
   @Column({ type: "varchar", length: 20, nullable: false, default: "unit" })
   unit_type: string; // "unit", "kg", "liter", etc.
 
-  @Column({ type: "decimal", precision: 8, scale: 3, nullable: false, default: 1 })
+  @Column({
+    type: "decimal",
+    precision: 8,
+    scale: 3,
+    nullable: false,
+    default: 1,
+  })
   unit_value: number; // Quantity per unit
 
   @Column({ type: "int", nullable: false, default: 0 })

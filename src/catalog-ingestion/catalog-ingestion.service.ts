@@ -1,48 +1,54 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, DataSource } from 'typeorm';
-import { ONDCSearchResponseDto, Provider, Category as ONDCCategory, Item as ONDCItem, Offer as ONDCOffer } from '../ondc-search/dto/ondc-search.dto';
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, DataSource } from "typeorm";
+import {
+  ONDCSearchResponseDto,
+  Provider,
+  Category as ONDCCategory,
+  Item as ONDCItem,
+  Offer as ONDCOffer,
+} from "../ondc-search/dto/ondc-search.dto";
 
 // Import transformers
-import { 
-  StoreTransformer, 
-  LocationTransformer, 
-  CategoryTransformer, 
-  ItemTransformer, 
-  OfferTransformer 
-} from './transformers';
+import {
+  StoreTransformer,
+  LocationTransformer,
+  CategoryTransformer,
+  ItemTransformer,
+  OfferTransformer,
+} from "./transformers";
 
 // Import all entities
-import { Store } from '../store/entities/store.entity';
-import { StoreLocation } from '../store/entities/store-location.entity';
-import { StoreFulfillment } from '../store/entities/store-fulfillment.entity';
-import { StoreTimings } from '../store/entities/store-timings.entity';
-import { StoreConfigs } from '../store/entities/store-configs.entity';
-import { StoreCloseTimings } from '../store/entities/store-close-timings.entity';
-import { Category } from '../category/entities/category.entity';
-import { CategoryTimings } from '../category/entities/category-timings.entity';
-import { CategoryConfigs } from '../category/entities/category-configs.entity';
-import { Item } from '../item/entities/item.entity';
-import { ItemCategories } from '../item/entities/item-categories.entity';
-import { ItemTimings } from '../item/entities/item-timings.entity';
-import { ItemAttributes } from '../item/entities/item-attributes.entity';
-import { ItemBarcodes } from '../item/entities/item-barcodes.entity';
-import { ItemPrices } from '../item/entities/item-prices.entity';
-import { ItemQuantities } from '../item/entities/item-quantities.entity';
-import { ItemCustomizationGroups } from '../item/entities/item-customization-groups.entity';
-import { CustomizationRelationships } from '../item/entities/customization-relationships.entity';
-import { VariantGroups } from '../variant/entities/variant-groups.entity';
-import { ItemVariants } from '../variant/entities/item-variants.entity';
-import { Offers } from '../offer/entities/offers.entity';
-import { OfferLocations } from '../offer/entities/offer-locations.entity';
-import { OfferItems } from '../offer/entities/offer-items.entity';
-import { OfferQualifiers } from '../offer/entities/offer-qualifiers.entity';
-import { OfferBenefits } from '../offer/entities/offer-benefits.entity';
+import { Store } from "../store/entities/store.entity";
+import { StoreLocation } from "../store/entities/store-location.entity";
+import { StoreFulfillment } from "../store/entities/store-fulfillment.entity";
+import { StoreTimings } from "../store/entities/store-timings.entity";
+import { StoreConfigs } from "../store/entities/store-configs.entity";
+import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
+import { Category } from "../category/entities/category.entity";
+import { CategoryTimings } from "../category/entities/category-timings.entity";
+import { CategoryConfigs } from "../category/entities/category-configs.entity";
+import { Item } from "../item/entities/item.entity";
+import { ItemCategories } from "../item/entities/item-categories.entity";
+import { ItemTimings } from "../item/entities/item-timings.entity";
+import { ItemAttributes } from "../item/entities/item-attributes.entity";
+import { ItemBarcodes } from "../item/entities/item-barcodes.entity";
+import { ItemPrices } from "../item/entities/item-prices.entity";
+import { ItemQuantities } from "../item/entities/item-quantities.entity";
+import { ItemCustomizationGroups } from "../item/entities/item-customization-groups.entity";
+import { CustomizationRelationships } from "../item/entities/customization-relationships.entity";
+import { VariantGroups } from "../variant/entities/variant-groups.entity";
+import { ItemVariants } from "../variant/entities/item-variants.entity";
+import { Offers } from "../offer/entities/offers.entity";
+import { OfferLocations } from "../offer/entities/offer-locations.entity";
+import { OfferItems } from "../offer/entities/offer-items.entity";
+import { OfferQualifiers } from "../offer/entities/offer-qualifiers.entity";
+import { OfferBenefits } from "../offer/entities/offer-benefits.entity";
 
 @Injectable()
 export class CatalogIngestionService {
   private readonly logger = new Logger(CatalogIngestionService.name);
-  
+
   // Initialize transformers
   private readonly storeTransformer = new StoreTransformer();
   private readonly locationTransformer = new LocationTransformer();
@@ -134,7 +140,9 @@ export class CatalogIngestionService {
       errors: [] as string[],
     };
 
-    this.logger.log(`Starting catalog ingestion for ${responses.length} provider response(s)`);
+    this.logger.log(
+      `Starting catalog ingestion for ${responses.length} provider response(s)`,
+    );
 
     // Collect all active store reference_ids from responses
     // Only include stores that have valid data and should be active
@@ -156,7 +164,10 @@ export class CatalogIngestionService {
         await this.processProviderResponse(response, stats);
         stats.providers_processed++;
       } catch (error) {
-        this.logger.error(`Failed to process provider response: ${error.message}`, error.stack);
+        this.logger.error(
+          `Failed to process provider response: ${error.message}`,
+          error.stack,
+        );
         stats.errors.push(`Provider processing error: ${error.message}`);
       }
     }
@@ -165,13 +176,16 @@ export class CatalogIngestionService {
     // TODO: Commented out for individual store webhook processing
     // await this.handleStoreDeletions(allActiveStoreIds, stats);
 
-    this.logger.log(`Catalog ingestion completed. Stats: ${JSON.stringify(stats)}`);
+    this.logger.log(
+      `Catalog ingestion completed. Stats: ${JSON.stringify(stats)}`,
+    );
 
     return {
       success: stats.errors.length === 0,
-      message: stats.errors.length === 0 
-        ? 'Catalog ingestion completed successfully' 
-        : `Catalog ingestion completed with ${stats.errors.length} errors`,
+      message:
+        stats.errors.length === 0
+          ? "Catalog ingestion completed successfully"
+          : `Catalog ingestion completed with ${stats.errors.length} errors`,
       stats,
     };
   }
@@ -179,21 +193,29 @@ export class CatalogIngestionService {
   /**
    * Process a single provider response with transaction support
    */
-  private async processProviderResponse(response: ONDCSearchResponseDto, stats: any): Promise<void> {
+  private async processProviderResponse(
+    response: ONDCSearchResponseDto,
+    stats: any,
+  ): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
 
     try {
-      const providers = response.message.catalog['bpp/providers'] || [];
+      const providers = response.message.catalog["bpp/providers"] || [];
       let validProvidersCount = 0;
-      
+
       for (const provider of providers) {
         // Process all providers (isValidProvider check commented out)
         // TODO: Re-enable validation when GPS format is properly handled
         // if (this.isValidProvider(provider)) {
-          await this.processProvider(provider, response.context, queryRunner, stats);
-          validProvidersCount++;
+        await this.processProvider(
+          provider,
+          response.context,
+          queryRunner,
+          stats,
+        );
+        validProvidersCount++;
         // } else {
         //   this.logger.warn(`Skipping invalid provider: ${provider.id}`);
         //   stats.providers_skipped = (stats.providers_skipped || 0) + 1;
@@ -201,7 +223,9 @@ export class CatalogIngestionService {
       }
 
       await queryRunner.commitTransaction();
-      this.logger.log(`Successfully processed provider response with ${validProvidersCount} valid provider(s) out of ${providers.length} total`);
+      this.logger.log(
+        `Successfully processed provider response with ${validProvidersCount} valid provider(s) out of ${providers.length} total`,
+      );
     } catch (error) {
       await queryRunner.rollbackTransaction();
       throw error;
@@ -213,7 +237,12 @@ export class CatalogIngestionService {
   /**
    * Process a single provider (store) with all its data
    */
-  private async processProvider(provider: Provider, context: any, queryRunner: any, stats: any): Promise<void> {
+  private async processProvider(
+    provider: Provider,
+    context: any,
+    queryRunner: any,
+    stats: any,
+  ): Promise<void> {
     // 1. Upsert Store
     const store = await this.upsertStore(provider, context, queryRunner);
     stats.stores_upserted++;
@@ -240,9 +269,10 @@ export class CatalogIngestionService {
     // 5. Upsert Categories
     if (provider.categories) {
       // First, mark all existing categories as inactive
-      await queryRunner.manager.update(Category, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Category,
+        { store: { id: store.id } },
+        { status: false },
       );
 
       // Then process current categories and mark them as active
@@ -252,18 +282,20 @@ export class CatalogIngestionService {
       }
     } else {
       // If no categories in current data, mark all existing categories as inactive
-      await queryRunner.manager.update(Category, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Category,
+        { store: { id: store.id } },
+        { status: false },
       );
     }
 
     // 6. Upsert Items
     if (provider.items) {
       // First, mark all existing items as inactive
-      await queryRunner.manager.update(Item, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Item,
+        { store: { id: store.id } },
+        { status: false },
       );
 
       // Then process current items and mark them as active
@@ -273,18 +305,20 @@ export class CatalogIngestionService {
       }
     } else {
       // If no items in current data, mark all existing items as inactive
-      await queryRunner.manager.update(Item, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Item,
+        { store: { id: store.id } },
+        { status: false },
       );
     }
 
     // 7. Upsert Offers
     if (provider.offers) {
       // First, mark all existing offers as inactive
-      await queryRunner.manager.update(Offers, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Offers,
+        { store: { id: store.id } },
+        { status: false },
       );
 
       // Then process current offers and mark them as active
@@ -294,14 +328,19 @@ export class CatalogIngestionService {
       }
     } else {
       // If no offers in current data, mark all existing offers as inactive
-      await queryRunner.manager.update(Offers, 
-        { store: { id: store.id } }, 
-        { status: false }
+      await queryRunner.manager.update(
+        Offers,
+        { store: { id: store.id } },
+        { status: false },
       );
     }
 
     // 8. Post-process customization parent_item relationships
-    await this.postProcessCustomizationParentItems(provider, store, queryRunner);
+    await this.postProcessCustomizationParentItems(
+      provider,
+      store,
+      queryRunner,
+    );
 
     // 9. Link customization items to categories
     await this.linkCustomizationItemsToCategories(store, queryRunner);
@@ -314,26 +353,35 @@ export class CatalogIngestionService {
   /**
    * Upsert Store entity using reference_id with enhanced transformation
    */
-  private async upsertStore(provider: Provider, context: any, queryRunner: any): Promise<Store> {
+  private async upsertStore(
+    provider: Provider,
+    context: any,
+    queryRunner: any,
+  ): Promise<Store> {
     let store = await queryRunner.manager.findOne(Store, {
-      where: { reference_id: provider.id }
+      where: { reference_id: provider.id },
     });
 
     try {
       // Use transformer to transform and validate data
       store = this.storeTransformer.transform(provider, context, store);
-      
+
       // Validate transformed data
       const validation = this.storeTransformer.validateStore(store);
       if (!validation.isValid) {
-        this.logger.warn(`Store validation failed for ${provider.id}:`, validation.errors);
+        this.logger.warn(
+          `Store validation failed for ${provider.id}:`,
+          validation.errors,
+        );
         // Continue with transformation warnings rather than failing
       }
 
       return await queryRunner.manager.save(Store, store);
-      
     } catch (error) {
-      this.logger.error(`Failed to upsert store ${provider.id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to upsert store ${provider.id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -341,36 +389,53 @@ export class CatalogIngestionService {
   /**
    * Upsert Store Location using reference_id with enhanced transformation
    */
-  private async upsertStoreLocation(locationData: any, store: Store, queryRunner: any): Promise<StoreLocation> {
+  private async upsertStoreLocation(
+    locationData: any,
+    store: Store,
+    queryRunner: any,
+  ): Promise<StoreLocation> {
     let location = await queryRunner.manager.findOne(StoreLocation, {
-      where: { reference_id: locationData.id, store: { id: store.id } }
+      where: { reference_id: locationData.id, store: { id: store.id } },
     });
 
     try {
       // Use transformer to transform and validate data
-      location = this.locationTransformer.transform(locationData, store, location);
-      
+      location = this.locationTransformer.transform(
+        locationData,
+        store,
+        location,
+      );
+
       // Validate transformed data
       const validation = this.locationTransformer.validateLocation(location);
       if (!validation.isValid) {
-        this.logger.warn(`Location validation failed for ${locationData.id}:`, validation.errors);
+        this.logger.warn(
+          `Location validation failed for ${locationData.id}:`,
+          validation.errors,
+        );
         // Continue with transformation warnings rather than failing
       }
 
       return await queryRunner.manager.save(StoreLocation, location);
-      
     } catch (error) {
-      this.logger.error(`Failed to upsert location ${locationData.id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to upsert location ${locationData.id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
 
   /**
-   * Upsert Store Fulfillment using reference_id - COMPLETE IMPLEMENTATION  
+   * Upsert Store Fulfillment using reference_id - COMPLETE IMPLEMENTATION
    */
-  private async upsertStoreFulfillment(fulfillmentData: any, store: Store, queryRunner: any): Promise<StoreFulfillment> {
+  private async upsertStoreFulfillment(
+    fulfillmentData: any,
+    store: Store,
+    queryRunner: any,
+  ): Promise<StoreFulfillment> {
     let fulfillment = await queryRunner.manager.findOne(StoreFulfillment, {
-      where: { reference_id: fulfillmentData.id, store: { id: store.id } }
+      where: { reference_id: fulfillmentData.id, store: { id: store.id } },
     });
 
     if (!fulfillment) {
@@ -389,19 +454,23 @@ export class CatalogIngestionService {
   /**
    * Process store tags - COMPLETE IMPLEMENTATION
    */
-  private async processStoreTags(tags: any[], store: Store, queryRunner: any): Promise<void> {
+  private async processStoreTags(
+    tags: any[],
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     for (const tag of tags) {
       switch (tag.code) {
-        case 'timing':
+        case "timing":
           await this.processStoreTimings(tag.list, store, queryRunner);
           break;
-        case 'serviceability':
+        case "serviceability":
           await this.processStoreConfigs(tag.list, store, queryRunner);
           break;
-        case 'close_timing':
+        case "close_timing":
           await this.processStoreCloseTimings(tag.list, store, queryRunner);
           break;
-        case 'order_value':
+        case "order_value":
           await this.processStoreOrderValue(tag.list, store, queryRunner);
           break;
       }
@@ -411,17 +480,21 @@ export class CatalogIngestionService {
   /**
    * Process store timings from tags
    */
-  private async processStoreTimings(timingList: any[], store: Store, queryRunner: any): Promise<void> {
+  private async processStoreTimings(
+    timingList: any[],
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing timings for this store to replace with new ones
     await queryRunner.manager.delete(StoreTimings, { store: { id: store.id } });
 
     const storeTiming = new StoreTimings();
     storeTiming.store = store;
-    storeTiming.type = 'Order';
+    storeTiming.type = "Order";
     storeTiming.day_from = 1;
     storeTiming.day_to = 7;
-    storeTiming.time_from = '0900';
-    storeTiming.time_to = '2100';
+    storeTiming.time_from = "0900";
+    storeTiming.time_to = "2100";
 
     await queryRunner.manager.save(StoreTimings, storeTiming);
   }
@@ -429,7 +502,11 @@ export class CatalogIngestionService {
   /**
    * Process store configs from serviceability tags
    */
-  private async processStoreConfigs(configList: any[], store: Store, queryRunner: any): Promise<void> {
+  private async processStoreConfigs(
+    configList: any[],
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing configs for this store
     await queryRunner.manager.delete(StoreConfigs, { store: { id: store.id } });
 
@@ -438,13 +515,13 @@ export class CatalogIngestionService {
 
     for (const item of configList) {
       switch (item.code) {
-        case 'type':
+        case "type":
           config.serviceability_type = item.value;
           break;
-        case 'val':
+        case "val":
           config.serviceability_value = item.value;
           break;
-        case 'unit':
+        case "unit":
           config.serviceability_unit = item.value;
           break;
       }
@@ -456,9 +533,13 @@ export class CatalogIngestionService {
   /**
    * Process store order value configs
    */
-  private async processStoreOrderValue(orderValueList: any[], store: Store, queryRunner: any): Promise<void> {
+  private async processStoreOrderValue(
+    orderValueList: any[],
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     let config = await queryRunner.manager.findOne(StoreConfigs, {
-      where: { store: { id: store.id } }
+      where: { store: { id: store.id } },
     });
 
     if (!config) {
@@ -467,7 +548,7 @@ export class CatalogIngestionService {
     }
 
     for (const item of orderValueList) {
-      if (item.code === 'min_value') {
+      if (item.code === "min_value") {
         config.min_order_value = parseFloat(item.value);
       }
     }
@@ -478,15 +559,21 @@ export class CatalogIngestionService {
   /**
    * Process store close timings
    */
-  private async processStoreCloseTimings(closeTimingList: any[], store: Store, queryRunner: any): Promise<void> {
+  private async processStoreCloseTimings(
+    closeTimingList: any[],
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing close timings for this store
-    await queryRunner.manager.delete(StoreCloseTimings, { store: { id: store.id } });
+    await queryRunner.manager.delete(StoreCloseTimings, {
+      store: { id: store.id },
+    });
 
     const closeTimings = new StoreCloseTimings();
     closeTimings.store = store;
     closeTimings.close_start_datetime = new Date();
     closeTimings.close_end_datetime = new Date();
-    closeTimings.reason = 'maintenance';
+    closeTimings.reason = "maintenance";
 
     await queryRunner.manager.save(StoreCloseTimings, closeTimings);
   }
@@ -494,22 +581,33 @@ export class CatalogIngestionService {
   /**
    * Upsert Category using reference_id with enhanced transformation
    */
-  private async upsertCategory(categoryData: ONDCCategory, store: Store, queryRunner: any): Promise<Category> {
+  private async upsertCategory(
+    categoryData: ONDCCategory,
+    store: Store,
+    queryRunner: any,
+  ): Promise<Category> {
     let category = await queryRunner.manager.findOne(Category, {
-      where: { reference_id: categoryData.id, store: { id: store.id } }
+      where: { reference_id: categoryData.id, store: { id: store.id } },
     });
 
     try {
       // Use transformer to transform and validate data
-      category = this.categoryTransformer.transform(categoryData, store, category);
-      
+      category = this.categoryTransformer.transform(
+        categoryData,
+        store,
+        category,
+      );
+
       // Ensure category is marked as active since it's in current data
       category.status = true;
-      
+
       // Validate transformed data
       const validation = this.categoryTransformer.validateCategory(category);
       if (!validation.isValid) {
-        this.logger.warn(`Category validation failed for ${categoryData.id}:`, validation.errors);
+        this.logger.warn(
+          `Category validation failed for ${categoryData.id}:`,
+          validation.errors,
+        );
         // Continue with transformation warnings rather than failing
       }
 
@@ -528,9 +626,11 @@ export class CatalogIngestionService {
       }
 
       return savedCategory;
-      
     } catch (error) {
-      this.logger.error(`Failed to upsert category ${categoryData.id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to upsert category ${categoryData.id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -538,9 +638,15 @@ export class CatalogIngestionService {
   /**
    * Process category timing information
    */
-  private async processCategoryTiming(timing: any, category: Category, queryRunner: any): Promise<void> {
+  private async processCategoryTiming(
+    timing: any,
+    category: Category,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing timing for this category
-    await queryRunner.manager.delete(CategoryTimings, { category: { id: category.id } });
+    await queryRunner.manager.delete(CategoryTimings, {
+      category: { id: category.id },
+    });
 
     const categoryTiming = new CategoryTimings();
     categoryTiming.category = category;
@@ -555,9 +661,15 @@ export class CatalogIngestionService {
   /**
    * Process category configuration information
    */
-  private async processCategoryConfig(config: any, category: Category, queryRunner: any): Promise<void> {
+  private async processCategoryConfig(
+    config: any,
+    category: Category,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing config for this category
-    await queryRunner.manager.delete(CategoryConfigs, { category: { id: category.id } });
+    await queryRunner.manager.delete(CategoryConfigs, {
+      category: { id: category.id },
+    });
 
     const categoryConfig = new CategoryConfigs();
     categoryConfig.category = category;
@@ -573,22 +685,30 @@ export class CatalogIngestionService {
   /**
    * Upsert Item using reference_id with enhanced transformation
    */
-  private async upsertItem(itemData: ONDCItem, store: Store, provider: Provider, queryRunner: any): Promise<Item> {
+  private async upsertItem(
+    itemData: ONDCItem,
+    store: Store,
+    provider: Provider,
+    queryRunner: any,
+  ): Promise<Item> {
     let item = await queryRunner.manager.findOne(Item, {
-      where: { reference_id: itemData.id, store: { id: store.id } }
+      where: { reference_id: itemData.id, store: { id: store.id } },
     });
 
     try {
       // Use transformer to transform and validate data
       item = this.itemTransformer.transform(itemData, store, item);
-      
+
       // Ensure item is marked as active since it's in current data
       item.status = true;
-      
+
       // Validate transformed data
       const validation = this.itemTransformer.validateItem(item);
       if (!validation.isValid) {
-        this.logger.warn(`Item validation failed for ${itemData.id}:`, validation.errors);
+        this.logger.warn(
+          `Item validation failed for ${itemData.id}:`,
+          validation.errors,
+        );
         // Continue with transformation warnings rather than failing
       }
 
@@ -619,21 +739,38 @@ export class CatalogIngestionService {
       await this.processItemTimings(itemData, savedItem, queryRunner);
 
       // Process item location and fulfillment relationships
-      await this.processItemLocationFulfillment(itemData, savedItem, store, queryRunner);
+      await this.processItemLocationFulfillment(
+        itemData,
+        savedItem,
+        store,
+        queryRunner,
+      );
 
       // Process item customization groups
-      await this.processItemCustomizationGroups(itemData, savedItem, store, queryRunner);
+      await this.processItemCustomizationGroups(
+        itemData,
+        savedItem,
+        store,
+        queryRunner,
+      );
 
       // Process customization relationships for customization items
-      await this.processCustomizationRelationships(itemData, savedItem, store, queryRunner);
+      await this.processCustomizationRelationships(
+        itemData,
+        savedItem,
+        store,
+        queryRunner,
+      );
 
       // Process item variants if available
       await this.processItemVariants(itemData, savedItem, store, queryRunner);
 
       return savedItem;
-      
     } catch (error) {
-      this.logger.error(`Failed to upsert item ${itemData.id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to upsert item ${itemData.id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -641,7 +778,11 @@ export class CatalogIngestionService {
   /**
    * Process item pricing data from transformer
    */
-  private async processItemPricing(pricingData: any, item: Item, queryRunner: any): Promise<void> {
+  private async processItemPricing(
+    pricingData: any,
+    item: Item,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing prices for this item
     await queryRunner.manager.delete(ItemPrices, { item: { id: item.id } });
 
@@ -653,7 +794,8 @@ export class CatalogIngestionService {
     itemPrice.minimum_price_range = pricingData.minimum_price_range;
     itemPrice.maximum_price_range = pricingData.maximum_price_range;
     itemPrice.default_selection_price = pricingData.default_selection_price;
-    itemPrice.default_selection_max_price = pricingData.default_selection_max_price;
+    itemPrice.default_selection_max_price =
+      pricingData.default_selection_max_price;
 
     await queryRunner.manager.save(ItemPrices, itemPrice);
   }
@@ -661,7 +803,11 @@ export class CatalogIngestionService {
   /**
    * Process item quantity data from transformer
    */
-  private async processItemQuantity(quantityData: any, item: Item, queryRunner: any): Promise<void> {
+  private async processItemQuantity(
+    quantityData: any,
+    item: Item,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing quantities for this item
     await queryRunner.manager.delete(ItemQuantities, { item: { id: item.id } });
 
@@ -680,7 +826,11 @@ export class CatalogIngestionService {
   /**
    * Process item attributes from transformer
    */
-  private async processItemAttributes(attributesData: any[], item: Item, queryRunner: any): Promise<void> {
+  private async processItemAttributes(
+    attributesData: any[],
+    item: Item,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing attributes for this item
     await queryRunner.manager.delete(ItemAttributes, { item: { id: item.id } });
 
@@ -700,22 +850,29 @@ export class CatalogIngestionService {
   /**
    * Upsert Offer using reference_id with enhanced transformation
    */
-  private async upsertOffer(offerData: ONDCOffer, store: Store, queryRunner: any): Promise<Offers> {
+  private async upsertOffer(
+    offerData: ONDCOffer,
+    store: Store,
+    queryRunner: any,
+  ): Promise<Offers> {
     let offer = await queryRunner.manager.findOne(Offers, {
-      where: { reference_id: offerData.id, store: { id: store.id } }
+      where: { reference_id: offerData.id, store: { id: store.id } },
     });
 
     try {
       // Use transformer to transform and validate data
       offer = this.offerTransformer.transform(offerData, store, offer);
-      
+
       // Ensure offer is marked as active since it's in current data
       offer.status = true;
-      
+
       // Validate transformed data
       const validation = this.offerTransformer.validateOffer(offer);
       if (!validation.isValid) {
-        this.logger.warn(`Offer validation failed for ${offerData.id}:`, validation.errors);
+        this.logger.warn(
+          `Offer validation failed for ${offerData.id}:`,
+          validation.errors,
+        );
         // Continue with transformation warnings rather than failing
       }
 
@@ -736,7 +893,12 @@ export class CatalogIngestionService {
       // Process offer location associations
       const locationIds = this.offerTransformer.parseLocationIds(offerData);
       if (locationIds.length > 0) {
-        await this.processOfferLocations(locationIds, savedOffer, store, queryRunner);
+        await this.processOfferLocations(
+          locationIds,
+          savedOffer,
+          store,
+          queryRunner,
+        );
       }
 
       // Process offer item associations
@@ -746,9 +908,11 @@ export class CatalogIngestionService {
       }
 
       return savedOffer;
-      
     } catch (error) {
-      this.logger.error(`Failed to upsert offer ${offerData.id}: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to upsert offer ${offerData.id}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -756,9 +920,15 @@ export class CatalogIngestionService {
   /**
    * Process offer qualifiers from transformer
    */
-  private async processOfferQualifiers(qualifiersData: any[], offer: Offers, queryRunner: any): Promise<void> {
+  private async processOfferQualifiers(
+    qualifiersData: any[],
+    offer: Offers,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing qualifiers for this offer
-    await queryRunner.manager.delete(OfferQualifiers, { offer: { id: offer.id } });
+    await queryRunner.manager.delete(OfferQualifiers, {
+      offer: { id: offer.id },
+    });
 
     for (const qualifierData of qualifiersData) {
       const offerQualifier = new OfferQualifiers();
@@ -773,9 +943,15 @@ export class CatalogIngestionService {
   /**
    * Process offer benefits from transformer
    */
-  private async processOfferBenefits(benefitsData: any[], offer: Offers, queryRunner: any): Promise<void> {
+  private async processOfferBenefits(
+    benefitsData: any[],
+    offer: Offers,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing benefits for this offer
-    await queryRunner.manager.delete(OfferBenefits, { offer: { id: offer.id } });
+    await queryRunner.manager.delete(OfferBenefits, {
+      offer: { id: offer.id },
+    });
 
     for (const benefitData of benefitsData) {
       const offerBenefit = new OfferBenefits();
@@ -792,14 +968,21 @@ export class CatalogIngestionService {
   /**
    * Process offer location associations
    */
-  private async processOfferLocations(locationIds: string[], offer: Offers, store: Store, queryRunner: any): Promise<void> {
+  private async processOfferLocations(
+    locationIds: string[],
+    offer: Offers,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing location associations for this offer
-    await queryRunner.manager.delete(OfferLocations, { offer: { id: offer.id } });
+    await queryRunner.manager.delete(OfferLocations, {
+      offer: { id: offer.id },
+    });
 
     for (const locationId of locationIds) {
       // Find the location in this store
       const location = await queryRunner.manager.findOne(StoreLocation, {
-        where: { reference_id: locationId, store: { id: store.id } }
+        where: { reference_id: locationId, store: { id: store.id } },
       });
 
       if (location) {
@@ -809,7 +992,9 @@ export class CatalogIngestionService {
 
         await queryRunner.manager.save(OfferLocations, offerLocation);
       } else {
-        this.logger.warn(`Location ${locationId} not found for offer ${offer.reference_id}`);
+        this.logger.warn(
+          `Location ${locationId} not found for offer ${offer.reference_id}`,
+        );
       }
     }
   }
@@ -817,14 +1002,19 @@ export class CatalogIngestionService {
   /**
    * Process offer item associations
    */
-  private async processOfferItems(itemIds: string[], offer: Offers, store: Store, queryRunner: any): Promise<void> {
+  private async processOfferItems(
+    itemIds: string[],
+    offer: Offers,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing item associations for this offer
     await queryRunner.manager.delete(OfferItems, { offer: { id: offer.id } });
 
     for (const itemId of itemIds) {
       // Find the item in this store
       const item = await queryRunner.manager.findOne(Item, {
-        where: { reference_id: itemId, store: { id: store.id } }
+        where: { reference_id: itemId, store: { id: store.id } },
       });
 
       if (item) {
@@ -834,7 +1024,9 @@ export class CatalogIngestionService {
 
         await queryRunner.manager.save(OfferItems, offerItem);
       } else {
-        this.logger.warn(`Item ${itemId} not found for offer ${offer.reference_id}`);
+        this.logger.warn(
+          `Item ${itemId} not found for offer ${offer.reference_id}`,
+        );
       }
     }
   }
@@ -842,7 +1034,10 @@ export class CatalogIngestionService {
   /**
    * Handle store-level deletions (stores not present in any response)
    */
-  private async handleStoreDeletions(activeStoreIds: string[], stats: any): Promise<void> {
+  private async handleStoreDeletions(
+    activeStoreIds: string[],
+    stats: any,
+  ): Promise<void> {
     const queryRunner = this.dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
@@ -850,21 +1045,25 @@ export class CatalogIngestionService {
     try {
       // Get all currently active stores
       const existingStores = await queryRunner.manager.find(Store, {
-        where: { status: true }
+        where: { status: true },
       });
 
       // Find stores to mark as deleted
-      const storesToDelete = existingStores.filter(store => 
-        !activeStoreIds.includes(store.reference_id)
+      const storesToDelete = existingStores.filter(
+        (store) => !activeStoreIds.includes(store.reference_id),
       );
 
       // Mark stores as inactive (soft delete)
       for (const store of storesToDelete) {
-        this.logger.log(`Marking store as inactive: ${store.reference_id} (${store.name}) - Reason: Not present in current ONDC response`);
+        this.logger.log(
+          `Marking store as inactive: ${store.reference_id} (${store.name}) - Reason: Not present in current ONDC response`,
+        );
         store.status = false;
         await queryRunner.manager.save(Store, store);
         stats.stores_deleted++;
-        this.logger.log(`Soft deleted store: ${store.reference_id} (${store.name})`);
+        this.logger.log(
+          `Soft deleted store: ${store.reference_id} (${store.name})`,
+        );
 
         // Also soft delete all related entities for this store
         await this.softDeleteStoreRelatedEntities(store, queryRunner);
@@ -873,7 +1072,10 @@ export class CatalogIngestionService {
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
-      this.logger.error(`Failed to handle store deletions: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to handle store deletions: ${error.message}`,
+        error.stack,
+      );
       stats.errors.push(`Store deletion error: ${error.message}`);
     } finally {
       await queryRunner.release();
@@ -888,50 +1090,71 @@ export class CatalogIngestionService {
     try {
       // Check if provider has required fields
       if (!provider.id || !provider.descriptor?.name) {
-        this.logger.warn(`Provider missing required fields: ${JSON.stringify(provider)}`);
+        this.logger.warn(
+          `Provider missing required fields: ${JSON.stringify(provider)}`,
+        );
         return false;
       }
 
       // Check if provider has valid descriptor
-      if (!provider.descriptor.name || provider.descriptor.name.trim().length < 2) {
+      if (
+        !provider.descriptor.name ||
+        provider.descriptor.name.trim().length < 2
+      ) {
         this.logger.warn(`Provider has invalid name: ${provider.id}`);
         return false;
       }
 
       // Check if provider has locations
-      if (!provider.locations || !Array.isArray(provider.locations) || provider.locations.length === 0) {
+      if (
+        !provider.locations ||
+        !Array.isArray(provider.locations) ||
+        provider.locations.length === 0
+      ) {
         this.logger.warn(`Provider has no valid locations: ${provider.id}`);
         return false;
       }
 
       // Check if provider has valid location data
-      const hasValidLocation = provider.locations.some((location: any) => 
-        location.gps && 
-        location.gps.lat && 
-        location.gps.lng &&
-        !isNaN(parseFloat(location.gps.lat)) &&
-        !isNaN(parseFloat(location.gps.lng))
+      const hasValidLocation = provider.locations.some(
+        (location: any) =>
+          location.gps &&
+          location.gps.lat &&
+          location.gps.lng &&
+          !isNaN(parseFloat(location.gps.lat)) &&
+          !isNaN(parseFloat(location.gps.lng)),
       );
 
       if (!hasValidLocation) {
-        this.logger.warn(`Provider has no valid GPS coordinates: ${provider.id}`);
+        this.logger.warn(
+          `Provider has no valid GPS coordinates: ${provider.id}`,
+        );
         return false;
       }
 
       // Check if provider has categories or items (at least one should exist)
-      const hasCategories = provider.categories && Array.isArray(provider.categories) && provider.categories.length > 0;
-      const hasItems = provider.items && Array.isArray(provider.items) && provider.items.length > 0;
+      const hasCategories =
+        provider.categories &&
+        Array.isArray(provider.categories) &&
+        provider.categories.length > 0;
+      const hasItems =
+        provider.items &&
+        Array.isArray(provider.items) &&
+        provider.items.length > 0;
 
       if (!hasCategories && !hasItems) {
         this.logger.warn(`Provider has no categories or items: ${provider.id}`);
         return false;
       }
 
-      this.logger.log(`Provider ${provider.id} is valid and will be marked as active`);
+      this.logger.log(
+        `Provider ${provider.id} is valid and will be marked as active`,
+      );
       return true;
-
     } catch (error) {
-      this.logger.error(`Error validating provider ${provider.id}: ${error.message}`);
+      this.logger.error(
+        `Error validating provider ${provider.id}: ${error.message}`,
+      );
       return false;
     }
   }
@@ -939,32 +1162,45 @@ export class CatalogIngestionService {
   /**
    * Soft delete all entities related to a deleted store
    */
-  private async softDeleteStoreRelatedEntities(store: Store, queryRunner: any): Promise<void> {
+  private async softDeleteStoreRelatedEntities(
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Soft delete categories
-    await queryRunner.manager.update(Category, 
-      { store: { id: store.id }, status: true }, 
-      { status: false }
+    await queryRunner.manager.update(
+      Category,
+      { store: { id: store.id }, status: true },
+      { status: false },
     );
 
     // Soft delete items
-    await queryRunner.manager.update(Item, 
-      { store: { id: store.id }, status: true }, 
-      { status: false }
+    await queryRunner.manager.update(
+      Item,
+      { store: { id: store.id }, status: true },
+      { status: false },
     );
 
     // Soft delete offers
-    await queryRunner.manager.update(Offers, 
-      { store: { id: store.id }, status: true }, 
-      { status: false }
+    await queryRunner.manager.update(
+      Offers,
+      { store: { id: store.id }, status: true },
+      { status: false },
     );
 
-    this.logger.log(`Soft deleted all related entities for store: ${store.reference_id}`);
+    this.logger.log(
+      `Soft deleted all related entities for store: ${store.reference_id}`,
+    );
   }
 
   /**
    * Handle deletions (soft delete) for entities not present in current response
    */
-  private async handleDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+  private async handleDeletions(
+    provider: Provider,
+    store: Store,
+    queryRunner: any,
+    stats: any,
+  ): Promise<void> {
     this.logger.log(`Handling deletions for store ${store.reference_id}`);
 
     // Handle Category deletions
@@ -976,24 +1212,31 @@ export class CatalogIngestionService {
     // Handle Offer deletions
     await this.handleOfferDeletions(provider, store, queryRunner, stats);
 
-    this.logger.log(`Deletion handling completed for store ${store.reference_id}`);
+    this.logger.log(
+      `Deletion handling completed for store ${store.reference_id}`,
+    );
   }
 
   /**
    * Handle Category deletions (soft delete)
    */
-  private async handleCategoryDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+  private async handleCategoryDeletions(
+    provider: Provider,
+    store: Store,
+    queryRunner: any,
+    stats: any,
+  ): Promise<void> {
     // Get existing active categories for this store
     const existingCategories = await queryRunner.manager.find(Category, {
-      where: { store: { id: store.id }, status: true }
+      where: { store: { id: store.id }, status: true },
     });
 
     // Get current response category IDs
-    const responseCategoryIds = provider.categories?.map(cat => cat.id) || [];
+    const responseCategoryIds = provider.categories?.map((cat) => cat.id) || [];
 
     // Find categories to mark as deleted
-    const categoriesToDelete = existingCategories.filter(category => 
-      !responseCategoryIds.includes(category.reference_id)
+    const categoriesToDelete = existingCategories.filter(
+      (category) => !responseCategoryIds.includes(category.reference_id),
     );
 
     // Mark as inactive (soft delete)
@@ -1001,25 +1244,32 @@ export class CatalogIngestionService {
       category.status = false;
       await queryRunner.manager.save(Category, category);
       stats.categories_deleted++;
-      this.logger.log(`Soft deleted category: ${category.reference_id} (${category.name})`);
+      this.logger.log(
+        `Soft deleted category: ${category.reference_id} (${category.name})`,
+      );
     }
   }
 
   /**
    * Handle Item deletions (soft delete)
    */
-  private async handleItemDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+  private async handleItemDeletions(
+    provider: Provider,
+    store: Store,
+    queryRunner: any,
+    stats: any,
+  ): Promise<void> {
     // Get existing active items for this store
     const existingItems = await queryRunner.manager.find(Item, {
-      where: { store: { id: store.id }, status: true }
+      where: { store: { id: store.id }, status: true },
     });
 
     // Get current response item IDs
-    const responseItemIds = provider.items?.map(item => item.id) || [];
+    const responseItemIds = provider.items?.map((item) => item.id) || [];
 
     // Find items to mark as deleted
-    const itemsToDelete = existingItems.filter(item => 
-      !responseItemIds.includes(item.reference_id)
+    const itemsToDelete = existingItems.filter(
+      (item) => !responseItemIds.includes(item.reference_id),
     );
 
     // Mark as inactive (soft delete)
@@ -1037,18 +1287,23 @@ export class CatalogIngestionService {
   /**
    * Handle Offer deletions (soft delete)
    */
-  private async handleOfferDeletions(provider: Provider, store: Store, queryRunner: any, stats: any): Promise<void> {
+  private async handleOfferDeletions(
+    provider: Provider,
+    store: Store,
+    queryRunner: any,
+    stats: any,
+  ): Promise<void> {
     // Get existing active offers for this store
     const existingOffers = await queryRunner.manager.find(Offers, {
-      where: { store: { id: store.id }, status: true }
+      where: { store: { id: store.id }, status: true },
     });
 
     // Get current response offer IDs
-    const responseOfferIds = provider.offers?.map(offer => offer.id) || [];
+    const responseOfferIds = provider.offers?.map((offer) => offer.id) || [];
 
     // Find offers to mark as deleted
-    const offersToDelete = existingOffers.filter(offer => 
-      !responseOfferIds.includes(offer.reference_id)
+    const offersToDelete = existingOffers.filter(
+      (offer) => !responseOfferIds.includes(offer.reference_id),
     );
 
     // Mark as inactive (soft delete)
@@ -1056,14 +1311,19 @@ export class CatalogIngestionService {
       offer.status = false;
       await queryRunner.manager.save(Offers, offer);
       stats.offers_deleted++;
-      this.logger.log(`Soft deleted offer: ${offer.reference_id} (${offer.offer_code})`);
+      this.logger.log(
+        `Soft deleted offer: ${offer.reference_id} (${offer.offer_code})`,
+      );
     }
   }
 
   /**
    * Soft delete related item entities when an item is deleted
    */
-  private async softDeleteRelatedItemEntities(item: Item, queryRunner: any): Promise<void> {
+  private async softDeleteRelatedItemEntities(
+    item: Item,
+    queryRunner: any,
+  ): Promise<void> {
     // Mark item prices as inactive (if they have status field)
     // Note: Current ItemPrices doesn't have status field, so we'll delete and recreate
     // This is handled by the delete operations in processItemPricing method
@@ -1076,13 +1336,20 @@ export class CatalogIngestionService {
     // Note: Current ItemAttributes doesn't have status field, so we'll delete and recreate
     // This is handled by the delete operations when processing item tags
 
-    this.logger.log(`Soft deleted related entities for item: ${item.reference_id}`);
+    this.logger.log(
+      `Soft deleted related entities for item: ${item.reference_id}`,
+    );
   }
 
   /**
    * Process item-category relationships
    */
-  private async processItemCategories(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+  private async processItemCategories(
+    itemData: ONDCItem,
+    item: Item,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing item-category relationships
     await queryRunner.manager.delete(ItemCategories, { item: { id: item.id } });
 
@@ -1093,11 +1360,11 @@ export class CatalogIngestionService {
 
     for (const categoryIdWithSuffix of itemData.category_ids) {
       // Parse category ID (remove suffix like ":1")
-      const categoryId = categoryIdWithSuffix.split(':')[0];
-      
+      const categoryId = categoryIdWithSuffix.split(":")[0];
+
       // Find the category in this store
       const category = await queryRunner.manager.findOne(Category, {
-        where: { reference_id: categoryId, store: { id: store.id } }
+        where: { reference_id: categoryId, store: { id: store.id } },
       });
 
       if (category) {
@@ -1111,13 +1378,18 @@ export class CatalogIngestionService {
         const itemCategory = new ItemCategories();
         itemCategory.item = item;
         itemCategory.category = category;
-        itemCategory.is_default = !item.category || item.category.id === category.id;
+        itemCategory.is_default =
+          !item.category || item.category.id === category.id;
 
         await queryRunner.manager.save(ItemCategories, itemCategory);
-        
-        this.logger.log(`Linked item ${item.reference_id} to category ${category.reference_id}`);
+
+        this.logger.log(
+          `Linked item ${item.reference_id} to category ${category.reference_id}`,
+        );
       } else {
-        this.logger.warn(`Category ${categoryId} not found for item ${itemData.id}`);
+        this.logger.warn(
+          `Category ${categoryId} not found for item ${itemData.id}`,
+        );
       }
     }
   }
@@ -1125,7 +1397,11 @@ export class CatalogIngestionService {
   /**
    * Process item timing information
    */
-  private async processItemTimings(itemData: ONDCItem, item: Item, queryRunner: any): Promise<void> {
+  private async processItemTimings(
+    itemData: ONDCItem,
+    item: Item,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing timings for this item
     await queryRunner.manager.delete(ItemTimings, { item: { id: item.id } });
 
@@ -1134,8 +1410,8 @@ export class CatalogIngestionService {
       itemTiming.item = item;
       itemTiming.day_from = 1; // Default to all days
       itemTiming.day_to = 7;
-      itemTiming.time_from = '0600'; // Default availability hours
-      itemTiming.time_to = '2200';
+      itemTiming.time_from = "0600"; // Default availability hours
+      itemTiming.time_to = "2200";
 
       await queryRunner.manager.save(ItemTimings, itemTiming);
       this.logger.log(`Added timing for item ${item.reference_id}`);
@@ -1145,32 +1421,48 @@ export class CatalogIngestionService {
   /**
    * Process item location and fulfillment relationships
    */
-  private async processItemLocationFulfillment(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+  private async processItemLocationFulfillment(
+    itemData: ONDCItem,
+    item: Item,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Set item location relationship
     if (itemData.location_id) {
       const location = await queryRunner.manager.findOne(StoreLocation, {
-        where: { reference_id: itemData.location_id, store: { id: store.id } }
+        where: { reference_id: itemData.location_id, store: { id: store.id } },
       });
-      
+
       if (location) {
         item.location = location;
-        this.logger.log(`Linked item ${item.reference_id} to location ${location.reference_id}`);
+        this.logger.log(
+          `Linked item ${item.reference_id} to location ${location.reference_id}`,
+        );
       } else {
-        this.logger.warn(`Location ${itemData.location_id} not found for item ${item.reference_id}`);
+        this.logger.warn(
+          `Location ${itemData.location_id} not found for item ${item.reference_id}`,
+        );
       }
     }
 
     // Set item fulfillment relationship
     if (itemData.fulfillment_id) {
       const fulfillment = await queryRunner.manager.findOne(StoreFulfillment, {
-        where: { reference_id: itemData.fulfillment_id, store: { id: store.id } }
+        where: {
+          reference_id: itemData.fulfillment_id,
+          store: { id: store.id },
+        },
       });
-      
+
       if (fulfillment) {
         item.fulfillment = fulfillment;
-        this.logger.log(`Linked item ${item.reference_id} to fulfillment ${fulfillment.reference_id}`);
+        this.logger.log(
+          `Linked item ${item.reference_id} to fulfillment ${fulfillment.reference_id}`,
+        );
       } else {
-        this.logger.warn(`Fulfillment ${itemData.fulfillment_id} not found for item ${item.reference_id}`);
+        this.logger.warn(
+          `Fulfillment ${itemData.fulfillment_id} not found for item ${item.reference_id}`,
+        );
       }
     }
 
@@ -1185,56 +1477,70 @@ export class CatalogIngestionService {
    * This method creates the relationship between main items and customization groups
    * Based on the actual ONDC data structure where customization groups are separate categories
    */
-  private async processItemCustomizationGroups(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+  private async processItemCustomizationGroups(
+    itemData: ONDCItem,
+    item: Item,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing customization groups for this item
-    await queryRunner.manager.delete(ItemCustomizationGroups, { item: { id: item.id } });
+    await queryRunner.manager.delete(ItemCustomizationGroups, {
+      item: { id: item.id },
+    });
 
     // Only process for main items (type='item'), not customization items
-    if (item.type !== 'item') {
+    if (item.type !== "item") {
       return;
     }
 
     // ✅ CORRECT APPROACH: Find customization groups that should be linked to this specific item
     // Based on the ONDC data structure, we need to determine which customization groups
     // are relevant for this main item based on business logic or item attributes
-    
+
     // For now, let's link customization groups based on item categories or other criteria
     // This can be made more specific based on your business requirements
-    
+
     // Get all customization groups for this store
     const customizationGroups = await queryRunner.manager.find(Category, {
-      where: { 
-        store: { id: store.id }, 
-        type: 'custom_group',
-        status: true 
-      }
+      where: {
+        store: { id: store.id },
+        type: "custom_group",
+        status: true,
+      },
     });
 
     if (customizationGroups.length === 0) {
-      this.logger.log(`No customization groups found for store ${store.reference_id}`);
+      this.logger.log(
+        `No customization groups found for store ${store.reference_id}`,
+      );
       return;
     }
 
     // ✅ BUSINESS LOGIC: Determine which customization groups should be linked to this item
     // For now, we'll link based on item category or other criteria
     // You can modify this logic based on your specific requirements
-    
+
     const relevantCustomizationGroups = this.filterRelevantCustomizationGroups(
-      item, 
-      customizationGroups, 
-      itemData
+      item,
+      customizationGroups,
+      itemData,
     );
 
     if (relevantCustomizationGroups.length === 0) {
-      this.logger.log(`No relevant customization groups found for item ${item.reference_id}`);
+      this.logger.log(
+        `No relevant customization groups found for item ${item.reference_id}`,
+      );
       return;
     }
 
     let sequence = 1;
     for (const customizationGroup of relevantCustomizationGroups) {
       // Get configuration from the customization group's tags
-      const config = await this.extractCustomizationGroupConfig(customizationGroup, queryRunner);
-      
+      const config = await this.extractCustomizationGroupConfig(
+        customizationGroup,
+        queryRunner,
+      );
+
       const itemCustomizationGroup = new ItemCustomizationGroups();
       itemCustomizationGroup.item = item;
       itemCustomizationGroup.customization_group = customizationGroup;
@@ -1243,8 +1549,13 @@ export class CatalogIngestionService {
       itemCustomizationGroup.is_mandatory = config.is_mandatory;
       itemCustomizationGroup.sequence = sequence++;
 
-      await queryRunner.manager.save(ItemCustomizationGroups, itemCustomizationGroup);
-      this.logger.log(`✅ Linked main item ${item.reference_id} to customization group ${customizationGroup.reference_id} (${customizationGroup.name})`);
+      await queryRunner.manager.save(
+        ItemCustomizationGroups,
+        itemCustomizationGroup,
+      );
+      this.logger.log(
+        `✅ Linked main item ${item.reference_id} to customization group ${customizationGroup.reference_id} (${customizationGroup.name})`,
+      );
     }
   }
 
@@ -1253,22 +1564,22 @@ export class CatalogIngestionService {
    * This is where you can implement your business logic
    */
   private filterRelevantCustomizationGroups(
-    item: Item, 
-    customizationGroups: Category[], 
-    itemData: ONDCItem
+    item: Item,
+    customizationGroups: Category[],
+    itemData: ONDCItem,
   ): Category[] {
     // ✅ BUSINESS LOGIC: Implement your specific rules here
     // For now, let's implement a simple rule based on item name patterns
-    
+
     const relevantGroups: Category[] = [];
-    
+
     for (const group of customizationGroups) {
       // Example business logic: Link based on item name patterns
       if (this.shouldLinkCustomizationGroup(item, group, itemData)) {
         relevantGroups.push(group);
       }
     }
-    
+
     return relevantGroups;
   }
 
@@ -1277,56 +1588,62 @@ export class CatalogIngestionService {
    * This is where you implement your specific business logic
    */
   private shouldLinkCustomizationGroup(
-    item: Item, 
-    customizationGroup: Category, 
-    itemData: ONDCItem
+    item: Item,
+    customizationGroup: Category,
+    itemData: ONDCItem,
   ): boolean {
     // Based on the actual data provided, link specific items to specific groups
     const itemName = item.name.toLowerCase();
     const groupName = customizationGroup.name.toLowerCase();
-    
+
     // Mutton Noodles (21673) → Fish Special
-    if (item.reference_id === '21673' && groupName.includes('fish special')) {
+    if (item.reference_id === "21673" && groupName.includes("fish special")) {
       return true;
     }
-    
+
     // Mutton Chilli Chicken (21674) → Fish addons
-    if (item.reference_id === '21674' && groupName.includes('fish addons')) {
+    if (item.reference_id === "21674" && groupName.includes("fish addons")) {
       return true;
     }
-    
+
     // Mutton Fry with Fish (21675) → Fish Special
-    if (item.reference_id === '21675' && groupName.includes('fish special')) {
+    if (item.reference_id === "21675" && groupName.includes("fish special")) {
       return true;
     }
-    
+
     // Fish Mutton Biriyani (21676) → Biriyani Special
-    if (item.reference_id === '21676' && groupName.includes('biriyani special')) {
+    if (
+      item.reference_id === "21676" &&
+      groupName.includes("biriyani special")
+    ) {
       return true;
     }
-    
+
     // Fish Raita (21677) → Fish addons
-    if (item.reference_id === '21677' && groupName.includes('fish addons')) {
+    if (item.reference_id === "21677" && groupName.includes("fish addons")) {
       return true;
     }
-    
+
     // Fish Soup (21680) → Soups
-    if (item.reference_id === '21680' && groupName.includes('soups')) {
+    if (item.reference_id === "21680" && groupName.includes("soups")) {
       return true;
     }
-    
+
     // Chicken Soup (21681) → Soups
-    if (item.reference_id === '21681' && groupName.includes('soups')) {
+    if (item.reference_id === "21681" && groupName.includes("soups")) {
       return true;
     }
-    
+
     return false;
   }
 
   /**
    * Extract configuration from customization group category
    */
-  private async extractCustomizationGroupConfig(category: Category, queryRunner: any): Promise<{
+  private async extractCustomizationGroupConfig(
+    category: Category,
+    queryRunner: any,
+  ): Promise<{
     min_selections: number;
     max_selections: number;
     is_mandatory: boolean;
@@ -1338,7 +1655,7 @@ export class CatalogIngestionService {
 
     // Load category configs from database
     const categoryConfigs = await queryRunner.manager.find(CategoryConfigs, {
-      where: { category: { id: category.id } }
+      where: { category: { id: category.id } },
     });
 
     if (categoryConfigs.length > 0) {
@@ -1351,7 +1668,7 @@ export class CatalogIngestionService {
     return {
       min_selections,
       max_selections,
-      is_mandatory
+      is_mandatory,
     };
   }
 
@@ -1359,14 +1676,21 @@ export class CatalogIngestionService {
    * Process customization relationships for customization items
    * This method creates the relationship between customization items and their parent customization groups
    */
-  private async processCustomizationRelationships(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+  private async processCustomizationRelationships(
+    itemData: ONDCItem,
+    item: Item,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Only process if this is a customization item
-    if (item.type !== 'customization') {
+    if (item.type !== "customization") {
       return;
     }
 
     // Delete existing relationships for this customization
-    await queryRunner.manager.delete(CustomizationRelationships, { parent_customization: { id: item.id } });
+    await queryRunner.manager.delete(CustomizationRelationships, {
+      parent_customization: { id: item.id },
+    });
 
     if (!itemData.tags || !Array.isArray(itemData.tags)) {
       this.logger.warn(`No tags found for customization item ${itemData.id}`);
@@ -1374,31 +1698,41 @@ export class CatalogIngestionService {
     }
 
     // ✅ CORRECT ONDC APPROACH: Find parent tag to get parent customization group ID
-    const parentTag = itemData.tags.find(tag => tag.code === 'parent');
+    const parentTag = itemData.tags.find((tag) => tag.code === "parent");
     if (!parentTag || !Array.isArray(parentTag.list)) {
-      this.logger.warn(`No parent tag found for customization item ${itemData.id}`);
+      this.logger.warn(
+        `No parent tag found for customization item ${itemData.id}`,
+      );
       return;
     }
 
     // Extract parent ID and default status from parent tag
-    const parentIdItem = parentTag.list.find(item => item.code === 'id');
-    const defaultItem = parentTag.list.find(item => item.code === 'default');
-    
+    const parentIdItem = parentTag.list.find((item) => item.code === "id");
+    const defaultItem = parentTag.list.find((item) => item.code === "default");
+
     if (!parentIdItem?.value) {
-      this.logger.warn(`No parent ID found in parent tag for customization item ${itemData.id}`);
+      this.logger.warn(
+        `No parent ID found in parent tag for customization item ${itemData.id}`,
+      );
       return;
     }
 
     const parentCategoryId = parentIdItem.value;
-    const isDefault = defaultItem?.value === 'yes';
+    const isDefault = defaultItem?.value === "yes";
 
     // Find the parent customization group (Category with type='custom_group')
     const parentCategory = await queryRunner.manager.findOne(Category, {
-      where: { reference_id: parentCategoryId, store: { id: store.id }, type: 'custom_group' }
+      where: {
+        reference_id: parentCategoryId,
+        store: { id: store.id },
+        type: "custom_group",
+      },
     });
 
     if (!parentCategory) {
-      this.logger.warn(`Parent customization group ${parentCategoryId} not found for item ${itemData.id}`);
+      this.logger.warn(
+        `Parent customization group ${parentCategoryId} not found for item ${itemData.id}`,
+      );
       return;
     }
 
@@ -1409,13 +1743,20 @@ export class CatalogIngestionService {
     relationship.is_default = isDefault; // Whether this is the default selection
 
     await queryRunner.manager.save(CustomizationRelationships, relationship);
-    this.logger.log(`✅ Created customization relationship: ${item.reference_id} -> ${parentCategory.reference_id} (default: ${isDefault})`);
+    this.logger.log(
+      `✅ Created customization relationship: ${item.reference_id} -> ${parentCategory.reference_id} (default: ${isDefault})`,
+    );
   }
 
   /**
    * Process item variants using ONDC parent_item_id approach
    */
-  private async processItemVariants(itemData: ONDCItem, item: Item, store: Store, queryRunner: any): Promise<void> {
+  private async processItemVariants(
+    itemData: ONDCItem,
+    item: Item,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     // Delete existing item variants
     await queryRunner.manager.delete(ItemVariants, { item: { id: item.id } });
 
@@ -1426,17 +1767,23 @@ export class CatalogIngestionService {
 
     // Find the variant group (which is stored as a Category with type='variant_group')
     const variantGroup = await queryRunner.manager.findOne(Category, {
-      where: { reference_id: itemData.parent_item_id, store: { id: store.id }, type: 'variant_group' }
+      where: {
+        reference_id: itemData.parent_item_id,
+        store: { id: store.id },
+        type: "variant_group",
+      },
     });
 
     if (!variantGroup) {
-      this.logger.warn(`Variant group ${itemData.parent_item_id} not found for item ${itemData.id}`);
+      this.logger.warn(
+        `Variant group ${itemData.parent_item_id} not found for item ${itemData.id}`,
+      );
       return;
     }
 
     // Create VariantGroups entity from the Category
     let variantGroupEntity = await queryRunner.manager.findOne(VariantGroups, {
-      where: { reference_id: itemData.parent_item_id, store: { id: store.id } }
+      where: { reference_id: itemData.parent_item_id, store: { id: store.id } },
     });
 
     if (!variantGroupEntity) {
@@ -1444,10 +1791,16 @@ export class CatalogIngestionService {
       variantGroupEntity.reference_id = itemData.parent_item_id;
       variantGroupEntity.store = store;
       variantGroupEntity.name = variantGroup.name;
-      variantGroupEntity.description = variantGroup.description || `Variant group for ${variantGroup.name}`;
-      
-      variantGroupEntity = await queryRunner.manager.save(VariantGroups, variantGroupEntity);
-      this.logger.log(`Created variant group entity: ${variantGroupEntity.reference_id}`);
+      variantGroupEntity.description =
+        variantGroup.description || `Variant group for ${variantGroup.name}`;
+
+      variantGroupEntity = await queryRunner.manager.save(
+        VariantGroups,
+        variantGroupEntity,
+      );
+      this.logger.log(
+        `Created variant group entity: ${variantGroupEntity.reference_id}`,
+      );
     }
 
     // Create item variant relationship
@@ -1457,11 +1810,15 @@ export class CatalogIngestionService {
     itemVariant.is_default = false; // Could be enhanced to detect default variant
 
     await queryRunner.manager.save(ItemVariants, itemVariant);
-    this.logger.log(`Linked variant item ${item.reference_id} to variant group ${variantGroupEntity.reference_id}`);
-    
+    this.logger.log(
+      `Linked variant item ${item.reference_id} to variant group ${variantGroupEntity.reference_id}`,
+    );
+
     // Log the variant details for debugging
     if (itemData.quantity?.unitized?.measure) {
-      this.logger.log(`Variant details - ${item.name}: ${itemData.quantity.unitized.measure.value} ${itemData.quantity.unitized.measure.unit}`);
+      this.logger.log(
+        `Variant details - ${item.name}: ${itemData.quantity.unitized.measure.value} ${itemData.quantity.unitized.measure.unit}`,
+      );
     }
   }
 
@@ -1469,72 +1826,92 @@ export class CatalogIngestionService {
    * Link customization items to their appropriate categories
    * This method links customization items to categories based on business logic
    */
-  private async linkCustomizationItemsToCategories(store: Store, queryRunner: any): Promise<void> {
-    this.logger.log(`Linking customization items to categories for store ${store.reference_id}`);
+  private async linkCustomizationItemsToCategories(
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
+    this.logger.log(
+      `Linking customization items to categories for store ${store.reference_id}`,
+    );
 
     // Get all customization items for this store
     const customizationItems = await queryRunner.manager.find(Item, {
-      where: { 
-        store: { id: store.id }, 
-        type: 'customization',
-        status: true 
-      }
+      where: {
+        store: { id: store.id },
+        type: "customization",
+        status: true,
+      },
     });
 
     for (const customizationItem of customizationItems) {
       // Determine which category this customization item belongs to based on name patterns
       let categoryId = null;
-      
-      if (customizationItem.name.toLowerCase().includes('fish') && customizationItem.name.toLowerCase().includes('raita')) {
+
+      if (
+        customizationItem.name.toLowerCase().includes("fish") &&
+        customizationItem.name.toLowerCase().includes("raita")
+      ) {
         // Fish Raita items should go to Fish Special group
         const category = await queryRunner.manager.findOne(Category, {
-          where: { 
-            store: { id: store.id }, 
-            name: 'Fish Special',
-            type: 'custom_group'
-          }
+          where: {
+            store: { id: store.id },
+            name: "Fish Special",
+            type: "custom_group",
+          },
         });
         categoryId = category?.id;
-      } else if (customizationItem.name.toLowerCase().includes('mutton') && customizationItem.name.toLowerCase().includes('fish')) {
+      } else if (
+        customizationItem.name.toLowerCase().includes("mutton") &&
+        customizationItem.name.toLowerCase().includes("fish")
+      ) {
         // Mutton Fry with Fish should go to Biriyani Special group
         const category = await queryRunner.manager.findOne(Category, {
-          where: { 
-            store: { id: store.id }, 
-            name: 'Biriyani Special',
-            type: 'custom_group'
-          }
+          where: {
+            store: { id: store.id },
+            name: "Biriyani Special",
+            type: "custom_group",
+          },
         });
         categoryId = category?.id;
-      } else if (customizationItem.name.toLowerCase().includes('chicken') && customizationItem.name.toLowerCase().includes('soup')) {
+      } else if (
+        customizationItem.name.toLowerCase().includes("chicken") &&
+        customizationItem.name.toLowerCase().includes("soup")
+      ) {
         // Chicken Soup should go to Soups group
         const category = await queryRunner.manager.findOne(Category, {
-          where: { 
-            store: { id: store.id }, 
-            name: 'Soups',
-            type: 'custom_group'
-          }
+          where: {
+            store: { id: store.id },
+            name: "Soups",
+            type: "custom_group",
+          },
         });
         categoryId = category?.id;
-      } else if (customizationItem.name.toLowerCase().includes('fish') && customizationItem.name.toLowerCase().includes('soup')) {
+      } else if (
+        customizationItem.name.toLowerCase().includes("fish") &&
+        customizationItem.name.toLowerCase().includes("soup")
+      ) {
         // Fish Soup should go to Soups group
         const category = await queryRunner.manager.findOne(Category, {
-          where: { 
-            store: { id: store.id }, 
-            name: 'Soups',
-            type: 'custom_group'
-          }
+          where: {
+            store: { id: store.id },
+            name: "Soups",
+            type: "custom_group",
+          },
         });
         categoryId = category?.id;
       }
 
       if (categoryId) {
         // Check if relationship already exists
-        const existingRelation = await queryRunner.manager.findOne(ItemCategories, {
-          where: { 
-            item: { id: customizationItem.id },
-            category: { id: categoryId }
-          }
-        });
+        const existingRelation = await queryRunner.manager.findOne(
+          ItemCategories,
+          {
+            where: {
+              item: { id: customizationItem.id },
+              category: { id: categoryId },
+            },
+          },
+        );
 
         if (!existingRelation) {
           // Create item_categories relationship
@@ -1542,12 +1919,16 @@ export class CatalogIngestionService {
           itemCategory.item = customizationItem;
           itemCategory.category = { id: categoryId } as any;
           itemCategory.is_default = false;
-          
+
           await queryRunner.manager.save(ItemCategories, itemCategory);
-          this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to category ${categoryId}`);
+          this.logger.log(
+            `✅ Linked customization item ${customizationItem.reference_id} to category ${categoryId}`,
+          );
         }
       } else {
-        this.logger.warn(`⚠️ No category found for customization item ${customizationItem.reference_id} (${customizationItem.name})`);
+        this.logger.warn(
+          `⚠️ No category found for customization item ${customizationItem.reference_id} (${customizationItem.name})`,
+        );
       }
     }
   }
@@ -1556,67 +1937,91 @@ export class CatalogIngestionService {
    * Post-process customization parent_item relationships
    * This runs after all items are processed to link customization items to their parent main items
    */
-  private async postProcessCustomizationParentItems(provider: Provider, store: Store, queryRunner: any): Promise<void> {
+  private async postProcessCustomizationParentItems(
+    provider: Provider,
+    store: Store,
+    queryRunner: any,
+  ): Promise<void> {
     if (!provider.items) {
       return;
     }
 
-    this.logger.log(`Post-processing customization parent_item relationships for store ${store.reference_id}`);
+    this.logger.log(
+      `Post-processing customization parent_item relationships for store ${store.reference_id}`,
+    );
 
     // Get all customization items for this store
     const customizationItems = await queryRunner.manager.find(Item, {
-      where: { 
-        store: { id: store.id }, 
-        type: 'customization',
-        status: true 
+      where: {
+        store: { id: store.id },
+        type: "customization",
+        status: true,
       },
-      relations: ['customizationRelationships', 'customizationRelationships.child_customization_group']
+      relations: [
+        "customizationRelationships",
+        "customizationRelationships.child_customization_group",
+      ],
     });
 
     for (const customizationItem of customizationItems) {
       // Find which customization group this item belongs to
-      if (customizationItem.customizationRelationships && customizationItem.customizationRelationships.length > 0) {
+      if (
+        customizationItem.customizationRelationships &&
+        customizationItem.customizationRelationships.length > 0
+      ) {
         const relationship = customizationItem.customizationRelationships[0]; // Take the first one
         const customizationGroup = relationship.child_customization_group;
 
         // ✅ FIXED: Find the correct parent item based on the ONDC data structure
         // The customization item ID contains the parent item ID (e.g., "a-21673-342" -> parent is "21673")
-        const parentItemId = this.extractParentItemIdFromCustomizationId(customizationItem.reference_id);
-        
+        const parentItemId = this.extractParentItemIdFromCustomizationId(
+          customizationItem.reference_id,
+        );
+
         if (parentItemId) {
           // Find the parent item by reference_id
           const parentItem = await queryRunner.manager.findOne(Item, {
-            where: { 
-              reference_id: parentItemId, 
+            where: {
+              reference_id: parentItemId,
               store: { id: store.id },
-              type: 'item',
-              status: true 
-            }
+              type: "item",
+              status: true,
+            },
           });
 
           if (parentItem) {
             // Set the parent_item relationship (TypeORM will handle the foreign key automatically)
             customizationItem.parent_item = parentItem;
             await queryRunner.manager.save(Item, customizationItem);
-            
-            this.logger.log(`✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id} (ID: ${parentItem.id})`);
+
+            this.logger.log(
+              `✅ Linked customization item ${customizationItem.reference_id} to parent item ${parentItem.reference_id} (ID: ${parentItem.id})`,
+            );
           } else {
-            this.logger.warn(`Parent item ${parentItemId} not found for customization item ${customizationItem.reference_id}`);
+            this.logger.warn(
+              `Parent item ${parentItemId} not found for customization item ${customizationItem.reference_id}`,
+            );
           }
         } else {
-          this.logger.warn(`Could not extract parent item ID from customization item ${customizationItem.reference_id}`);
+          this.logger.warn(
+            `Could not extract parent item ID from customization item ${customizationItem.reference_id}`,
+          );
         }
       }
     }
 
-    this.logger.log(`Completed post-processing customization parent_item relationships for store ${store.reference_id}`);
+    this.logger.log(
+      `Completed post-processing customization parent_item relationships for store ${store.reference_id}`,
+    );
   }
 
   /**
    * Extract parent item ID from customization item ID
    * Examples: "a-21673-342" -> "21673", "a-21674-343" -> "21674"
    */
-  private extractParentItemIdFromCustomizationId(customizationId: string): string | null {
+  private extractParentItemIdFromCustomizationId(
+    customizationId: string,
+  ): string | null {
     // Pattern: "a-{parentId}-{suffix}"
     const match = customizationId.match(/^a-(\d+)-/);
     return match ? match[1] : null;
@@ -1627,8 +2032,8 @@ export class CatalogIngestionService {
    */
   private formatAttributeName(code: string): string {
     return code
-      .split('_')
-      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-      .join(' ');
+      .split("_")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
   }
 }

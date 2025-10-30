@@ -3,17 +3,17 @@ import {
   Logger,
   BadRequestException,
   ConflictException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, LessThan, In, MoreThan } from 'typeorm';
-import { ConfigService } from '@nestjs/config';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, LessThan, In, MoreThan } from "typeorm";
+import { ConfigService } from "@nestjs/config";
 import {
   OtpVerification,
   OtpPurpose,
-} from './entities/otp-verification.entity';
-import { AirtelSmsProvider } from '../sms/providers/airtel-sms.provider';
-import { SendOtpDto, VerifyOtpDto } from './dto/send-otp.dto';
-import { OtpResponseDto, VerifyOtpResponseDto } from './dto/otp-response.dto';
+} from "./entities/otp-verification.entity";
+import { AirtelSmsProvider } from "../sms/providers/airtel-sms.provider";
+import { SendOtpDto, VerifyOtpDto } from "./dto/send-otp.dto";
+import { OtpResponseDto, VerifyOtpResponseDto } from "./dto/otp-response.dto";
 
 @Injectable()
 export class OtpService {
@@ -44,14 +44,14 @@ export class OtpService {
             expires_at: MoreThan(new Date(Date.now() - 5 * 60 * 1000)),
           },
           order: {
-            created_at: 'DESC',
+            created_at: "DESC",
           },
         });
 
         if (otpRecord.length >= 5) {
           const response: OtpResponseDto = {
             success: false,
-            message: 'OTP multiple retries exceeded',
+            message: "OTP multiple retries exceeded",
             phone_number: phone_number,
             timestamp: new Date(),
             expires_in_minutes: 0,
@@ -88,34 +88,32 @@ export class OtpService {
 
         const response: OtpResponseDto = {
           success: true,
-          message: 'OTP sent successfully',
+          message: "OTP sent successfully",
           phone_number: phone_number,
           expires_in_minutes: 1,
           messageRequestId: smsResponse.messageRequestId,
           timestamp: new Date(),
           // Include OTP only in development mode
-          ...(process.env.NODE_ENV === 'development' && { otp: otp }),
+          ...(process.env.NODE_ENV === "development" && { otp: otp }),
         };
 
         return response;
       } else {
-        throw new BadRequestException('Failed to send SMS');
+        throw new BadRequestException("Failed to send SMS");
       }
     } catch (error) {
       this.logger.error(
         `Failed to send OTP to ${sendOtpDto.phone_number}:`,
         error.message,
       );
-      throw new BadRequestException('Failed to send SMS');
+      throw new BadRequestException("Failed to send SMS");
     }
   }
 
   /**
    * Verify OTP
    */
-  async verifyOtp(
-    verifyOtpDto: VerifyOtpDto,
-  ): Promise<VerifyOtpResponseDto> {
+  async verifyOtp(verifyOtpDto: VerifyOtpDto): Promise<VerifyOtpResponseDto> {
     try {
       const {
         phone_number,
@@ -134,14 +132,14 @@ export class OtpService {
           is_verified: false,
         },
         order: {
-          created_at: 'DESC',
+          created_at: "DESC",
         },
       });
 
       if (!otpRecord) {
         return {
           success: false,
-          message: 'OTP not found or already verified',
+          message: "OTP not found or already verified",
           verified: false,
           phone_number: phone_number,
           timestamp: new Date(),
@@ -152,7 +150,7 @@ export class OtpService {
       if (otpRecord.expires_at < new Date()) {
         return {
           success: false,
-          message: 'OTP has expired',
+          message: "OTP has expired",
           verified: false,
           phone_number: phone_number,
           timestamp: new Date(),
@@ -163,7 +161,7 @@ export class OtpService {
       if (otpRecord.attempts >= otpRecord.max_attempts) {
         return {
           success: false,
-          message: 'Maximum verification attempts exceeded',
+          message: "Maximum verification attempts exceeded",
           verified: false,
           phone_number: phone_number,
           attempts_remaining: 0,
@@ -187,14 +185,13 @@ export class OtpService {
         // OTP verified successfully - return success response
         const response: VerifyOtpResponseDto = {
           success: true,
-          message: 'OTP verified successfully',
+          message: "OTP verified successfully",
           verified: true,
           phone_number: phone_number,
           timestamp: new Date(),
         };
 
         return response;
-        
       } else {
         const attemptsRemaining = otpRecord.max_attempts - otpRecord.attempts;
 
@@ -259,7 +256,7 @@ export class OtpService {
 
       this.logger.log(`Cleaned up ${result.affected} expired OTP records`);
     } catch (error) {
-      this.logger.error('Failed to cleanup expired OTPs:', error.message);
+      this.logger.error("Failed to cleanup expired OTPs:", error.message);
     }
   }
 
@@ -271,7 +268,7 @@ export class OtpService {
 
   private createOtpMessage(otp: string, purpose: OtpPurpose): string {
     const purposeText =
-      purpose === OtpPurpose.REGISTRATION ? 'registration' : 'verification';
+      purpose === OtpPurpose.REGISTRATION ? "registration" : "verification";
     return `Your Valar Verification code is ${otp}. Never share this OTP. Thanks, Valar Digital`;
   }
 
@@ -303,7 +300,7 @@ export class OtpService {
         purpose: purpose,
       },
       order: {
-        created_at: 'DESC',
+        created_at: "DESC",
       },
     });
 
@@ -324,10 +321,10 @@ export class OtpService {
 
   private cleanPhoneNumber(phoneNumber: string): string {
     // Remove all non-numeric characters
-    const cleaned = phoneNumber.replace(/\D/g, '');
+    const cleaned = phoneNumber.replace(/\D/g, "");
 
     // Handle Indian phone numbers
-    if (cleaned.startsWith('91') && cleaned.length === 12) {
+    if (cleaned.startsWith("91") && cleaned.length === 12) {
       return cleaned.slice(2);
     } else if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) {
       return cleaned;

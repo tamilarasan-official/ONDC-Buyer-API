@@ -1,171 +1,171 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class MenuItemPriceDto {
   @ApiProperty({
-    description: 'Base price of the item',
-    example: 299.00,
-    type: 'number'
+    description: "Base price of the item",
+    example: 299.0,
+    type: "number",
   })
   base_price: number;
 
   @ApiProperty({
-    description: 'Currency code',
-    example: 'INR'
+    description: "Currency code",
+    example: "INR",
   })
   currency: string;
 
   @ApiProperty({
-    description: 'Maximum price with all premium options',
-    example: 399.00,
-    type: 'number',
-    required: false
+    description: "Maximum price with all premium options",
+    example: 399.0,
+    type: "number",
+    required: false,
   })
   maximum_price?: number;
 
   @ApiProperty({
-    description: 'Minimum possible price with customizations',
-    example: 249.00,
-    type: 'number',
-    required: false
+    description: "Minimum possible price with customizations",
+    example: 249.0,
+    type: "number",
+    required: false,
   })
   minimum_price_range?: number;
 
   @ApiProperty({
-    description: 'Maximum possible price with customizations',
-    example: 449.00,
-    type: 'number',
-    required: false
+    description: "Maximum possible price with customizations",
+    example: 449.0,
+    type: "number",
+    required: false,
   })
   maximum_price_range?: number;
 }
 
 export class MenuItemQuantityDto {
   @ApiProperty({
-    description: 'Unit type',
-    example: 'unit'
+    description: "Unit type",
+    example: "unit",
   })
   unit_type: string;
 
   @ApiProperty({
-    description: 'Unit value',
+    description: "Unit value",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   unit_value: number;
 
   @ApiProperty({
-    description: 'Available count',
+    description: "Available count",
     example: 50,
-    type: 'number'
+    type: "number",
   })
   available_count: number;
 
   @ApiProperty({
-    description: 'Maximum allowed quantity',
+    description: "Maximum allowed quantity",
     example: 10,
-    type: 'number'
+    type: "number",
   })
   maximum_count: number;
 }
 
 export class MenuItemAttributeDto {
   @ApiProperty({
-    description: 'Attribute code',
-    example: 'veg_nonveg'
+    description: "Attribute code",
+    example: "veg_nonveg",
   })
   attribute_code: string;
 
   @ApiProperty({
-    description: 'Attribute name',
-    example: 'Veg Non-Veg'
+    description: "Attribute name",
+    example: "Veg Non-Veg",
   })
   attribute_name: string;
 
   @ApiProperty({
-    description: 'Attribute value',
-    example: 'veg'
+    description: "Attribute value",
+    example: "veg",
   })
   attribute_value: string;
 
   @ApiProperty({
-    description: 'Attribute group',
-    example: 'dietary'
+    description: "Attribute group",
+    example: "dietary",
   })
   attribute_group: string;
 }
 
 export class MenuItemCustomizationDto {
   @ApiProperty({
-    description: 'Customization group ID',
+    description: "Customization group ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Customization group name',
-    example: 'Crust'
+    description: "Customization group name",
+    example: "Crust",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Customization group description',
-    example: 'Choose your pizza crust'
+    description: "Customization group description",
+    example: "Choose your pizza crust",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Minimum selections required',
+    description: "Minimum selections required",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   min_selections: number;
 
   @ApiProperty({
-    description: 'Maximum selections allowed',
+    description: "Maximum selections allowed",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   max_selections: number;
 
   @ApiProperty({
-    description: 'Input type',
-    example: 'select',
-    enum: ['select', 'radio', 'checkbox']
+    description: "Input type",
+    example: "select",
+    enum: ["select", "radio", "checkbox"],
   })
   input_type: string;
 
   @ApiProperty({
-    description: 'Is mandatory',
+    description: "Is mandatory",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_mandatory: boolean;
 
   @ApiProperty({
-    description: 'Display sequence',
+    description: "Display sequence",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   sequence: number;
 
   @ApiProperty({
-    description: 'Available options',
+    description: "Available options",
     type: [Object],
     example: [
       {
         id: 1,
-        name: 'Thin Crust',
+        name: "Thin Crust",
         price: 0,
-        is_default: true
+        is_default: true,
       },
       {
         id: 2,
-        name: 'Thick Crust',
+        name: "Thick Crust",
         price: 50,
-        is_default: false
-      }
-    ]
+        is_default: false,
+      },
+    ],
   })
   options: Array<{
     id: number;
@@ -177,47 +177,47 @@ export class MenuItemCustomizationDto {
 
 export class MenuItemVariantDto {
   @ApiProperty({
-    description: 'Variant group ID',
+    description: "Variant group ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Variant group name',
-    example: 'Size'
+    description: "Variant group name",
+    example: "Size",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Variant group description',
-    example: 'Choose your pizza size'
+    description: "Variant group description",
+    example: "Choose your pizza size",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Available variants',
+    description: "Available variants",
     type: [Object],
     example: [
       {
         id: 1,
-        name: 'Small (8 inch)',
+        name: "Small (8 inch)",
         price: 0,
-        is_default: true
+        is_default: true,
       },
       {
         id: 2,
-        name: 'Medium (10 inch)',
+        name: "Medium (10 inch)",
         price: 100,
-        is_default: false
+        is_default: false,
       },
       {
         id: 3,
-        name: 'Large (12 inch)',
+        name: "Large (12 inch)",
         price: 200,
-        is_default: false
-      }
-    ]
+        is_default: false,
+      },
+    ],
   })
   variants: Array<{
     id: number;
@@ -229,224 +229,225 @@ export class MenuItemVariantDto {
 
 export class MenuItemDto {
   @ApiProperty({
-    description: 'Item ID',
+    description: "Item ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Item name',
-    example: 'Margherita Pizza'
+    description: "Item name",
+    example: "Margherita Pizza",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Item short description',
-    example: 'Classic margherita with fresh mozzarella'
+    description: "Item short description",
+    example: "Classic margherita with fresh mozzarella",
   })
   short_desc: string;
 
   @ApiProperty({
-    description: 'Item long description',
-    example: 'Traditional Italian pizza with fresh mozzarella, tomato sauce, and basil'
+    description: "Item long description",
+    example:
+      "Traditional Italian pizza with fresh mozzarella, tomato sauce, and basil",
   })
   long_desc: string;
 
   @ApiProperty({
-    description: 'Item images',
+    description: "Item images",
     type: [String],
-    example: ['https://example.com/pizza.jpg']
+    example: ["https://example.com/pizza.jpg"],
   })
   images: string[];
 
   @ApiProperty({
-    description: 'Item price information',
-    type: MenuItemPriceDto
+    description: "Item price information",
+    type: MenuItemPriceDto,
   })
   price: MenuItemPriceDto;
 
   @ApiProperty({
-    description: 'Item quantity information',
-    type: MenuItemQuantityDto
+    description: "Item quantity information",
+    type: MenuItemQuantityDto,
   })
   quantity: MenuItemQuantityDto;
 
   @ApiProperty({
-    description: 'Item attributes',
-    type: [MenuItemAttributeDto]
+    description: "Item attributes",
+    type: [MenuItemAttributeDto],
   })
   attributes: MenuItemAttributeDto[];
 
   @ApiProperty({
-    description: 'Item customization groups',
+    description: "Item customization groups",
     type: [MenuItemCustomizationDto],
-    required: false
+    required: false,
   })
   customizations?: MenuItemCustomizationDto[];
 
   @ApiProperty({
-    description: 'Item variant groups',
+    description: "Item variant groups",
     type: [MenuItemVariantDto],
-    required: false
+    required: false,
   })
   variants?: MenuItemVariantDto[];
 
   @ApiProperty({
-    description: 'Item rating',
+    description: "Item rating",
     example: 4.2,
-    type: 'number'
+    type: "number",
   })
   rating: number;
 
   @ApiProperty({
-    description: 'Is item available',
+    description: "Is item available",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_available: boolean;
 
   @ApiProperty({
-    description: 'Is item recommended',
+    description: "Is item recommended",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_recommended: boolean;
 
   @ApiProperty({
-    description: 'Tax rate percentage',
-    example: 18.00,
-    type: 'number',
-    required: false
+    description: "Tax rate percentage",
+    example: 18.0,
+    type: "number",
+    required: false,
   })
   tax_rate?: number;
 
   @ApiProperty({
-    description: 'Tax type',
-    example: 'GST',
-    required: false
+    description: "Tax type",
+    example: "GST",
+    required: false,
   })
   tax_type?: string;
 
   @ApiProperty({
-    description: 'HSN code for tax classification',
-    example: '1905',
-    required: false
+    description: "HSN code for tax classification",
+    example: "1905",
+    required: false,
   })
   hsn_code?: string;
 
   @ApiProperty({
-    description: 'Is item marked as favorite by the logged-in user',
+    description: "Is item marked as favorite by the logged-in user",
     example: false,
-    type: 'boolean'
+    type: "boolean",
   })
   is_favorite: boolean;
 }
 
 export class MenuCategoryDto {
   @ApiProperty({
-    description: 'Category ID',
+    description: "Category ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Category name',
-    example: 'Pizza'
+    description: "Category name",
+    example: "Pizza",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Category description',
-    example: 'Delicious pizzas'
+    description: "Category description",
+    example: "Delicious pizzas",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Category icon URL',
-    example: 'https://example.com/pizza-icon.jpg'
+    description: "Category icon URL",
+    example: "https://example.com/pizza-icon.jpg",
   })
   icon: string;
 
   @ApiProperty({
-    description: 'Display rank',
+    description: "Display rank",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   display_rank: number;
 
   @ApiProperty({
-    description: 'Number of items in this category',
+    description: "Number of items in this category",
     example: 15,
-    type: 'number'
+    type: "number",
   })
   item_count: number;
 
   @ApiProperty({
-    description: 'Menu items in this category',
-    type: [MenuItemDto]
+    description: "Menu items in this category",
+    type: [MenuItemDto],
   })
   items: MenuItemDto[];
 }
 
 export class MenuDataDto {
   @ApiProperty({
-    description: 'Restaurant ID',
+    description: "Restaurant ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   restaurant_id: number;
 
   @ApiProperty({
-    description: 'Restaurant name',
-    example: 'Pizza Palace'
+    description: "Restaurant name",
+    example: "Pizza Palace",
   })
   restaurant_name: string;
 
   @ApiProperty({
-    description: 'Food type',
-    example: 'Veg',
-    required: false
+    description: "Food type",
+    example: "Veg",
+    required: false,
   })
   food_type?: string;
 
   @ApiProperty({
-    description: 'Cuisine tags',
-    example: 'South Indian, North Indian, Chinese',
-    required: false
+    description: "Cuisine tags",
+    example: "South Indian, North Indian, Chinese",
+    required: false,
   })
   cuisine_tags?: string;
 
   @ApiProperty({
-    description: 'Menu categories with items',
-    type: [MenuCategoryDto]
+    description: "Menu categories with items",
+    type: [MenuCategoryDto],
   })
   categories: MenuCategoryDto[];
 
   @ApiProperty({
-    description: 'Total number of items',
+    description: "Total number of items",
     example: 45,
-    type: 'number'
+    type: "number",
   })
   total_items: number;
 
   @ApiProperty({
-    description: 'Total number of categories',
+    description: "Total number of categories",
     example: 8,
-    type: 'number'
+    type: "number",
   })
   total_categories: number;
 
   @ApiProperty({
-    description: 'Applied filters',
+    description: "Applied filters",
     example: {
       category_id: 1,
-      search: 'pizza',
+      search: "pizza",
       min_price: 100,
       max_price: 500,
-      dietary_preference: 'veg'
-    }
+      dietary_preference: "veg",
+    },
   })
   applied_filters: {
     category_id?: number;
@@ -459,21 +460,21 @@ export class MenuDataDto {
 
 export class MenuResponseDto {
   @ApiProperty({
-    description: 'Success status',
+    description: "Success status",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   success: boolean;
 
   @ApiProperty({
-    description: 'Response message',
-    example: 'Menu retrieved successfully'
+    description: "Response message",
+    example: "Menu retrieved successfully",
   })
   message: string;
 
   @ApiProperty({
-    description: 'Menu data',
-    type: MenuDataDto
+    description: "Menu data",
+    type: MenuDataDto,
   })
   data: MenuDataDto;
 }

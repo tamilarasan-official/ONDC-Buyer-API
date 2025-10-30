@@ -1,19 +1,27 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsString, IsEnum, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { ApiProperty } from "@nestjs/swagger";
+import {
+  IsNotEmpty,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsEnum,
+  Min,
+  Max,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export enum PaymentMethod {
-  COD = 'cod',
-  ONLINE = 'online',
-  WALLET = 'wallet',
-  UPI = 'upi'
+  COD = "cod",
+  ONLINE = "online",
+  WALLET = "wallet",
+  UPI = "upi",
 }
 
 export class CreateOrderDto {
   @ApiProperty({
-    description: 'Delivery address ID',
+    description: "Delivery address ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @IsNotEmpty()
   @Type(() => Number)
@@ -21,27 +29,27 @@ export class CreateOrderDto {
   delivery_address_id: number;
 
   @ApiProperty({
-    description: 'Payment method',
-    example: 'online',
-    enum: PaymentMethod
+    description: "Payment method",
+    example: "online",
+    enum: PaymentMethod,
   })
   @IsNotEmpty()
   @IsEnum(PaymentMethod)
   payment_method: PaymentMethod;
 
   @ApiProperty({
-    description: 'Special instructions for the order',
-    example: 'Please call before delivery',
-    required: false
+    description: "Special instructions for the order",
+    example: "Please call before delivery",
+    required: false,
   })
   @IsOptional()
   @IsString()
   notes?: string;
 
   @ApiProperty({
-    description: 'Apply saved offer code',
-    example: 'PIZZA50',
-    required: false
+    description: "Apply saved offer code",
+    example: "PIZZA50",
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -50,18 +58,25 @@ export class CreateOrderDto {
 
 export class UpdateOrderStatusDto {
   @ApiProperty({
-    description: 'New order status',
-    example: 'confirmed',
-    enum: ['pending', 'confirmed', 'preparing', 'out_for_delivery', 'delivered', 'cancelled']
+    description: "New order status",
+    example: "confirmed",
+    enum: [
+      "pending",
+      "confirmed",
+      "preparing",
+      "out_for_delivery",
+      "delivered",
+      "cancelled",
+    ],
   })
   @IsNotEmpty()
   @IsString()
   status: string;
 
   @ApiProperty({
-    description: 'Status update message',
-    example: 'Order confirmed and will be prepared shortly',
-    required: false
+    description: "Status update message",
+    example: "Order confirmed and will be prepared shortly",
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -70,9 +85,9 @@ export class UpdateOrderStatusDto {
 
 export class CancelOrderDto {
   @ApiProperty({
-    description: 'Cancellation reason',
-    example: 'Changed my mind',
-    required: false
+    description: "Cancellation reason",
+    example: "Changed my mind",
+    required: false,
   })
   @IsOptional()
   @IsString()
@@ -81,9 +96,9 @@ export class CancelOrderDto {
 
 export class CreatePaymentDto {
   @ApiProperty({
-    description: 'Order ID for payment',
+    description: "Order ID for payment",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @IsNotEmpty()
   @Type(() => Number)
@@ -91,18 +106,18 @@ export class CreatePaymentDto {
   order_id: number;
 
   @ApiProperty({
-    description: 'Payment method',
-    example: 'online',
-    enum: PaymentMethod
+    description: "Payment method",
+    example: "online",
+    enum: PaymentMethod,
   })
   @IsNotEmpty()
   @IsEnum(PaymentMethod)
   payment_method: PaymentMethod;
 
   @ApiProperty({
-    description: 'Payment amount in paise (e.g., 10000 for ₹100)',
+    description: "Payment amount in paise (e.g., 10000 for ₹100)",
     example: 68564,
-    type: 'number'
+    type: "number",
   })
   @IsNotEmpty()
   @Type(() => Number)
@@ -111,33 +126,33 @@ export class CreatePaymentDto {
   amount: number;
 
   @ApiProperty({
-    description: 'Currency code',
-    example: 'INR',
-    default: 'INR'
+    description: "Currency code",
+    example: "INR",
+    default: "INR",
   })
   @IsOptional()
   @IsString()
-  currency?: string = 'INR';
+  currency?: string = "INR";
 
   @ApiProperty({
-    description: 'Customer name for payment',
-    example: 'John Doe'
+    description: "Customer name for payment",
+    example: "John Doe",
   })
   @IsNotEmpty()
   @IsString()
   customer_name: string;
 
   @ApiProperty({
-    description: 'Customer email for payment',
-    example: 'john@example.com'
+    description: "Customer email for payment",
+    example: "john@example.com",
   })
   @IsNotEmpty()
   @IsString()
   customer_email: string;
 
   @ApiProperty({
-    description: 'Customer phone for payment',
-    example: '9876543210'
+    description: "Customer phone for payment",
+    example: "9876543210",
   })
   @IsNotEmpty()
   @IsString()
@@ -146,24 +161,24 @@ export class CreatePaymentDto {
 
 export class VerifyPaymentDto {
   @ApiProperty({
-    description: 'Razorpay payment ID',
-    example: 'pay_29QQoUBi66xm2f'
+    description: "Razorpay payment ID",
+    example: "pay_29QQoUBi66xm2f",
   })
   @IsNotEmpty()
   @IsString()
   razorpay_payment_id: string;
 
   @ApiProperty({
-    description: 'Razorpay order ID',
-    example: 'order_29QQoUBi66xm2f'
+    description: "Razorpay order ID",
+    example: "order_29QQoUBi66xm2f",
   })
   @IsNotEmpty()
   @IsString()
   razorpay_order_id: string;
 
   @ApiProperty({
-    description: 'Razorpay signature for verification',
-    example: '9ef4dffbfd84f1318f6739a3ce19f9d85851857ae648f114332d8401e0949a3d'
+    description: "Razorpay signature for verification",
+    example: "9ef4dffbfd84f1318f6739a3ce19f9d85851857ae648f114332d8401e0949a3d",
   })
   @IsNotEmpty()
   @IsString()
@@ -172,9 +187,9 @@ export class VerifyPaymentDto {
 
 export class OrderTrackingDto {
   @ApiProperty({
-    description: 'Order ID to track',
+    description: "Order ID to track",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @IsNotEmpty()
   @Type(() => Number)

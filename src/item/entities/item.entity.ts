@@ -155,10 +155,16 @@ export class Item {
   @OneToMany(() => ItemQuantities, (quantity) => quantity.item)
   quantities: ItemQuantities[];
 
-  @OneToMany(() => ItemCustomizationGroups, (customizationGroup) => customizationGroup.item)
+  @OneToMany(
+    () => ItemCustomizationGroups,
+    (customizationGroup) => customizationGroup.item,
+  )
   customizationGroups: ItemCustomizationGroups[];
 
-  @OneToMany(() => CustomizationRelationships, (relationship) => relationship.parent_customization)
+  @OneToMany(
+    () => CustomizationRelationships,
+    (relationship) => relationship.parent_customization,
+  )
   customizationRelationships: CustomizationRelationships[];
 
   @OneToMany(() => OfferItems, (offerItem) => offerItem.item)

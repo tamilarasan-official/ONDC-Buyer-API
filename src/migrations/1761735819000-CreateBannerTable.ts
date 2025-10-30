@@ -1,10 +1,10 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
 export class CreateBannerTable1761735819000 implements MigrationInterface {
-    name = 'CreateBannerTable1761735819000'
+  name = "CreateBannerTable1761735819000";
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`
             CREATE TABLE "banner" (
                 "id" SERIAL NOT NULL,
                 "title" character varying(255) NOT NULL,
@@ -21,14 +21,17 @@ export class CreateBannerTable1761735819000 implements MigrationInterface {
                 CONSTRAINT "PK_banner_id" PRIMARY KEY ("id")
             )
         `);
-        await queryRunner.query(`CREATE INDEX "IDX_banner_sequence" ON "banner" ("sequence") `);
-        await queryRunner.query(`CREATE INDEX "IDX_banner_status" ON "banner" ("status") `);
-    }
+    await queryRunner.query(
+      `CREATE INDEX "IDX_banner_sequence" ON "banner" ("sequence") `,
+    );
+    await queryRunner.query(
+      `CREATE INDEX "IDX_banner_status" ON "banner" ("status") `,
+    );
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`DROP INDEX "public"."IDX_banner_status"`);
-        await queryRunner.query(`DROP INDEX "public"."IDX_banner_sequence"`);
-        await queryRunner.query(`DROP TABLE "banner"`);
-    }
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`DROP INDEX "public"."IDX_banner_status"`);
+    await queryRunner.query(`DROP INDEX "public"."IDX_banner_sequence"`);
+    await queryRunner.query(`DROP TABLE "banner"`);
+  }
 }
-

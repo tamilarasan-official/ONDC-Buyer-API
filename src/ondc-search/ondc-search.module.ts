@@ -1,9 +1,9 @@
-import { Module } from '@nestjs/common';
-import { HttpModule } from '@nestjs/axios';
-import { ConfigModule } from '@nestjs/config';
-import { OndcSearchService } from './ondc-search.service';
-import { OndcSearchController } from './ondc-search.controller';
-import { CatalogIngestionModule } from '../catalog-ingestion/catalog-ingestion.module';
+import { Module } from "@nestjs/common";
+import { HttpModule } from "@nestjs/axios";
+import { ConfigModule } from "@nestjs/config";
+import { OndcSearchService } from "./ondc-search.service";
+import { OndcSearchController } from "./ondc-search.controller";
+import { CatalogIngestionModule } from "../catalog-ingestion/catalog-ingestion.module";
 
 @Module({
   imports: [

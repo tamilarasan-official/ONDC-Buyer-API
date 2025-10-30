@@ -4,15 +4,15 @@ import {
   IsPhoneNumber,
   IsEnum,
   IsOptional,
-} from 'class-validator';
-import { OtpPurpose } from '../entities/otp-verification.entity';
+} from "class-validator";
+import { OtpPurpose } from "../entities/otp-verification.entity";
 
 export class SendOtpDto {
   @IsString()
   @IsNotEmpty()
-  @IsPhoneNumber('IN')
+  @IsPhoneNumber("IN")
   phone_number: string;
-  
+
   @IsEnum(OtpPurpose)
   @IsOptional()
   purpose?: OtpPurpose = OtpPurpose.REGISTRATION;
@@ -21,7 +21,7 @@ export class SendOtpDto {
 export class VerifyOtpDto {
   @IsString()
   @IsNotEmpty()
-  @IsPhoneNumber('IN')
+  @IsPhoneNumber("IN")
   phone_number: string;
 
   @IsString()

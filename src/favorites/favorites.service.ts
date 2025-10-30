@@ -1,10 +1,15 @@
-import { Injectable, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { UserFavoriteItem } from './entities/user-favorite-item.entity';
-import { UserFavoriteRestaurant } from './entities/user-favorite-restaurant.entity';
-import { Item } from '../item/entities/item.entity';
-import { Store } from '../store/entities/store.entity';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { UserFavoriteItem } from "./entities/user-favorite-item.entity";
+import { UserFavoriteRestaurant } from "./entities/user-favorite-restaurant.entity";
+import { Item } from "../item/entities/item.entity";
+import { Store } from "../store/entities/store.entity";
 
 @Injectable()
 export class FavoritesService {
@@ -34,7 +39,7 @@ export class FavoritesService {
       // Check if item exists
       const item = await this.itemRepository.findOne({ where: { id: itemId } });
       if (!item) {
-        throw new NotFoundException('Item not found');
+        throw new NotFoundException("Item not found");
       }
 
       // Check if already favorited
@@ -48,8 +53,8 @@ export class FavoritesService {
 
         return {
           success: true,
-          action: 'removed',
-          message: 'Item removed from favorites',
+          action: "removed",
+          message: "Item removed from favorites",
           data: {
             is_favorite: false,
             favorited_at: null,
@@ -65,8 +70,8 @@ export class FavoritesService {
 
         return {
           success: true,
-          action: 'added',
-          message: 'Item added to favorites',
+          action: "added",
+          message: "Item added to favorites",
           data: {
             is_favorite: true,
             favorited_at: favorite.created_at,
@@ -78,7 +83,7 @@ export class FavoritesService {
         throw error;
       }
       this.logger.error(`Error toggling favorite item: ${error.message}`);
-      throw new BadRequestException('Failed to toggle favorite item');
+      throw new BadRequestException("Failed to toggle favorite item");
     }
   }
 
@@ -89,8 +94,14 @@ export class FavoritesService {
     try {
       const favorites = await this.favoriteItemRepository.find({
         where: { user: { id: userId } },
-        relations: ['item', 'item.store', 'item.prices', 'item.quantities', 'item.item_categories'],
-        order: { created_at: 'DESC' },
+        relations: [
+          "item",
+          "item.store",
+          "item.prices",
+          "item.quantities",
+          "item.item_categories",
+        ],
+        order: { created_at: "DESC" },
       });
 
       const items = await Promise.all(
@@ -106,7 +117,7 @@ export class FavoritesService {
             if (Array.isArray(item.images)) {
               // Already parsed as array
               images = item.images;
-            } else if (typeof item.images === 'string') {
+            } else if (typeof item.images === "string") {
               try {
                 // Try to parse as JSON
                 const parsed = JSON.parse(item.images);
@@ -122,7 +133,8 @@ export class FavoritesService {
           const rating = 0; // TODO: Calculate from reviews
 
           // Get availability
-          const is_available = item.status && (item.quantities?.[0]?.available_count || 0) > 0;
+          const is_available =
+            item.status && (item.quantities?.[0]?.available_count || 0) > 0;
 
           return {
             id: item.id,
@@ -140,17 +152,17 @@ export class FavoritesService {
             favorited_at: favorite.created_at,
             is_favorite: true,
           };
-        })
+        }),
       );
 
       return {
         success: true,
-        message: 'Favorite items retrieved successfully',
+        message: "Favorite items retrieved successfully",
         data: items,
       };
     } catch (error) {
       this.logger.error(`Error getting favorite items: ${error.message}`);
-      throw new BadRequestException('Failed to get favorite items');
+      throw new BadRequestException("Failed to get favorite items");
     }
   }
 
@@ -172,7 +184,7 @@ export class FavoritesService {
       };
     } catch (error) {
       this.logger.error(`Error checking item favorite: ${error.message}`);
-      throw new BadRequestException('Failed to check item favorite status');
+      throw new BadRequestException("Failed to check item favorite status");
     }
   }
 
@@ -184,9 +196,11 @@ export class FavoritesService {
   async toggleFavoriteRestaurant(userId: number, storeId: number) {
     try {
       // Check if restaurant exists
-      const store = await this.storeRepository.findOne({ where: { id: storeId } });
+      const store = await this.storeRepository.findOne({
+        where: { id: storeId },
+      });
       if (!store) {
-        throw new NotFoundException('Restaurant not found');
+        throw new NotFoundException("Restaurant not found");
       }
 
       // Check if already favorited
@@ -200,8 +214,8 @@ export class FavoritesService {
 
         return {
           success: true,
-          action: 'removed',
-          message: 'Restaurant removed from favorites',
+          action: "removed",
+          message: "Restaurant removed from favorites",
           data: {
             is_favorite: false,
             favorited_at: null,
@@ -217,8 +231,8 @@ export class FavoritesService {
 
         return {
           success: true,
-          action: 'added',
-          message: 'Restaurant added to favorites',
+          action: "added",
+          message: "Restaurant added to favorites",
           data: {
             is_favorite: true,
             favorited_at: favorite.created_at,
@@ -230,19 +244,23 @@ export class FavoritesService {
         throw error;
       }
       this.logger.error(`Error toggling favorite restaurant: ${error.message}`);
-      throw new BadRequestException('Failed to toggle favorite restaurant');
+      throw new BadRequestException("Failed to toggle favorite restaurant");
     }
   }
 
   /**
    * Get all favorite restaurants for a user
    */
-  async getFavoriteRestaurants(userId: number, userLat?: number, userLng?: number) {
+  async getFavoriteRestaurants(
+    userId: number,
+    userLat?: number,
+    userLng?: number,
+  ) {
     try {
       const favorites = await this.favoriteRestaurantRepository.find({
         where: { user: { id: userId } },
-        relations: ['store', 'store.locations', 'store.timings'],
-        order: { created_at: 'DESC' },
+        relations: ["store", "store.locations", "store.timings"],
+        order: { created_at: "DESC" },
       });
 
       const restaurants = favorites.map((favorite) => {
@@ -252,7 +270,12 @@ export class FavoritesService {
         // Calculate distance if user location provided
         let distance = 0;
         if (userLat && userLng && location) {
-          distance = this.calculateDistance(userLat, userLng, location.gps_lat, location.gps_lng);
+          distance = this.calculateDistance(
+            userLat,
+            userLng,
+            location.gps_lat,
+            location.gps_lng,
+          );
         }
 
         // Check if store is open (simplified - you may have more complex logic)
@@ -267,12 +290,14 @@ export class FavoritesService {
           description: store.description,
           logo_url: store.logo_url,
           fssai_license: store.fssai_license_no,
-          location: location ? {
-            lat: location.gps_lat,
-            lng: location.gps_lng,
-            city: location.address_city,
-            locality: location.address_locality,
-          } : null,
+          location: location
+            ? {
+                lat: location.gps_lat,
+                lng: location.gps_lng,
+                city: location.address_city,
+                locality: location.address_locality,
+              }
+            : null,
           distance: Math.round(distance * 100) / 100,
           rating: 0, // TODO: Calculate from reviews
           delivery_time,
@@ -286,12 +311,12 @@ export class FavoritesService {
 
       return {
         success: true,
-        message: 'Favorite restaurants retrieved successfully',
+        message: "Favorite restaurants retrieved successfully",
         data: restaurants,
       };
     } catch (error) {
       this.logger.error(`Error getting favorite restaurants: ${error.message}`);
-      throw new BadRequestException('Failed to get favorite restaurants');
+      throw new BadRequestException("Failed to get favorite restaurants");
     }
   }
 
@@ -313,7 +338,9 @@ export class FavoritesService {
       };
     } catch (error) {
       this.logger.error(`Error checking restaurant favorite: ${error.message}`);
-      throw new BadRequestException('Failed to check restaurant favorite status');
+      throw new BadRequestException(
+        "Failed to check restaurant favorite status",
+      );
     }
   }
 
@@ -331,12 +358,13 @@ export class FavoritesService {
 
       return {
         success: true,
-        message: 'All favorites retrieved successfully',
+        message: "All favorites retrieved successfully",
         data: {
           restaurants: restaurantsResponse.data,
           items: itemsResponse.data,
           summary: {
-            total_favorites: restaurantsResponse.data.length + itemsResponse.data.length,
+            total_favorites:
+              restaurantsResponse.data.length + itemsResponse.data.length,
             favorite_restaurants: restaurantsResponse.data.length,
             favorite_items: itemsResponse.data.length,
           },
@@ -344,7 +372,7 @@ export class FavoritesService {
       };
     } catch (error) {
       this.logger.error(`Error getting all favorites: ${error.message}`);
-      throw new BadRequestException('Failed to get all favorites');
+      throw new BadRequestException("Failed to get all favorites");
     }
   }
 
@@ -353,7 +381,12 @@ export class FavoritesService {
   /**
    * Calculate distance between two points using Haversine formula
    */
-  private calculateDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  private calculateDistance(
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number,
+  ): number {
     const R = 6371; // Radius of the Earth in km
     const dLat = this.deg2rad(lat2 - lat1);
     const dLon = this.deg2rad(lon2 - lon1);
@@ -376,9 +409,9 @@ export class FavoritesService {
    * Calculate delivery time based on distance
    */
   private calculateDeliveryTime(distance: number): string {
-    if (distance < 2) return '15-20 mins';
-    if (distance < 5) return '25-30 mins';
-    if (distance < 10) return '35-40 mins';
-    return '45-60 mins';
+    if (distance < 2) return "15-20 mins";
+    if (distance < 5) return "25-30 mins";
+    if (distance < 10) return "35-40 mins";
+    return "45-60 mins";
   }
 }

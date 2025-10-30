@@ -1,6 +1,6 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import * as admin from 'firebase-admin';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import * as admin from "firebase-admin";
 
 export interface FCMNotificationPayload {
   title: string;
@@ -10,7 +10,7 @@ export interface FCMNotificationPayload {
 }
 
 export interface FCMNotificationOptions {
-  priority?: 'high' | 'normal';
+  priority?: "high" | "normal";
   timeToLive?: number;
   collapseKey?: string;
   badge?: number;
@@ -30,43 +30,54 @@ export class FCMService {
   private initializeFirebase() {
     try {
       // Check if Firebase is already initialized
-      const existingApp = admin.apps.find(app => app !== null);
+      const existingApp = admin.apps.find((app) => app !== null);
       if (existingApp) {
         this.app = existingApp;
-        this.logger.log('Using existing Firebase Admin SDK instance');
+        this.logger.log("Using existing Firebase Admin SDK instance");
         return;
       }
 
       // Check if FCM credentials are configured
-      const projectId = this.configService.get<string>('FCM_PROJECT_ID');
-      if (!projectId || projectId === 'your-project-id') {
-        this.logger.warn('⚠️  Firebase credentials not configured. FCM notifications will be disabled. Set FCM_* environment variables to enable.');
+      const projectId = this.configService.get<string>("FCM_PROJECT_ID");
+      if (!projectId || projectId === "your-project-id") {
+        this.logger.warn(
+          "⚠️  Firebase credentials not configured. FCM notifications will be disabled. Set FCM_* environment variables to enable.",
+        );
         return;
       }
 
       // Initialize Firebase Admin SDK
       const serviceAccount = {
-        type: 'service_account',
+        type: "service_account",
         project_id: projectId,
-        private_key_id: this.configService.get<string>('FCM_PRIVATE_KEY_ID'),
-        private_key: this.configService.get<string>('FCM_PRIVATE_KEY')?.replace(/\\n/g, '\n'),
-        client_email: this.configService.get<string>('FCM_CLIENT_EMAIL'),
-        client_id: this.configService.get<string>('FCM_CLIENT_ID'),
-        auth_uri: 'https://accounts.google.com/o/oauth2/auth',
-        token_uri: 'https://oauth2.googleapis.com/token',
-        auth_provider_x509_cert_url: 'https://www.googleapis.com/oauth2/v1/certs',
-        client_x509_cert_url: this.configService.get<string>('FCM_CLIENT_X509_CERT_URL'),
+        private_key_id: this.configService.get<string>("FCM_PRIVATE_KEY_ID"),
+        private_key: this.configService
+          .get<string>("FCM_PRIVATE_KEY")
+          ?.replace(/\\n/g, "\n"),
+        client_email: this.configService.get<string>("FCM_CLIENT_EMAIL"),
+        client_id: this.configService.get<string>("FCM_CLIENT_ID"),
+        auth_uri: "https://accounts.google.com/o/oauth2/auth",
+        token_uri: "https://oauth2.googleapis.com/token",
+        auth_provider_x509_cert_url:
+          "https://www.googleapis.com/oauth2/v1/certs",
+        client_x509_cert_url: this.configService.get<string>(
+          "FCM_CLIENT_X509_CERT_URL",
+        ),
       };
 
       this.app = admin.initializeApp({
-        credential: admin.credential.cert(serviceAccount as admin.ServiceAccount),
+        credential: admin.credential.cert(
+          serviceAccount as admin.ServiceAccount,
+        ),
         projectId: projectId,
       });
 
-      this.logger.log('Firebase Admin SDK initialized successfully');
+      this.logger.log("Firebase Admin SDK initialized successfully");
     } catch (error) {
-      this.logger.error('Failed to initialize Firebase Admin SDK:', error);
-      this.logger.warn('⚠️  FCM notifications will be disabled due to initialization error.');
+      this.logger.error("Failed to initialize Firebase Admin SDK:", error);
+      this.logger.warn(
+        "⚠️  FCM notifications will be disabled due to initialization error.",
+      );
       // Don't throw error - allow app to continue without FCM
     }
   }
@@ -77,7 +88,7 @@ export class FCMService {
   async sendToDevice(
     token: string,
     payload: FCMNotificationPayload,
-    options?: FCMNotificationOptions
+    options?: FCMNotificationOptions,
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       const message: admin.messaging.Message = {
@@ -89,32 +100,37 @@ export class FCMService {
         },
         data: payload.data || {},
         android: {
-          priority: options?.priority || 'high',
+          priority: options?.priority || "high",
           ttl: options?.timeToLive || 3600000, // 1 hour default
           collapseKey: options?.collapseKey,
           notification: {
-            sound: options?.sound || 'default',
+            sound: options?.sound || "default",
             clickAction: options?.clickAction,
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: options?.sound || 'default',
+              sound: options?.sound || "default",
             },
           },
         },
       };
 
       const response = await admin.messaging().send(message);
-      this.logger.log(`FCM notification sent successfully to token ${token}: ${response}`);
-      
+      this.logger.log(
+        `FCM notification sent successfully to token ${token}: ${response}`,
+      );
+
       return {
         success: true,
         messageId: response,
       };
     } catch (error) {
-      this.logger.error(`Failed to send FCM notification to token ${token}:`, error);
+      this.logger.error(
+        `Failed to send FCM notification to token ${token}:`,
+        error,
+      );
       return {
         success: false,
         error: error.message,
@@ -128,11 +144,16 @@ export class FCMService {
   async sendToMultipleDevices(
     tokens: string[],
     payload: FCMNotificationPayload,
-    options?: FCMNotificationOptions
+    options?: FCMNotificationOptions,
   ): Promise<{
     successCount: number;
     failureCount: number;
-    results: Array<{ token: string; success: boolean; messageId?: string; error?: string }>;
+    results: Array<{
+      token: string;
+      success: boolean;
+      messageId?: string;
+      error?: string;
+    }>;
   }> {
     try {
       const message: admin.messaging.MulticastMessage = {
@@ -144,25 +165,25 @@ export class FCMService {
         },
         data: payload.data || {},
         android: {
-          priority: options?.priority || 'high',
+          priority: options?.priority || "high",
           ttl: options?.timeToLive || 3600000,
           collapseKey: options?.collapseKey,
           notification: {
-            sound: options?.sound || 'default',
+            sound: options?.sound || "default",
             clickAction: options?.clickAction,
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: options?.sound || 'default',
+              sound: options?.sound || "default",
             },
           },
         },
       };
 
       const response = await admin.messaging().sendEachForMulticast(message);
-      
+
       const results = tokens.map((token, index) => {
         const result = response.responses[index];
         return {
@@ -173,15 +194,17 @@ export class FCMService {
         };
       });
 
-      this.logger.log(`FCM multicast notification sent: ${response.successCount} success, ${response.failureCount} failures`);
-      
+      this.logger.log(
+        `FCM multicast notification sent: ${response.successCount} success, ${response.failureCount} failures`,
+      );
+
       return {
         successCount: response.successCount,
         failureCount: response.failureCount,
         results,
       };
     } catch (error) {
-      this.logger.error('Failed to send FCM multicast notification:', error);
+      this.logger.error("Failed to send FCM multicast notification:", error);
       throw error;
     }
   }
@@ -192,7 +215,7 @@ export class FCMService {
   async sendToTopic(
     topic: string,
     payload: FCMNotificationPayload,
-    options?: FCMNotificationOptions
+    options?: FCMNotificationOptions,
   ): Promise<{ success: boolean; messageId?: string; error?: string }> {
     try {
       const message: admin.messaging.Message = {
@@ -204,32 +227,37 @@ export class FCMService {
         },
         data: payload.data || {},
         android: {
-          priority: options?.priority || 'high',
+          priority: options?.priority || "high",
           ttl: options?.timeToLive || 3600000,
           collapseKey: options?.collapseKey,
           notification: {
-            sound: options?.sound || 'default',
+            sound: options?.sound || "default",
             clickAction: options?.clickAction,
           },
         },
         apns: {
           payload: {
             aps: {
-              sound: options?.sound || 'default',
+              sound: options?.sound || "default",
             },
           },
         },
       };
 
       const response = await admin.messaging().send(message);
-      this.logger.log(`FCM topic notification sent successfully to topic ${topic}: ${response}`);
-      
+      this.logger.log(
+        `FCM topic notification sent successfully to topic ${topic}: ${response}`,
+      );
+
       return {
         success: true,
         messageId: response,
       };
     } catch (error) {
-      this.logger.error(`Failed to send FCM topic notification to topic ${topic}:`, error);
+      this.logger.error(
+        `Failed to send FCM topic notification to topic ${topic}:`,
+        error,
+      );
       return {
         success: false,
         error: error.message,
@@ -240,19 +268,26 @@ export class FCMService {
   /**
    * Subscribe device tokens to a topic
    */
-  async subscribeToTopic(tokens: string[], topic: string): Promise<{
+  async subscribeToTopic(
+    tokens: string[],
+    topic: string,
+  ): Promise<{
     successCount: number;
     failureCount: number;
     errors: string[];
   }> {
     try {
       const response = await admin.messaging().subscribeToTopic(tokens, topic);
-      this.logger.log(`Subscribed ${response.successCount} tokens to topic ${topic}`);
-      
+      this.logger.log(
+        `Subscribed ${response.successCount} tokens to topic ${topic}`,
+      );
+
       return {
         successCount: response.successCount,
         failureCount: response.failureCount,
-        errors: response.errors.map(error => error.error?.message || 'Unknown error'),
+        errors: response.errors.map(
+          (error) => error.error?.message || "Unknown error",
+        ),
       };
     } catch (error) {
       this.logger.error(`Failed to subscribe tokens to topic ${topic}:`, error);
@@ -263,22 +298,34 @@ export class FCMService {
   /**
    * Unsubscribe device tokens from a topic
    */
-  async unsubscribeFromTopic(tokens: string[], topic: string): Promise<{
+  async unsubscribeFromTopic(
+    tokens: string[],
+    topic: string,
+  ): Promise<{
     successCount: number;
     failureCount: number;
     errors: string[];
   }> {
     try {
-      const response = await admin.messaging().unsubscribeFromTopic(tokens, topic);
-      this.logger.log(`Unsubscribed ${response.successCount} tokens from topic ${topic}`);
-      
+      const response = await admin
+        .messaging()
+        .unsubscribeFromTopic(tokens, topic);
+      this.logger.log(
+        `Unsubscribed ${response.successCount} tokens from topic ${topic}`,
+      );
+
       return {
         successCount: response.successCount,
         failureCount: response.failureCount,
-        errors: response.errors.map(error => error.error?.message || 'Unknown error'),
+        errors: response.errors.map(
+          (error) => error.error?.message || "Unknown error",
+        ),
       };
     } catch (error) {
-      this.logger.error(`Failed to unsubscribe tokens from topic ${topic}:`, error);
+      this.logger.error(
+        `Failed to unsubscribe tokens from topic ${topic}:`,
+        error,
+      );
       throw error;
     }
   }
@@ -291,8 +338,8 @@ export class FCMService {
       // Send a test message to validate the token
       const message: admin.messaging.Message = {
         token,
-        data: { test: 'true' },
-        android: { priority: 'high' },
+        data: { test: "true" },
+        android: { priority: "high" },
         apns: { payload: { aps: { contentAvailable: true } } },
       };
 
@@ -310,7 +357,7 @@ export class FCMService {
   getServiceStatus(): { initialized: boolean; projectId?: string } {
     return {
       initialized: !!this.app,
-      projectId: this.configService.get<string>('FCM_PROJECT_ID'),
+      projectId: this.configService.get<string>("FCM_PROJECT_ID"),
     };
   }
 }

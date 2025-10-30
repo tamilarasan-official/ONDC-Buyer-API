@@ -1,6 +1,6 @@
-import { Repository, ObjectLiteral } from 'typeorm';
-import { PaginationDto } from '../dto/pagination.dto';
-import { PaginationUtil } from '../utils/pagination.util';
+import { Repository, ObjectLiteral } from "typeorm";
+import { PaginationDto } from "../dto/pagination.dto";
+import { PaginationUtil } from "../utils/pagination.util";
 
 export abstract class BaseService<T extends ObjectLiteral> {
   constructor(protected readonly repository: Repository<T>) {}
@@ -11,15 +11,15 @@ export abstract class BaseService<T extends ObjectLiteral> {
   async findAllWithPagination(
     paginationDto: PaginationDto,
     searchFields: string[] = [],
-    defaultSortBy: string = 'createdAt',
-    additionalWhere?: any
+    defaultSortBy: string = "createdAt",
+    additionalWhere?: any,
   ) {
     return PaginationUtil.findWithPagination(
       this.repository,
       paginationDto,
       searchFields,
       defaultSortBy,
-      additionalWhere
+      additionalWhere,
     );
   }
 
@@ -39,7 +39,7 @@ export abstract class BaseService<T extends ObjectLiteral> {
    */
   async create(createDto: any): Promise<T> {
     const entity = this.repository.create(createDto);
-    return await this.repository.save(entity) as unknown as T;
+    return (await this.repository.save(entity)) as unknown as T;
   }
 
   /**
@@ -66,4 +66,4 @@ export abstract class BaseService<T extends ObjectLiteral> {
     const count = await this.repository.count({ where: { id } as any });
     return count > 0;
   }
-} 
+}

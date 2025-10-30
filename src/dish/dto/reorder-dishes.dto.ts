@@ -1,12 +1,18 @@
-import { IsArray, IsInt, IsNotEmpty, IsOptional, ValidateNested } from "class-validator";
+import {
+  IsArray,
+  IsInt,
+  IsNotEmpty,
+  IsOptional,
+  ValidateNested,
+} from "class-validator";
 import { Type } from "class-transformer";
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class DishSequenceDto {
   @ApiProperty({
-    description: 'Dish ID',
+    description: "Dish ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @Type(() => Number)
   @IsInt()
@@ -14,9 +20,9 @@ export class DishSequenceDto {
   id: number;
 
   @ApiProperty({
-    description: 'New sequence position',
+    description: "New sequence position",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @Type(() => Number)
   @IsInt()
@@ -26,13 +32,13 @@ export class DishSequenceDto {
 
 export class ReorderDishesDto {
   @ApiProperty({
-    description: 'Array of dishes with their new sequence positions',
+    description: "Array of dishes with their new sequence positions",
     type: [DishSequenceDto],
     example: [
       { id: 3, sequence: 1 },
       { id: 1, sequence: 2 },
-      { id: 2, sequence: 3 }
-    ]
+      { id: 2, sequence: 3 },
+    ],
   })
   @IsArray()
   @ValidateNested({ each: true })
@@ -40,10 +46,10 @@ export class ReorderDishesDto {
   dishes: DishSequenceDto[];
 
   @ApiProperty({
-    description: 'Food type ID to reorder within (optional)',
+    description: "Food type ID to reorder within (optional)",
     example: 1,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @Type(() => Number)
   @IsOptional()
@@ -53,9 +59,9 @@ export class ReorderDishesDto {
 
 export class MoveDishDto {
   @ApiProperty({
-    description: 'New position for the dish',
+    description: "New position for the dish",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   @Type(() => Number)
   @IsInt()
@@ -63,10 +69,10 @@ export class MoveDishDto {
   new_position: number;
 
   @ApiProperty({
-    description: 'Food type ID to move within (optional)',
+    description: "Food type ID to move within (optional)",
     example: 1,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @Type(() => Number)
   @IsOptional()

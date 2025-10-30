@@ -1,4 +1,11 @@
-import { Column, CreateDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import {
+  Column,
+  CreateDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from "typeorm";
 
 @Entity()
 export class Banner {
@@ -20,11 +27,11 @@ export class Banner {
   @Column({ type: "varchar", length: 20, nullable: true })
   background_color?: string;
 
-  @Column({ 
-    type: "varchar", 
-    length: 50, 
+  @Column({
+    type: "varchar",
+    length: 50,
     nullable: true,
-    enum: ['restaurant_id', 'category_id', 'url']
+    enum: ["restaurant_id", "category_id", "url"],
   })
   promotion_type?: string;
 
@@ -44,4 +51,3 @@ export class Banner {
   @UpdateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   updated_at: Date;
 }
-

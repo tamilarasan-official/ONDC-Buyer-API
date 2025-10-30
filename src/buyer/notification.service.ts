@@ -1,17 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { Notification } from '../notification/entities/notification.entity';
-import { User } from '../user/entities/user.entity';
-import { UserDeviceToken } from '../user/entities/user-device-token.entity';
-import { Order } from '../order/entities/order.entity';
-import { FCMService, FCMNotificationPayload, FCMNotificationOptions } from './fcm.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { Notification } from "../notification/entities/notification.entity";
+import { User } from "../user/entities/user.entity";
+import { UserDeviceToken } from "../user/entities/user-device-token.entity";
+import { Order } from "../order/entities/order.entity";
+import {
+  FCMService,
+  FCMNotificationPayload,
+  FCMNotificationOptions,
+} from "./fcm.service";
 
 export interface CreateNotificationDto {
   user_id: number;
   title: string;
   message: string;
-  type: 'order' | 'promotion' | 'system' | 'review';
+  type: "order" | "promotion" | "system" | "review";
   data?: any;
 }
 
@@ -47,7 +51,9 @@ export class NotificationService {
   /**
    * Create a new notification
    */
-  async createNotification(createNotificationDto: CreateNotificationDto): Promise<Notification> {
+  async createNotification(
+    createNotificationDto: CreateNotificationDto,
+  ): Promise<Notification> {
     try {
       const notification = this.notificationRepository.create({
         user: { id: createNotificationDto.user_id },
@@ -55,20 +61,26 @@ export class NotificationService {
         message: createNotificationDto.message,
         type: createNotificationDto.type,
         data: createNotificationDto.data || {},
-        status: 'unread',
+        status: "unread",
         is_read: false,
       });
 
-      const savedNotification = await this.notificationRepository.save(notification);
-      
-      this.logger.log(`Notification created for user ${createNotificationDto.user_id}: ${createNotificationDto.title}`);
-      
+      const savedNotification =
+        await this.notificationRepository.save(notification);
+
+      this.logger.log(
+        `Notification created for user ${createNotificationDto.user_id}: ${createNotificationDto.title}`,
+      );
+
       // TODO: Trigger push notification, email, SMS based on user preferences
       await this.deliverNotification(savedNotification);
-      
+
       return savedNotification;
     } catch (error) {
-      this.logger.error(`Failed to create notification: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to create notification: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -81,21 +93,23 @@ export class NotificationService {
     page: number = 1,
     limit: number = 20,
     type?: string,
-    unreadOnly: boolean = false
+    unreadOnly: boolean = false,
   ) {
     try {
       const queryBuilder = this.notificationRepository
-        .createQueryBuilder('notification')
-        .leftJoinAndSelect('notification.user', 'user')
-        .where('notification.user.id = :userId', { userId })
-        .orderBy('notification.created_at', 'DESC');
+        .createQueryBuilder("notification")
+        .leftJoinAndSelect("notification.user", "user")
+        .where("notification.user.id = :userId", { userId })
+        .orderBy("notification.created_at", "DESC");
 
       if (type) {
-        queryBuilder.andWhere('notification.type = :type', { type });
+        queryBuilder.andWhere("notification.type = :type", { type });
       }
 
       if (unreadOnly) {
-        queryBuilder.andWhere('notification.is_read = :isRead', { isRead: false });
+        queryBuilder.andWhere("notification.is_read = :isRead", {
+          isRead: false,
+        });
       }
 
       const [notifications, total] = await queryBuilder
@@ -106,7 +120,9 @@ export class NotificationService {
       const totalPages = Math.ceil(total / limit);
 
       return {
-        notifications: notifications.map(notification => this.formatNotification(notification)),
+        notifications: notifications.map((notification) =>
+          this.formatNotification(notification),
+        ),
         pagination: {
           page,
           limit,
@@ -118,7 +134,10 @@ export class NotificationService {
         unread_count: await this.getUnreadCount(userId),
       };
     } catch (error) {
-      this.logger.error(`Failed to get user notifications: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to get user notifications: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -126,26 +145,35 @@ export class NotificationService {
   /**
    * Mark notification as read
    */
-  async markAsRead(notificationId: number, userId: number): Promise<Notification> {
+  async markAsRead(
+    notificationId: number,
+    userId: number,
+  ): Promise<Notification> {
     try {
       const notification = await this.notificationRepository.findOne({
         where: { id: notificationId, user: { id: userId } },
       });
 
       if (!notification) {
-        throw new Error('Notification not found');
+        throw new Error("Notification not found");
       }
 
       notification.is_read = true;
-      notification.status = 'read';
+      notification.status = "read";
 
-      const updatedNotification = await this.notificationRepository.save(notification);
-      
-      this.logger.log(`Notification ${notificationId} marked as read for user ${userId}`);
-      
+      const updatedNotification =
+        await this.notificationRepository.save(notification);
+
+      this.logger.log(
+        `Notification ${notificationId} marked as read for user ${userId}`,
+      );
+
       return updatedNotification;
     } catch (error) {
-      this.logger.error(`Failed to mark notification as read: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to mark notification as read: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -158,17 +186,25 @@ export class NotificationService {
       const result = await this.notificationRepository
         .createQueryBuilder()
         .update(Notification)
-        .set({ is_read: true, status: 'read' })
-        .where('user.id = :userId AND is_read = :isRead', { userId, isRead: false })
+        .set({ is_read: true, status: "read" })
+        .where("user.id = :userId AND is_read = :isRead", {
+          userId,
+          isRead: false,
+        })
         .execute();
 
       const updatedCount = result.affected || 0;
-      
-      this.logger.log(`Marked ${updatedCount} notifications as read for user ${userId}`);
-      
+
+      this.logger.log(
+        `Marked ${updatedCount} notifications as read for user ${userId}`,
+      );
+
       return { updated_count: updatedCount };
     } catch (error) {
-      this.logger.error(`Failed to mark all notifications as read: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to mark all notifications as read: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -176,7 +212,10 @@ export class NotificationService {
   /**
    * Delete a notification
    */
-  async deleteNotification(notificationId: number, userId: number): Promise<void> {
+  async deleteNotification(
+    notificationId: number,
+    userId: number,
+  ): Promise<void> {
     try {
       const result = await this.notificationRepository.delete({
         id: notificationId,
@@ -184,12 +223,17 @@ export class NotificationService {
       });
 
       if (result.affected === 0) {
-        throw new Error('Notification not found');
+        throw new Error("Notification not found");
       }
 
-      this.logger.log(`Notification ${notificationId} deleted for user ${userId}`);
+      this.logger.log(
+        `Notification ${notificationId} deleted for user ${userId}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to delete notification: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to delete notification: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -203,7 +247,10 @@ export class NotificationService {
         where: { user: { id: userId }, is_read: false },
       });
     } catch (error) {
-      this.logger.error(`Failed to get unread count: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to get unread count: ${error.message}`,
+        error.stack,
+      );
       return 0;
     }
   }
@@ -216,16 +263,20 @@ export class NotificationService {
     orderId: number,
     status: string,
     message: string,
-    additionalData?: any
+    additionalData?: any,
   ): Promise<Notification> {
     const title = this.getOrderNotificationTitle(status);
-    const notificationMessage = this.getOrderNotificationMessage(status, message, additionalData);
+    const notificationMessage = this.getOrderNotificationMessage(
+      status,
+      message,
+      additionalData,
+    );
 
     return this.createNotification({
       user_id: userId,
       title,
       message: notificationMessage,
-      type: 'order',
+      type: "order",
       data: {
         order_id: orderId,
         status,
@@ -234,20 +285,19 @@ export class NotificationService {
     });
   }
 
-
   /**
    * Create review reminder notification
    */
   async createReviewNotification(
     userId: number,
     orderId: number,
-    restaurantName: string
+    restaurantName: string,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
-      title: 'Rate Your Experience',
+      title: "Rate Your Experience",
       message: `How was your order from ${restaurantName}? Share your feedback!`,
-      type: 'review',
+      type: "review",
       data: {
         order_id: orderId,
         restaurant_name: restaurantName,
@@ -261,13 +311,13 @@ export class NotificationService {
   async createOTPNotification(
     userId: number,
     phoneNumber: number,
-    otp: string
+    otp: string,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
-      title: 'OTP for Login',
+      title: "OTP for Login",
       message: `Your OTP is ${otp}. Valid for 5 minutes.`,
-      type: 'system',
+      type: "system",
       data: {
         phone_number: phoneNumber,
         otp: otp,
@@ -283,18 +333,18 @@ export class NotificationService {
     userId: number,
     orderId: number,
     amount: number,
-    paymentMethod: string
+    paymentMethod: string,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
-      title: 'Payment Successful',
+      title: "Payment Successful",
       message: `Payment of ₹${amount} via ${paymentMethod} completed successfully`,
-      type: 'order',
+      type: "order",
       data: {
         order_id: orderId,
         amount: amount,
         payment_method: paymentMethod,
-        status: 'paid',
+        status: "paid",
       },
     });
   }
@@ -307,18 +357,18 @@ export class NotificationService {
     orderId: number,
     amount: number,
     paymentMethod: string,
-    reason?: string
+    reason?: string,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
-      title: 'Payment Failed',
-      message: `Payment of ₹${amount} via ${paymentMethod} failed. ${reason || 'Please try again.'}`,
-      type: 'order',
+      title: "Payment Failed",
+      message: `Payment of ₹${amount} via ${paymentMethod} failed. ${reason || "Please try again."}`,
+      type: "order",
       data: {
         order_id: orderId,
         amount: amount,
         payment_method: paymentMethod,
-        status: 'failed',
+        status: "failed",
         reason: reason,
       },
     });
@@ -331,13 +381,13 @@ export class NotificationService {
     userId: number,
     title: string,
     message: string,
-    offerData?: any
+    offerData?: any,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
       title,
       message,
-      type: 'promotion',
+      type: "promotion",
       data: offerData || {},
     });
   }
@@ -348,13 +398,13 @@ export class NotificationService {
   async createSystemMaintenanceNotification(
     userId: number,
     message: string,
-    maintenanceData?: any
+    maintenanceData?: any,
   ): Promise<Notification> {
     return this.createNotification({
       user_id: userId,
-      title: 'System Maintenance',
+      title: "System Maintenance",
       message,
-      type: 'system',
+      type: "system",
       data: maintenanceData || {},
     });
   }
@@ -362,7 +412,9 @@ export class NotificationService {
   /**
    * Get notification preferences (placeholder - would be stored in user profile)
    */
-  async getNotificationPreferences(userId: number): Promise<NotificationPreferences> {
+  async getNotificationPreferences(
+    userId: number,
+  ): Promise<NotificationPreferences> {
     // TODO: Implement user notification preferences
     // This would typically be stored in a user_preferences table
     return {
@@ -381,11 +433,14 @@ export class NotificationService {
    */
   async updateNotificationPreferences(
     userId: number,
-    preferences: Partial<NotificationPreferences>
+    preferences: Partial<NotificationPreferences>,
   ): Promise<NotificationPreferences> {
     // TODO: Implement updating user notification preferences
-    this.logger.log(`Notification preferences updated for user ${userId}`, preferences);
-    
+    this.logger.log(
+      `Notification preferences updated for user ${userId}`,
+      preferences,
+    );
+
     return {
       order_updates: true,
       promotional_offers: true,
@@ -398,32 +453,43 @@ export class NotificationService {
     };
   }
 
-
   /**
    * Unregister device token
    */
-  async unregisterDeviceToken(userId: number, deviceToken: string): Promise<void> {
+  async unregisterDeviceToken(
+    userId: number,
+    deviceToken: string,
+  ): Promise<void> {
     try {
       await this.userDeviceTokenRepository.delete({
         user: { id: userId },
         token: deviceToken,
       });
-      this.logger.log(`Device token unregistered for user ${userId}: ${deviceToken}`);
+      this.logger.log(
+        `Device token unregistered for user ${userId}: ${deviceToken}`,
+      );
     } catch (error) {
-      this.logger.error(`Failed to unregister device token: ${error.message}`, error.stack);
-      throw new Error('Failed to unregister device token');
+      this.logger.error(
+        `Failed to unregister device token: ${error.message}`,
+        error.stack,
+      );
+      throw new Error("Failed to unregister device token");
     }
   }
 
   /**
    * Register device token for push notifications
    */
-  async registerDeviceToken(userId: number, deviceToken: string, platform: string): Promise<void> {
+  async registerDeviceToken(
+    userId: number,
+    deviceToken: string,
+    platform: string,
+  ): Promise<void> {
     try {
       // Validate token with FCM
       const isValid = await this.fcmService.validateToken(deviceToken);
       if (!isValid) {
-        throw new Error('Invalid device token');
+        throw new Error("Invalid device token");
       }
 
       // Check if token already exists
@@ -440,7 +506,9 @@ export class NotificationService {
         existingToken.platform = platform;
         existingToken.updated_at = new Date();
         await this.userDeviceTokenRepository.save(existingToken);
-        this.logger.log(`Device token updated for user ${userId}: ${deviceToken}`);
+        this.logger.log(
+          `Device token updated for user ${userId}: ${deviceToken}`,
+        );
       } else {
         // Create new token
         const newToken = this.userDeviceTokenRepository.create({
@@ -450,11 +518,16 @@ export class NotificationService {
           is_active: true,
         });
         await this.userDeviceTokenRepository.save(newToken);
-        this.logger.log(`Device token registered for user ${userId}: ${deviceToken}`);
+        this.logger.log(
+          `Device token registered for user ${userId}: ${deviceToken}`,
+        );
       }
     } catch (error) {
-      this.logger.error(`Failed to register device token: ${error.message}`, error.stack);
-      throw new Error('Failed to register device token');
+      this.logger.error(
+        `Failed to register device token: ${error.message}`,
+        error.stack,
+      );
+      throw new Error("Failed to register device token");
     }
   }
 
@@ -465,11 +538,14 @@ export class NotificationService {
     try {
       await this.userDeviceTokenRepository.update(
         { token: { $in: tokens } as any },
-        { is_active: false }
+        { is_active: false },
       );
       this.logger.log(`Marked ${tokens.length} invalid tokens as inactive`);
     } catch (error) {
-      this.logger.error(`Failed to remove invalid tokens: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to remove invalid tokens: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
@@ -483,38 +559,51 @@ export class NotificationService {
       // 2. Send push notification if enabled
       // 3. Send email if enabled
       // 4. Send SMS if enabled
-      
-      this.logger.log(`Delivering notification ${notification.id} to user ${notification.user?.id}`);
-      
+
+      this.logger.log(
+        `Delivering notification ${notification.id} to user ${notification.user?.id}`,
+      );
+
       // Placeholder for actual delivery implementation
       await this.sendPushNotification(notification);
       await this.sendEmailNotification(notification);
       await this.sendSMSNotification(notification);
     } catch (error) {
-      this.logger.error(`Failed to deliver notification: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to deliver notification: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
   /**
    * Send push notification via FCM
    */
-  private async sendPushNotification(notification: Notification): Promise<void> {
+  private async sendPushNotification(
+    notification: Notification,
+  ): Promise<void> {
     try {
       // Get user's device tokens
       const user = await this.userRepository.findOne({
         where: { id: notification.user?.id },
-        relations: ['device_tokens'],
+        relations: ["device_tokens"],
       });
 
       if (!user || !user.device_tokens || user.device_tokens.length === 0) {
-        this.logger.warn(`No device tokens found for user ${notification.user?.id}`);
+        this.logger.warn(
+          `No device tokens found for user ${notification.user?.id}`,
+        );
         return;
       }
 
       // Check user's push notification preferences
-      const preferences = await this.getNotificationPreferences(notification.user?.id);
+      const preferences = await this.getNotificationPreferences(
+        notification.user?.id,
+      );
       if (!preferences.push_notifications) {
-        this.logger.log(`Push notifications disabled for user ${notification.user?.id}`);
+        this.logger.log(
+          `Push notifications disabled for user ${notification.user?.id}`,
+        );
         return;
       }
 
@@ -529,47 +618,64 @@ export class NotificationService {
       };
 
       const options: FCMNotificationOptions = {
-        priority: 'high',
+        priority: "high",
         timeToLive: 3600000, // 1 hour
         collapseKey: `notification_${notification.type}`,
       };
 
       // Send to all user's device tokens
       const tokens = user.device_tokens
-        .filter(dt => dt.is_active)
-        .map(dt => dt.token);
-      
+        .filter((dt) => dt.is_active)
+        .map((dt) => dt.token);
+
       if (tokens.length === 0) {
-        this.logger.warn(`No active device tokens found for user ${notification.user?.id}`);
+        this.logger.warn(
+          `No active device tokens found for user ${notification.user?.id}`,
+        );
         return;
       }
 
-      const result = await this.fcmService.sendToMultipleDevices(tokens, payload, options);
+      const result = await this.fcmService.sendToMultipleDevices(
+        tokens,
+        payload,
+        options,
+      );
 
-      this.logger.log(`Push notification sent to user ${notification.user?.id}: ${result.successCount} success, ${result.failureCount} failures`);
+      this.logger.log(
+        `Push notification sent to user ${notification.user?.id}: ${result.successCount} success, ${result.failureCount} failures`,
+      );
 
       // Handle failed tokens (remove invalid tokens)
       if (result.failureCount > 0) {
         const failedTokens = result.results
-          .filter(r => !r.success)
-          .map(r => r.token);
-        
-        this.logger.warn(`Failed to send push notifications to tokens: ${failedTokens.join(', ')}`);
-        
+          .filter((r) => !r.success)
+          .map((r) => r.token);
+
+        this.logger.warn(
+          `Failed to send push notifications to tokens: ${failedTokens.join(", ")}`,
+        );
+
         // Remove invalid tokens from database
         await this.removeInvalidTokens(failedTokens);
       }
     } catch (error) {
-      this.logger.error(`Failed to send push notification: ${error.message}`, error.stack);
+      this.logger.error(
+        `Failed to send push notification: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
   /**
    * Send email notification (placeholder)
    */
-  private async sendEmailNotification(notification: Notification): Promise<void> {
+  private async sendEmailNotification(
+    notification: Notification,
+  ): Promise<void> {
     // TODO: Implement email service integration
-    this.logger.log(`Email notification sent for notification ${notification.id}`);
+    this.logger.log(
+      `Email notification sent for notification ${notification.id}`,
+    );
   }
 
   /**
@@ -577,7 +683,9 @@ export class NotificationService {
    */
   private async sendSMSNotification(notification: Notification): Promise<void> {
     // TODO: Implement SMS service integration
-    this.logger.log(`SMS notification sent for notification ${notification.id}`);
+    this.logger.log(
+      `SMS notification sent for notification ${notification.id}`,
+    );
   }
 
   /**
@@ -585,35 +693,41 @@ export class NotificationService {
    */
   private getOrderNotificationTitle(status: string): string {
     const titles = {
-      pending: 'Order Placed',
-      confirmed: 'Order Confirmed',
-      preparing: 'Order Being Prepared',
-      out_for_delivery: 'Order Out for Delivery',
-      delivered: 'Order Delivered',
-      cancelled: 'Order Cancelled',
+      pending: "Order Placed",
+      confirmed: "Order Confirmed",
+      preparing: "Order Being Prepared",
+      out_for_delivery: "Order Out for Delivery",
+      delivered: "Order Delivered",
+      cancelled: "Order Cancelled",
     };
-    return titles[status] || 'Order Update';
+    return titles[status] || "Order Update";
   }
 
   /**
    * Get order notification message based on status
    */
-  private getOrderNotificationMessage(status: string, message: string, additionalData?: any): string {
+  private getOrderNotificationMessage(
+    status: string,
+    message: string,
+    additionalData?: any,
+  ): string {
     const baseMessages = {
-      pending: 'Your order has been placed successfully and is being processed.',
-      confirmed: 'Your order has been confirmed by the restaurant.',
-      preparing: 'Your order is being prepared with care.',
-      out_for_delivery: 'Your order is out for delivery and will reach you soon.',
-      delivered: 'Your order has been delivered. Enjoy your meal!',
-      cancelled: 'Your order has been cancelled.',
+      pending:
+        "Your order has been placed successfully and is being processed.",
+      confirmed: "Your order has been confirmed by the restaurant.",
+      preparing: "Your order is being prepared with care.",
+      out_for_delivery:
+        "Your order is out for delivery and will reach you soon.",
+      delivered: "Your order has been delivered. Enjoy your meal!",
+      cancelled: "Your order has been cancelled.",
     };
 
     const baseMessage = baseMessages[status] || message;
-    
+
     if (additionalData?.estimated_time) {
       return `${baseMessage} Estimated delivery time: ${additionalData.estimated_time}`;
     }
-    
+
     return baseMessage;
   }
 

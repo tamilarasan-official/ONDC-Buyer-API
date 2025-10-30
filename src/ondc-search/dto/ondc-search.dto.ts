@@ -1,5 +1,11 @@
-import { Type } from 'class-transformer';
-import { IsArray, IsISO8601, IsOptional, IsString, ValidateNested } from 'class-validator';
+import { Type } from "class-transformer";
+import {
+  IsArray,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  ValidateNested,
+} from "class-validator";
 
 export class ONDCSearchRequestDto {
   context: {
@@ -20,8 +26,8 @@ export class ONDCSearchRequestDto {
   message: {
     intent: {
       payment: {
-        '@ondc/org/buyer_app_finder_fee_type': string; // 'percent'
-        '@ondc/org/buyer_app_finder_fee_amount': string; // '3'
+        "@ondc/org/buyer_app_finder_fee_type": string; // 'percent'
+        "@ondc/org/buyer_app_finder_fee_amount": string; // '3'
       };
       // Optional search filters
       fulfillment?: {
@@ -62,7 +68,7 @@ export class ONDCSearchResponseDto {
 
   message: {
     catalog: {
-      'bpp/descriptor': {
+      "bpp/descriptor": {
         name: string;
         symbol?: string;
         short_desc?: string;
@@ -70,8 +76,8 @@ export class ONDCSearchResponseDto {
         images?: string[];
         tags?: Tag[];
       };
-      'bpp/fulfillments'?: Fulfillment[];
-      'bpp/providers': Provider[];
+      "bpp/fulfillments"?: Fulfillment[];
+      "bpp/providers": Provider[];
     };
   };
 }
@@ -92,7 +98,7 @@ export interface Provider {
     food_type?: string;
     tags?: string[];
   };
-  '@ondc/org/fssai_license_no'?: string;
+  "@ondc/org/fssai_license_no"?: string;
   ttl?: string;
   locations: Location[];
   categories: Category[];
@@ -196,13 +202,13 @@ export interface Item {
   location_id?: string;
   related?: boolean;
   recommended?: boolean;
-  '@ondc/org/returnable'?: boolean;
-  '@ondc/org/cancellable'?: boolean;
-  '@ondc/org/return_window'?: string;
-  '@ondc/org/seller_pickup_return'?: boolean;
-  '@ondc/org/time_to_ship'?: string;
-  '@ondc/org/available_on_cod'?: boolean;
-  '@ondc/org/contact_details_consumer_care'?: string;
+  "@ondc/org/returnable"?: boolean;
+  "@ondc/org/cancellable"?: boolean;
+  "@ondc/org/return_window"?: string;
+  "@ondc/org/seller_pickup_return"?: boolean;
+  "@ondc/org/time_to_ship"?: string;
+  "@ondc/org/available_on_cod"?: boolean;
+  "@ondc/org/contact_details_consumer_care"?: string;
   tax?: {
     percent: number;
   };
@@ -272,20 +278,20 @@ export class BppDescriptorDto {
 }
 
 export class CatalogDto {
-
-  @ValidateNested() @Type(() => BppDescriptorDto)
+  @ValidateNested()
+  @Type(() => BppDescriptorDto)
   "bpp/descriptor": BppDescriptorDto;
 
-  @IsOptional() bpp_fulfillments?: any[]; 
-  
-  @IsArray() "bpp/providers": any[];       
+  @IsOptional() bpp_fulfillments?: any[];
+
+  @IsArray() "bpp/providers": any[];
 }
 
 export class MessageDto {
-  @ValidateNested() @Type(() => CatalogDto)
+  @ValidateNested()
+  @Type(() => CatalogDto)
   catalog: CatalogDto;
 }
-
 
 // New DTOs for ONDC protocol flow
 export class ONDCSearchAckDto {
@@ -306,7 +312,7 @@ export class ONDCSearchAckDto {
 
   message: {
     ack: {
-      status: 'ACK' | 'NACK';
+      status: "ACK" | "NACK";
       message_id: string;
       error?: {
         code: string;
@@ -317,9 +323,11 @@ export class ONDCSearchAckDto {
 }
 
 export class ONDCOnSearchResponseDto {
-  @ValidateNested() @Type(() => ContextDto)
+  @ValidateNested()
+  @Type(() => ContextDto)
   context: ContextDto;
 
-  @ValidateNested() @Type(() => MessageDto)
+  @ValidateNested()
+  @Type(() => MessageDto)
   message: MessageDto;
 }

@@ -1,8 +1,8 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
-import { catchError, timeout } from 'rxjs/operators';
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { firstValueFrom } from "rxjs";
+import { catchError, timeout } from "rxjs/operators";
 
 export interface AirtelSmsRequest {
   customerId: string;
@@ -10,7 +10,7 @@ export interface AirtelSmsRequest {
   dltTemplateId: string;
   entityId: string;
   message: string;
-  messageType: 'PROMOTIONAL' | 'TRANSACTIONAL' | 'SERVICE_IMPLICIT';
+  messageType: "PROMOTIONAL" | "TRANSACTIONAL" | "SERVICE_IMPLICIT";
   sourceAddress: string;
   urlShortenerParams?: {
     campaignId: string;
@@ -38,7 +38,7 @@ export interface AirtelSmsResponse {
 @Injectable()
 export class AirtelSmsProvider {
   private readonly logger = new Logger(AirtelSmsProvider.name);
-  private readonly baseUrl = 'https://iqsms.airtel.in/api/v1';
+  private readonly baseUrl = "https://iqsms.airtel.in/api/v1";
 
   constructor(
     private readonly httpService: HttpService,
@@ -53,17 +53,17 @@ export class AirtelSmsProvider {
       const cleanPhoneNumber = this.cleanPhoneNumber(phoneNumber);
 
       // Prepare Airtel SMS request
-      const customerId = this.configService.get<string>('AIRTEL_CUSTOMER_ID');
+      const customerId = this.configService.get<string>("AIRTEL_CUSTOMER_ID");
       const dltTemplateId = this.configService.get<string>(
-        'AIRTEL_DLT_TEMPLATE_ID',
+        "AIRTEL_DLT_TEMPLATE_ID",
       );
-      const entityId = this.configService.get<string>('AIRTEL_ENTITY_ID');
+      const entityId = this.configService.get<string>("AIRTEL_ENTITY_ID");
       const sourceAddress =
-        this.configService.get<string>('AIRTEL_SOURCE_ADDRESS') || 'ONDC';
+        this.configService.get<string>("AIRTEL_SOURCE_ADDRESS") || "ONDC";
 
       if (!customerId || !dltTemplateId || !entityId) {
         throw new BadRequestException(
-          'Missing required Airtel SMS configuration',
+          "Missing required Airtel SMS configuration",
         );
       }
 
@@ -73,29 +73,29 @@ export class AirtelSmsProvider {
         dltTemplateId: dltTemplateId,
         entityId: entityId,
         message: message,
-        messageType: 'SERVICE_IMPLICIT',
+        messageType: "SERVICE_IMPLICIT",
         sourceAddress: sourceAddress,
       };
 
       this.logger.log(`Sending SMS to ${cleanPhoneNumber} via Airtel API`);
 
       // Make API call to Airtel with Basic Auth (username/password)
-      const username = this.configService.get<string>('AIRTEL_USERNAME');
-      const password = this.configService.get<string>('AIRTEL_PASSWORD');
+      const username = this.configService.get<string>("AIRTEL_USERNAME");
+      const password = this.configService.get<string>("AIRTEL_PASSWORD");
 
       if (!username || !password) {
-        throw new BadRequestException('Missing Airtel username or password');
+        throw new BadRequestException("Missing Airtel username or password");
       }
 
       const basicAuth = Buffer.from(`${username}:${password}`).toString(
-        'base64',
+        "base64",
       );
 
       const response = await firstValueFrom(
         this.httpService
           .post(`${this.baseUrl}/send-prepaid-sms`, requestBody, {
             headers: {
-              'Content-Type': 'application/json',
+              "Content-Type": "application/json",
               Authorization: `Basic ${basicAuth}`,
             },
             timeout: 10000,
@@ -104,7 +104,7 @@ export class AirtelSmsProvider {
             timeout(10000),
             catchError((error) => {
               this.logger.error(
-                'Airtel SMS API error:',
+                "Airtel SMS API error:",
                 error.response?.data || error.message,
               );
               throw new BadRequestException(
@@ -116,7 +116,7 @@ export class AirtelSmsProvider {
 
       const responseData: AirtelSmsResponse = response.data;
 
-      this.logger.log('SMS sent successfully via Airtel', {
+      this.logger.log("SMS sent successfully via Airtel", {
         phoneNumber: cleanPhoneNumber,
         messageId: responseData.messageRequestId,
         status: responseData.status,
@@ -131,10 +131,10 @@ export class AirtelSmsProvider {
 
   private cleanPhoneNumber(phoneNumber: string): string {
     // Remove all non-numeric characters
-    let cleaned = phoneNumber.replace(/\D/g, '');
+    const cleaned = phoneNumber.replace(/\D/g, "");
 
     // Remove country code if present and return only 10-digit number
-    if (cleaned.startsWith('91') && cleaned.length === 12) {
+    if (cleaned.startsWith("91") && cleaned.length === 12) {
       // Remove the '91' country code
       return cleaned.substring(2);
     } else if (cleaned.length === 10 && /^[6-9]/.test(cleaned)) {
@@ -149,12 +149,12 @@ export class AirtelSmsProvider {
 
   validateConfig(): boolean {
     const requiredFields = [
-      'AIRTEL_CUSTOMER_ID',
-      'AIRTEL_DLT_TEMPLATE_ID',
-      'AIRTEL_ENTITY_ID',
-      'AIRTEL_USERNAME',
-      'AIRTEL_PASSWORD',
-      'AIRTEL_SOURCE_ADDRESS',
+      "AIRTEL_CUSTOMER_ID",
+      "AIRTEL_DLT_TEMPLATE_ID",
+      "AIRTEL_ENTITY_ID",
+      "AIRTEL_USERNAME",
+      "AIRTEL_PASSWORD",
+      "AIRTEL_SOURCE_ADDRESS",
     ];
 
     const missingFields = requiredFields.filter(
@@ -163,7 +163,7 @@ export class AirtelSmsProvider {
 
     if (missingFields.length > 0) {
       this.logger.error(
-        `Missing Airtel SMS configuration: ${missingFields.join(', ')}`,
+        `Missing Airtel SMS configuration: ${missingFields.join(", ")}`,
       );
       return false;
     }

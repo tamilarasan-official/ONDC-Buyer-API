@@ -1,46 +1,46 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty } from "@nestjs/swagger";
 
 export class SearchRestaurantDto {
   @ApiProperty({
-    description: 'Restaurant ID',
+    description: "Restaurant ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Restaurant name',
-    example: 'Pizza Palace'
+    description: "Restaurant name",
+    example: "Pizza Palace",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Restaurant description',
-    example: 'Best pizza in town'
+    description: "Restaurant description",
+    example: "Best pizza in town",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Restaurant logo URL',
-    example: 'https://example.com/logo.jpg'
+    description: "Restaurant logo URL",
+    example: "https://example.com/logo.jpg",
   })
   logo_url: string;
 
   @ApiProperty({
-    description: 'FSSAI license number',
-    example: '12345678901234'
+    description: "FSSAI license number",
+    example: "12345678901234",
   })
   fssai_license: string;
 
   @ApiProperty({
-    description: 'Restaurant location details',
-    type: 'object',
+    description: "Restaurant location details",
+    type: "object",
     properties: {
-      lat: { type: 'number', example: 9.9352300 },
-      lng: { type: 'number', example: 78.1304040 },
-      city: { type: 'string', example: 'Bangalore' },
-      locality: { type: 'string', example: 'Koramangala' }
-    }
+      lat: { type: "number", example: 9.93523 },
+      lng: { type: "number", example: 78.130404 },
+      city: { type: "string", example: "Bangalore" },
+      locality: { type: "string", example: "Koramangala" },
+    },
   })
   location: {
     lat: number;
@@ -50,88 +50,88 @@ export class SearchRestaurantDto {
   };
 
   @ApiProperty({
-    description: 'Distance from user in kilometers',
+    description: "Distance from user in kilometers",
     example: 2.5,
-    type: 'number'
+    type: "number",
   })
   distance: number;
 
   @ApiProperty({
-    description: 'Restaurant rating',
+    description: "Restaurant rating",
     example: 4.5,
-    type: 'number'
+    type: "number",
   })
   rating: number;
 
   @ApiProperty({
-    description: 'Estimated delivery time',
-    example: '25-30 mins'
+    description: "Estimated delivery time",
+    example: "25-30 mins",
   })
   delivery_time: string;
 
   @ApiProperty({
-    description: 'Number of active offers',
+    description: "Number of active offers",
     example: 3,
-    type: 'number'
+    type: "number",
   })
   offers_count: number;
 
   @ApiProperty({
-    description: 'Number of items available',
+    description: "Number of items available",
     example: 45,
-    type: 'number'
+    type: "number",
   })
   items_count: number;
 
   @ApiProperty({
-    description: 'Is restaurant currently open',
+    description: "Is restaurant currently open",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_open: boolean;
 }
 
 export class TopRatedRestaurantDto {
   @ApiProperty({
-    description: 'Restaurant ID',
+    description: "Restaurant ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Restaurant name',
-    example: '6SUVAI Restaurant'
+    description: "Restaurant name",
+    example: "6SUVAI Restaurant",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Restaurant description',
-    example: 'Best South Indian cuisine with authentic flavors'
+    description: "Restaurant description",
+    example: "Best South Indian cuisine with authentic flavors",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Restaurant logo URL',
-    example: 'https://example.com/logo.jpg'
+    description: "Restaurant logo URL",
+    example: "https://example.com/logo.jpg",
   })
   logo_url: string;
 
   @ApiProperty({
-    description: 'FSSAI license number',
-    example: '12345678901234'
+    description: "FSSAI license number",
+    example: "12345678901234",
   })
   fssai_license: string;
 
   @ApiProperty({
-    description: 'Restaurant location details',
-    type: 'object',
+    description: "Restaurant location details",
+    type: "object",
     properties: {
-      lat: { type: 'number', example: 9.9352300 },
-      lng: { type: 'number', example: 78.1304040 },
-      city: { type: 'string', example: 'Madurai' },
-      locality: { type: 'string', example: 'Anna Nagar' }
-    }
+      lat: { type: "number", example: 9.93523 },
+      lng: { type: "number", example: 78.130404 },
+      city: { type: "string", example: "Madurai" },
+      locality: { type: "string", example: "Anna Nagar" },
+    },
   })
   location: {
     lat: number;
@@ -141,88 +141,88 @@ export class TopRatedRestaurantDto {
   };
 
   @ApiProperty({
-    description: 'Distance from user in kilometers',
+    description: "Distance from user in kilometers",
     example: 1.8,
-    type: 'number'
+    type: "number",
   })
   distance: number;
 
   @ApiProperty({
-    description: 'Restaurant average rating (rounded to 1 decimal)',
+    description: "Restaurant average rating (rounded to 1 decimal)",
     example: 4.7,
-    type: 'number'
+    type: "number",
   })
   rating: number;
 
   @ApiProperty({
-    description: 'Number of reviews received',
+    description: "Number of reviews received",
     example: 142,
-    type: 'number'
+    type: "number",
   })
   review_count: number;
 
   @ApiProperty({
-    description: 'Estimated delivery time',
-    example: '25-30 mins'
+    description: "Estimated delivery time",
+    example: "25-30 mins",
   })
   delivery_time: string;
 
   @ApiProperty({
-    description: 'Number of active offers',
+    description: "Number of active offers",
     example: 2,
-    type: 'number'
+    type: "number",
   })
   offers_count: number;
 
   @ApiProperty({
-    description: 'Number of items available',
+    description: "Number of items available",
     example: 38,
-    type: 'number'
+    type: "number",
   })
   items_count: number;
 
   @ApiProperty({
-    description: 'Is restaurant currently open',
+    description: "Is restaurant currently open",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_open: boolean;
 }
 
 export class SearchItemDto {
   @ApiProperty({
-    description: 'Item ID',
+    description: "Item ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Item name',
-    example: 'Margherita Pizza'
+    description: "Item name",
+    example: "Margherita Pizza",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Item description',
-    example: 'Classic margherita with fresh mozzarella'
+    description: "Item description",
+    example: "Classic margherita with fresh mozzarella",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Item images',
+    description: "Item images",
     type: [String],
-    example: ['https://example.com/pizza.jpg']
+    example: ["https://example.com/pizza.jpg"],
   })
   images: string[];
 
   @ApiProperty({
-    description: 'Item price',
-    type: 'object',
+    description: "Item price",
+    type: "object",
     properties: {
-      amount: { type: 'number', example: 299.00 },
-      currency: { type: 'string', example: 'INR' }
-    }
+      amount: { type: "number", example: 299.0 },
+      currency: { type: "string", example: "INR" },
+    },
   })
   price: {
     amount: number;
@@ -230,13 +230,13 @@ export class SearchItemDto {
   };
 
   @ApiProperty({
-    description: 'Store information',
-    type: 'object',
+    description: "Store information",
+    type: "object",
     properties: {
-      id: { type: 'number', example: 1 },
-      name: { type: 'string', example: 'Pizza Palace' },
-      logo_url: { type: 'string', example: 'https://example.com/logo.jpg' }
-    }
+      id: { type: "number", example: 1 },
+      name: { type: "string", example: "Pizza Palace" },
+      logo_url: { type: "string", example: "https://example.com/logo.jpg" },
+    },
   })
   store: {
     id: number;
@@ -245,26 +245,26 @@ export class SearchItemDto {
   };
 
   @ApiProperty({
-    description: 'Distance from user in kilometers',
+    description: "Distance from user in kilometers",
     example: 1.2,
-    type: 'number'
+    type: "number",
   })
   distance: number;
 
   @ApiProperty({
-    description: 'Item rating',
+    description: "Item rating",
     example: 4.2,
-    type: 'number'
+    type: "number",
   })
   rating: number;
 
   @ApiProperty({
-    description: 'Category information',
-    type: 'object',
+    description: "Category information",
+    type: "object",
     properties: {
-      id: { type: 'number', example: 1 },
-      name: { type: 'string', example: 'Pizza' }
-    }
+      id: { type: "number", example: 1 },
+      name: { type: "string", example: "Pizza" },
+    },
   })
   category: {
     id: number;
@@ -272,152 +272,152 @@ export class SearchItemDto {
   };
 
   @ApiProperty({
-    description: 'Is item currently available',
+    description: "Is item currently available",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   is_available: boolean;
 
   @ApiProperty({
-    description: 'Is item marked as favorite by the logged-in user',
+    description: "Is item marked as favorite by the logged-in user",
     example: false,
-    type: 'boolean'
+    type: "boolean",
   })
   is_favorite: boolean;
 
   @ApiProperty({
-    description: 'Food type',
-    example: 'Veg',
-    required: false
+    description: "Food type",
+    example: "Veg",
+    required: false,
   })
   food_type?: string;
 
   @ApiProperty({
-    description: 'Cuisine tags',
-    example: 'South Indian, North Indian, Chinese',
-    required: false
+    description: "Cuisine tags",
+    example: "South Indian, North Indian, Chinese",
+    required: false,
   })
   cuisine_tags?: string;
 }
 
 export class SearchCategoryDto {
   @ApiProperty({
-    description: 'Category ID',
+    description: "Category ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Category name',
-    example: 'Pizza'
+    description: "Category name",
+    example: "Pizza",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Category description',
-    example: 'Delicious pizzas'
+    description: "Category description",
+    example: "Delicious pizzas",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Category icon URL',
-    example: 'https://example.com/pizza-icon.jpg'
+    description: "Category icon URL",
+    example: "https://example.com/pizza-icon.jpg",
   })
   icon: string;
 
   @ApiProperty({
-    description: 'Number of items in this category',
+    description: "Number of items in this category",
     example: 25,
-    type: 'number'
+    type: "number",
   })
   item_count: number;
 
   @ApiProperty({
-    description: 'Number of restaurants serving this category',
+    description: "Number of restaurants serving this category",
     example: 8,
-    type: 'number'
+    type: "number",
   })
   restaurant_count: number;
 }
 
 export class SearchMetaDto {
   @ApiProperty({
-    description: 'Current page number',
+    description: "Current page number",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   page: number;
 
   @ApiProperty({
-    description: 'Number of results per page',
+    description: "Number of results per page",
     example: 20,
-    type: 'number'
+    type: "number",
   })
   limit: number;
 
   @ApiProperty({
-    description: 'Total number of results',
+    description: "Total number of results",
     example: 150,
-    type: 'number'
+    type: "number",
   })
   total: number;
 
   @ApiProperty({
-    description: 'Total number of pages',
+    description: "Total number of pages",
     example: 8,
-    type: 'number'
+    type: "number",
   })
   total_pages: number;
 
   @ApiProperty({
-    description: 'Has next page',
+    description: "Has next page",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   has_next: boolean;
 
   @ApiProperty({
-    description: 'Has previous page',
+    description: "Has previous page",
     example: false,
-    type: 'boolean'
+    type: "boolean",
   })
   has_prev: boolean;
 
   @ApiProperty({
-    description: 'Search query used',
-    example: 'pizza'
+    description: "Search query used",
+    example: "pizza",
   })
   query: string;
 
   @ApiProperty({
-    description: 'Search type used',
-    example: 'all'
+    description: "Search type used",
+    example: "all",
   })
   type: string;
 
   @ApiProperty({
-    description: 'Sort criteria used',
-    example: 'distance'
+    description: "Sort criteria used",
+    example: "distance",
   })
   sort_by: string;
 
   @ApiProperty({
-    description: 'Sort order used',
-    example: 'asc'
+    description: "Sort order used",
+    example: "asc",
   })
   sort_order: string;
 }
 
 export class SearchDataDto {
   @ApiProperty({
-    description: 'User location information',
-    type: 'object',
+    description: "User location information",
+    type: "object",
     properties: {
-      lat: { type: 'number', example: 9.9352300 },
-      lng: { type: 'number', example: 78.1304040 },
-      source: { type: 'string', example: 'default_address' }
-    }
+      lat: { type: "number", example: 9.93523 },
+      lng: { type: "number", example: 78.130404 },
+      source: { type: "string", example: "default_address" },
+    },
   })
   location: {
     lat: number;
@@ -426,75 +426,76 @@ export class SearchDataDto {
   };
 
   @ApiProperty({
-    description: 'Search results for restaurants',
-    type: [SearchRestaurantDto]
+    description: "Search results for restaurants",
+    type: [SearchRestaurantDto],
   })
   restaurants: SearchRestaurantDto[];
 
   @ApiProperty({
-    description: 'Search results for items',
-    type: [SearchItemDto]
+    description: "Search results for items",
+    type: [SearchItemDto],
   })
   items: SearchItemDto[];
 
   @ApiProperty({
-    description: 'Search results for categories',
-    type: [SearchCategoryDto]
+    description: "Search results for categories",
+    type: [SearchCategoryDto],
   })
   categories: SearchCategoryDto[];
 
   @ApiProperty({
-    description: 'Top 5 highly rated restaurants within the search radius (always included regardless of search query)',
+    description:
+      "Top 5 highly rated restaurants within the search radius (always included regardless of search query)",
     type: [TopRatedRestaurantDto],
     example: [
       {
         id: 1,
-        name: '6SUVAI Restaurant',
-        description: 'Best South Indian cuisine with authentic flavors',
-        logo_url: 'https://example.com/6suvai-logo.jpg',
-        fssai_license: '12345678901234',
+        name: "6SUVAI Restaurant",
+        description: "Best South Indian cuisine with authentic flavors",
+        logo_url: "https://example.com/6suvai-logo.jpg",
+        fssai_license: "12345678901234",
         location: {
-          lat: 9.9352300,
-          lng: 78.1304040,
-          city: 'Madurai',
-          locality: 'Anna Nagar'
+          lat: 9.93523,
+          lng: 78.130404,
+          city: "Madurai",
+          locality: "Anna Nagar",
         },
         distance: 1.8,
         rating: 4.7,
         review_count: 142,
-        delivery_time: '25-30 mins',
+        delivery_time: "25-30 mins",
         offers_count: 2,
         items_count: 38,
-        is_open: true
-      }
-    ]
+        is_open: true,
+      },
+    ],
   })
   top_rated_restaurants: TopRatedRestaurantDto[];
 
   @ApiProperty({
-    description: 'Pagination and search metadata',
-    type: SearchMetaDto
+    description: "Pagination and search metadata",
+    type: SearchMetaDto,
   })
   meta: SearchMetaDto;
 }
 
 export class SearchResponseDto {
   @ApiProperty({
-    description: 'Success status',
+    description: "Success status",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   success: boolean;
 
   @ApiProperty({
-    description: 'Response message',
-    example: 'Search completed successfully'
+    description: "Response message",
+    example: "Search completed successfully",
   })
   message: string;
 
   @ApiProperty({
-    description: 'Search results data',
-    type: SearchDataDto
+    description: "Search results data",
+    type: SearchDataDto,
   })
   data: SearchDataDto;
 }
@@ -502,96 +503,96 @@ export class SearchResponseDto {
 // Search Suggestions Response DTOs
 export class SearchSuggestionDto {
   @ApiProperty({
-    description: 'Suggestion ID',
+    description: "Suggestion ID",
     example: 1,
-    type: 'number'
+    type: "number",
   })
   id: number;
 
   @ApiProperty({
-    description: 'Suggestion name',
-    example: 'Burger'
+    description: "Suggestion name",
+    example: "Burger",
   })
   name: string;
 
   @ApiProperty({
-    description: 'Suggestion type',
-    example: 'dish',
-    enum: ['dish', 'restaurant', 'category']
+    description: "Suggestion type",
+    example: "dish",
+    enum: ["dish", "restaurant", "category"],
   })
-  type: 'dish' | 'restaurant' | 'category';
+  type: "dish" | "restaurant" | "category";
 
   @ApiProperty({
-    description: 'Suggestion description',
-    example: 'Delicious burgers'
+    description: "Suggestion description",
+    example: "Delicious burgers",
   })
   description: string;
 
   @ApiProperty({
-    description: 'Suggestion icon URL',
-    example: 'https://example.com/burger-icon.jpg'
+    description: "Suggestion icon URL",
+    example: "https://example.com/burger-icon.jpg",
   })
   icon: string;
 
   @ApiProperty({
-    description: 'Suggestion image URL',
-    example: 'https://example.com/burger-image.jpg'
+    description: "Suggestion image URL",
+    example: "https://example.com/burger-image.jpg",
   })
   image: string;
 
   @ApiProperty({
-    description: 'Number of restaurants serving this suggestion',
+    description: "Number of restaurants serving this suggestion",
     example: 15,
-    type: 'number'
+    type: "number",
   })
   restaurant_count: number;
 
   @ApiProperty({
-    description: 'Number of items matching this suggestion',
+    description: "Number of items matching this suggestion",
     example: 25,
-    type: 'number'
+    type: "number",
   })
   item_count: number;
 }
 
 export class SearchSuggestionsDataDto {
   @ApiProperty({
-    description: 'Original search query',
-    example: 'burgl'
+    description: "Original search query",
+    example: "burgl",
   })
   query: string;
 
   @ApiProperty({
-    description: 'List of search suggestions',
-    type: [SearchSuggestionDto]
+    description: "List of search suggestions",
+    type: [SearchSuggestionDto],
   })
   suggestions: SearchSuggestionDto[];
 
   @ApiProperty({
-    description: 'Total number of suggestions found',
+    description: "Total number of suggestions found",
     example: 8,
-    type: 'number'
+    type: "number",
   })
   total_suggestions: number;
 }
 
 export class SearchSuggestionsResponseDto {
   @ApiProperty({
-    description: 'Success status',
+    description: "Success status",
     example: true,
-    type: 'boolean'
+    type: "boolean",
   })
   success: boolean;
 
   @ApiProperty({
-    description: 'Response message',
-    example: 'Search suggestions retrieved successfully'
+    description: "Response message",
+    example: "Search suggestions retrieved successfully",
   })
   message: string;
 
   @ApiProperty({
-    description: 'Search suggestions data',
-    type: SearchSuggestionsDataDto
+    description: "Search suggestions data",
+    type: SearchSuggestionsDataDto,
   })
   data: SearchSuggestionsDataDto;
 }

@@ -368,7 +368,8 @@ export class RestaurantItemDto {
   is_favorite: boolean;
 
   @ApiProperty({
-    description: "Item availability timings - defines when this item is available for order. Each timing object represents a time window with day range and time range. Example: breakfast items available Mon-Fri 6AM-11AM, or all-day items available Mon-Sun 24 hours. Empty array means no specific timing restrictions.",
+    description:
+      "Item availability timings - defines when this item is available for order. Each timing object represents a time window with day range and time range. Example: breakfast items available Mon-Fri 6AM-11AM, or all-day items available Mon-Sun 24 hours. Empty array means no specific timing restrictions.",
     type: [ItemTimingDto],
     required: false,
     example: [

@@ -3,9 +3,9 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
-} from '@nestjs/common';
-import { Observable } from 'rxjs';
-import { map } from 'rxjs/operators';
+} from "@nestjs/common";
+import { Observable } from "rxjs";
+import { map } from "rxjs/operators";
 
 @Injectable()
 export class ResponseInterceptor<T> implements NestInterceptor<T, any> {
@@ -14,10 +14,10 @@ export class ResponseInterceptor<T> implements NestInterceptor<T, any> {
       map((data) => ({
         success: true,
         statusCode: context.switchToHttp().getResponse().statusCode,
-        message: 'Request successful',
+        message: "Request successful",
         data,
         timestamp: new Date().toISOString(),
       })),
     );
   }
-} 
+}

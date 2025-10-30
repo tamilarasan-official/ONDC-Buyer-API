@@ -5,51 +5,51 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   Index,
-} from 'typeorm';
+} from "typeorm";
 
 export enum OtpPurpose {
-  REGISTRATION = 'registration',
-  LOGIN = 'login',
-  PASSWORD_RESET = 'password_reset',
+  REGISTRATION = "registration",
+  LOGIN = "login",
+  PASSWORD_RESET = "password_reset",
 }
 
-@Entity('otp_verifications')
-@Index(['purpose'])
+@Entity("otp_verifications")
+@Index(["purpose"])
 export class OtpVerification {
   @PrimaryGeneratedColumn()
   id: number;
 
-  @Column({ type: 'varchar', length: 15, nullable: true })
+  @Column({ type: "varchar", length: 15, nullable: true })
   phone_number: string;
 
-  @Column({ type: 'varchar', length: 4 })
+  @Column({ type: "varchar", length: 4 })
   otp: string;
 
   @Column({
-    type: 'enum',
+    type: "enum",
     enum: OtpPurpose,
     default: OtpPurpose.REGISTRATION,
   })
   purpose: OtpPurpose;
 
-  @Column({ type: 'boolean', default: false })
+  @Column({ type: "boolean", default: false })
   is_verified: boolean;
 
-  @Column({ type: 'int', default: 0 })
+  @Column({ type: "int", default: 0 })
   attempts: number;
 
-  @Column({ type: 'int', default: 3 })
+  @Column({ type: "int", default: 3 })
   max_attempts: number;
 
-  @Column({ type: 'timestamp' })
+  @Column({ type: "timestamp" })
   expires_at: Date;
 
-  @Column({ type: 'timestamp', nullable: true })
+  @Column({ type: "timestamp", nullable: true })
   verified_at: Date;
 
-  @CreateDateColumn({ type: 'timestamp' })
+  @CreateDateColumn({ type: "timestamp" })
   created_at: Date;
 
-  @UpdateDateColumn({ type: 'timestamp' })
+  @UpdateDateColumn({ type: "timestamp" })
   updated_at: Date;
 }

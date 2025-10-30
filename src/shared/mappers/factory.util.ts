@@ -1,5 +1,1 @@
-
-
-export class DtoFactory {
-  
-}
+export class DtoFactory {}

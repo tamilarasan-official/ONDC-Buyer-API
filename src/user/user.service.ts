@@ -26,9 +26,9 @@ export class UserService {
 
     @InjectRepository(UserAddress)
     private readonly userAddressRepository: Repository<UserAddress>,
-    
+
     private readonly notificationService: NotificationService,
-    private readonly otpService: OtpService
+    private readonly otpService: OtpService,
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
@@ -39,7 +39,7 @@ export class UserService {
       // Send OTP using the new OTP service
       const otpResponse = await this.otpService.sendOtp({
         phone_number: phoneNumberString,
-        purpose: OtpPurpose.REGISTRATION
+        purpose: OtpPurpose.REGISTRATION,
       });
 
       if (!otpResponse.success) {
@@ -61,10 +61,13 @@ export class UserService {
         await this.notificationService.createOTPNotification(
           user.id,
           generateOtpDto.phone_number,
-          'OTP sent via SMS'
+          "OTP sent via SMS",
         );
       } catch (notificationError) {
-        console.error('Failed to create OTP notification:', notificationError.message);
+        console.error(
+          "Failed to create OTP notification:",
+          notificationError.message,
+        );
         // Don't throw error as OTP generation should still succeed
       }
 
@@ -72,7 +75,7 @@ export class UserService {
         ...user,
         otp_sent: true,
         message: otpResponse.message,
-        expires_in_minutes: otpResponse.expires_in_minutes
+        expires_in_minutes: otpResponse.expires_in_minutes,
       };
     } catch (error) {
       throw new BadRequestException("Failed to generate OTP", error);
@@ -88,7 +91,7 @@ export class UserService {
       const otpResponse = await this.otpService.verifyOtp({
         phone_number: phoneNumberString,
         otp: loginDto.otp.toString(),
-        purpose: OtpPurpose.REGISTRATION
+        purpose: OtpPurpose.REGISTRATION,
       });
 
       if (!otpResponse.success || !otpResponse.verified) {
@@ -218,7 +221,7 @@ export class UserService {
     try {
       const addresses = await this.userAddressRepository.find({
         where: { user: { id: user.id } },
-        order: { is_default: 'DESC', created_at: 'DESC' },
+        order: { is_default: "DESC", created_at: "DESC" },
       });
 
       return addresses;

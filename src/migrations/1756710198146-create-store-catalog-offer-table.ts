@@ -1,152 +1,373 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class CreateStoreCatalogOfferTable1756710198146 implements MigrationInterface {
-    name = 'CreateStoreCatalogOfferTable1756710198146'
+export class CreateStoreCatalogOfferTable1756710198146
+  implements MigrationInterface
+{
+  name = "CreateStoreCatalogOfferTable1756710198146";
 
-    public async up(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`CREATE TABLE "store_timings" ("id" SERIAL NOT NULL, "type" character varying(50) NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, CONSTRAINT "PK_cb3d577f21e95b082fd8307756f" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "store_close_timings" ("id" SERIAL NOT NULL, "close_start_datetime" TIMESTAMP NOT NULL, "close_end_datetime" TIMESTAMP NOT NULL, "reason" character varying(100), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, CONSTRAINT "PK_a6fd0a76596560290ac3a407844" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "offer_items" ("id" SERIAL NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "itemId" integer, CONSTRAINT "PK_0b2cba22a72c041326c7b633057" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "offer_qualifiers" ("id" SERIAL NOT NULL, "qualifier_type" character varying(50) NOT NULL, "qualifier_value" character varying(255) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, CONSTRAINT "PK_1ee8920e4ff9437cc8c12e8a45e" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "offer_benefits" ("id" SERIAL NOT NULL, "benefit_type" character varying(50) NOT NULL, "benefit_value" character varying(255) NOT NULL, "benefit_cap" character varying(255), "benefit_item_count" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "benefitItemId" integer, CONSTRAINT "PK_d8861e1e01aaa809b7d7349f6e5" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "offers" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "name" character varying(255), "description" text, "offer_code" character varying(50) NOT NULL, "banner_image_url" text, "valid_from" TIMESTAMP NOT NULL, "valid_to" TIMESTAMP NOT NULL, "is_auto_apply" boolean NOT NULL DEFAULT false, "is_additive" boolean NOT NULL DEFAULT false, "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_4c88e956195bba85977da21b8f4" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "offer_locations" ("id" SERIAL NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "locationId" integer, CONSTRAINT "PK_2612a2033c23d1e1e55d5900bfc" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "store_location" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "gps_lat" numeric(10,7) NOT NULL, "gps_lng" numeric(10,7) NOT NULL, "address_locality" character varying(255) NOT NULL, "address_street" character varying(255) NOT NULL, "address_city" character varying(100) NOT NULL, "address_area_code" character varying(10) NOT NULL, "address_state" character varying(5) NOT NULL, "delivery_radius_km" numeric(8,2), "delivery_radius_unit" character varying(10), "days_of_week" character varying(50), "schedule_holidays" json, "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_109d2fd491fde750eaffb318524" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "store_fulfillment" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "type" character varying(50) NOT NULL, "contact_phone" character varying(20), "contact_email" character varying(255), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_8c5bcb812220db489cab04e8dd5" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "store_configs" ("id" SERIAL NOT NULL, "min_order_value" numeric(10,2), "serviceability_type" character varying(50), "serviceability_value" character varying(50), "serviceability_unit" character varying(10), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_d5df95cbc1e9acb86915c8e28e0" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "category_timings" ("id" SERIAL NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "categoryId" integer, CONSTRAINT "PK_fbe3a1c109501d6741d8228910d" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "category_configs" ("id" SERIAL NOT NULL, "min_selections" integer NOT NULL, "max_selections" integer NOT NULL, "input_type" character varying(50) NOT NULL, "sequence" integer NOT NULL, "is_mandatory" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "categoryId" integer, CONSTRAINT "PK_de54759cad4aa3165c1c437e338" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_categories" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "categoryId" integer, CONSTRAINT "PK_db3359595abacbe15cf2f89c07e" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_customization_groups" ("id" SERIAL NOT NULL, "min_selections" integer, "max_selections" integer, "sequence" integer, "is_mandatory" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "customizationGroupId" integer, CONSTRAINT "PK_ff9ac76db4d71d1085a488b30bb" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "customization_relationships" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "parentCustomizationId" integer, "childCustomizationGroupId" integer, CONSTRAINT "PK_5d0e6c2426d2d7ceb3be8d1eb46" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "variant_groups" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "name" character varying(255) NOT NULL, "description" text, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_5d1f7a1a014554a48d20ae4d489" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "store" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "bpp_id" character varying(255) NOT NULL, "bpp_uri" text NOT NULL, "name" character varying(255) NOT NULL, "description" text, "logo_url" text, "fssai_license_no" character varying(50), "ttl" character varying(10), "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_f3172007d4de5ae8e7692759d79" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_timings" ("id" SERIAL NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_c58214c9bc1097d360693a5df70" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_attributes" ("id" SERIAL NOT NULL, "attribute_code" character varying(100) NOT NULL, "attribute_name" character varying(255) NOT NULL, "attribute_value" text NOT NULL, "attribute_group" character varying(50) NOT NULL, "display_order" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_1f04d0cef03934743b1d54e4ae8" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_barcodes" ("id" SERIAL NOT NULL, "barcode_type" integer NOT NULL, "barcode_type_name" character varying(50) NOT NULL, "barcode_value" character varying(255) NOT NULL, "full_code" character varying(255) NOT NULL, "is_primary" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_2dec43308bdb7c84b4dd95fead8" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_prices" ("id" SERIAL NOT NULL, "currency" character varying(3) NOT NULL DEFAULT 'INR', "base_price" numeric(10,2) NOT NULL, "maximum_price" numeric(10,2), "minimum_price_range" numeric(10,2), "maximum_price_range" numeric(10,2), "default_selection_price" numeric(10,2), "default_selection_max_price" numeric(10,2), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_7168da11af9b5b4c4155c109011" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_quantities" ("id" SERIAL NOT NULL, "unit_type" character varying(20) NOT NULL DEFAULT 'unit', "unit_value" numeric(8,3) NOT NULL DEFAULT '1', "available_count" integer NOT NULL DEFAULT '0', "maximum_count" integer NOT NULL DEFAULT '99', "unitized_unit" character varying(20), "unitized_value" numeric(8,3), "measure_unit" character varying(20), "measure_value" numeric(8,3), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_72fb4e0ae97b061af75e7da9025" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "code" character varying(255), "name" character varying(255) NOT NULL, "short_desc" text, "long_desc" text, "symbol_url" text, "images" json, "type" character varying(50) NOT NULL, "is_related" boolean NOT NULL DEFAULT false, "is_recommended" boolean NOT NULL DEFAULT false, "is_returnable" boolean NOT NULL DEFAULT false, "is_cancellable" boolean NOT NULL DEFAULT false, "return_window" character varying(50), "seller_pickup_return" boolean NOT NULL DEFAULT false, "time_to_ship" character varying(50), "available_on_cod" boolean NOT NULL DEFAULT false, "consumer_care_details" text, "status" boolean NOT NULL DEFAULT true, "enable_timestamp" TIMESTAMP, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, "fulfillmentId" integer, "categoryId" integer, "parentItemId" integer, CONSTRAINT "PK_d3c0c71f23e7adcf952a1d13423" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`CREATE TABLE "item_variants" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "variantGroupId" integer, CONSTRAINT "PK_d5896ae5b95e6b60d50c6bbe61e" PRIMARY KEY ("id"))`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "parent_category_id" integer`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "type" character varying(50) NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "display_rank" integer`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "status" boolean NOT NULL DEFAULT true`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "created_at" TIMESTAMP NOT NULL DEFAULT now()`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "updated_at" TIMESTAMP NOT NULL DEFAULT now()`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "storeId" integer`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "reference_id"`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "reference_id" character varying(255) NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "store_timings" ADD CONSTRAINT "FK_d8c87af79a2cf16d67285fc3b71" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_timings" ADD CONSTRAINT "FK_4e3d3d1181b8634712ffe28e312" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_close_timings" ADD CONSTRAINT "FK_a519fe761b28ebd6b4a933cd080" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_close_timings" ADD CONSTRAINT "FK_29e4782eb81d436375b89827aa0" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_items" ADD CONSTRAINT "FK_f17dee763de46516e73e79665b0" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_items" ADD CONSTRAINT "FK_9081be5b2163dc51beef0596690" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_qualifiers" ADD CONSTRAINT "FK_9068ee0ccc95db792a61d354ff9" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_benefits" ADD CONSTRAINT "FK_276932e202be35cb99c7742bbe6" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_benefits" ADD CONSTRAINT "FK_ce5f88375f31da5e064474a6dbd" FOREIGN KEY ("benefitItemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offers" ADD CONSTRAINT "FK_22f5c1e69d5ba4dc2ebe4d268d1" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_locations" ADD CONSTRAINT "FK_88f6f7a193c980784b5ff080037" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "offer_locations" ADD CONSTRAINT "FK_d8b7260ea4382f85bc21a1b226e" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_location" ADD CONSTRAINT "FK_427b6a250c65117c77d5aff8f56" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_fulfillment" ADD CONSTRAINT "FK_757eddfec22f1606a82445e017c" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "store_configs" ADD CONSTRAINT "FK_0491e49f35fe4837d09117518c4" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "category_timings" ADD CONSTRAINT "FK_b24609484cdc467ac7f8db1f286" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "category_configs" ADD CONSTRAINT "FK_c109b5e5a8ed8670a0ff55d365c" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_categories" ADD CONSTRAINT "FK_dfdbafcb9120d1f212f8786a405" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_categories" ADD CONSTRAINT "FK_165a4936ab2a8e771efa826a53b" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_customization_groups" ADD CONSTRAINT "FK_8c4e1b99dcbfa086045b79a9c83" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_customization_groups" ADD CONSTRAINT "FK_2ed09bba304d335cd97baf28425" FOREIGN KEY ("customizationGroupId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "customization_relationships" ADD CONSTRAINT "FK_c942012fb5e63848b10617c82ef" FOREIGN KEY ("parentCustomizationId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "customization_relationships" ADD CONSTRAINT "FK_a5fe2edac7ec2b7f2337c09e484" FOREIGN KEY ("childCustomizationGroupId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "category" ADD CONSTRAINT "FK_52d64a21bc11cd2b4bbabcc5d4b" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "variant_groups" ADD CONSTRAINT "FK_47b548027b7f90778629a3aa044" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_timings" ADD CONSTRAINT "FK_b6282b7f0a0012c221314cfe8f2" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_attributes" ADD CONSTRAINT "FK_d2f52db45e62d7dec5e7a9de233" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_barcodes" ADD CONSTRAINT "FK_2af35d6d7cdd3d08e3178eb1282" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_prices" ADD CONSTRAINT "FK_f29a9596a9f540ac34880b21441" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_quantities" ADD CONSTRAINT "FK_e56adc59aaf65352ae37f807d16" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item" ADD CONSTRAINT "FK_304562e55f7e1e9f08920cb0a11" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item" ADD CONSTRAINT "FK_e97b6ed5f00c41c3ef3b7f22685" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item" ADD CONSTRAINT "FK_7e113f28b580cd952beaddff2dc" FOREIGN KEY ("fulfillmentId") REFERENCES "store_fulfillment"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item" ADD CONSTRAINT "FK_c0c8f47a702c974a77812169bc2" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item" ADD CONSTRAINT "FK_48d6fff4486b318e19709c3ba25" FOREIGN KEY ("parentItemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_variants" ADD CONSTRAINT "FK_de6d658692e25d4ae972926c5a7" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-        await queryRunner.query(`ALTER TABLE "item_variants" ADD CONSTRAINT "FK_3022190bee56cd988810d18f447" FOREIGN KEY ("variantGroupId") REFERENCES "variant_groups"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
-    }
+  public async up(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `CREATE TABLE "store_timings" ("id" SERIAL NOT NULL, "type" character varying(50) NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, CONSTRAINT "PK_cb3d577f21e95b082fd8307756f" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "store_close_timings" ("id" SERIAL NOT NULL, "close_start_datetime" TIMESTAMP NOT NULL, "close_end_datetime" TIMESTAMP NOT NULL, "reason" character varying(100), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, CONSTRAINT "PK_a6fd0a76596560290ac3a407844" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "offer_items" ("id" SERIAL NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "itemId" integer, CONSTRAINT "PK_0b2cba22a72c041326c7b633057" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "offer_qualifiers" ("id" SERIAL NOT NULL, "qualifier_type" character varying(50) NOT NULL, "qualifier_value" character varying(255) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, CONSTRAINT "PK_1ee8920e4ff9437cc8c12e8a45e" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "offer_benefits" ("id" SERIAL NOT NULL, "benefit_type" character varying(50) NOT NULL, "benefit_value" character varying(255) NOT NULL, "benefit_cap" character varying(255), "benefit_item_count" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "benefitItemId" integer, CONSTRAINT "PK_d8861e1e01aaa809b7d7349f6e5" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "offers" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "name" character varying(255), "description" text, "offer_code" character varying(50) NOT NULL, "banner_image_url" text, "valid_from" TIMESTAMP NOT NULL, "valid_to" TIMESTAMP NOT NULL, "is_auto_apply" boolean NOT NULL DEFAULT false, "is_additive" boolean NOT NULL DEFAULT false, "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_4c88e956195bba85977da21b8f4" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "offer_locations" ("id" SERIAL NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "offerId" integer, "locationId" integer, CONSTRAINT "PK_2612a2033c23d1e1e55d5900bfc" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "store_location" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "gps_lat" numeric(10,7) NOT NULL, "gps_lng" numeric(10,7) NOT NULL, "address_locality" character varying(255) NOT NULL, "address_street" character varying(255) NOT NULL, "address_city" character varying(100) NOT NULL, "address_area_code" character varying(10) NOT NULL, "address_state" character varying(5) NOT NULL, "delivery_radius_km" numeric(8,2), "delivery_radius_unit" character varying(10), "days_of_week" character varying(50), "schedule_holidays" json, "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_109d2fd491fde750eaffb318524" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "store_fulfillment" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "type" character varying(50) NOT NULL, "contact_phone" character varying(20), "contact_email" character varying(255), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_8c5bcb812220db489cab04e8dd5" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "store_configs" ("id" SERIAL NOT NULL, "min_order_value" numeric(10,2), "serviceability_type" character varying(50), "serviceability_value" character varying(50), "serviceability_unit" character varying(10), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_d5df95cbc1e9acb86915c8e28e0" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "category_timings" ("id" SERIAL NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "categoryId" integer, CONSTRAINT "PK_fbe3a1c109501d6741d8228910d" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "category_configs" ("id" SERIAL NOT NULL, "min_selections" integer NOT NULL, "max_selections" integer NOT NULL, "input_type" character varying(50) NOT NULL, "sequence" integer NOT NULL, "is_mandatory" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "categoryId" integer, CONSTRAINT "PK_de54759cad4aa3165c1c437e338" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_categories" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "categoryId" integer, CONSTRAINT "PK_db3359595abacbe15cf2f89c07e" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_customization_groups" ("id" SERIAL NOT NULL, "min_selections" integer, "max_selections" integer, "sequence" integer, "is_mandatory" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "customizationGroupId" integer, CONSTRAINT "PK_ff9ac76db4d71d1085a488b30bb" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "customization_relationships" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "parentCustomizationId" integer, "childCustomizationGroupId" integer, CONSTRAINT "PK_5d0e6c2426d2d7ceb3be8d1eb46" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "variant_groups" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "name" character varying(255) NOT NULL, "description" text, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, CONSTRAINT "PK_5d1f7a1a014554a48d20ae4d489" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "store" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "bpp_id" character varying(255) NOT NULL, "bpp_uri" text NOT NULL, "name" character varying(255) NOT NULL, "description" text, "logo_url" text, "fssai_license_no" character varying(50), "ttl" character varying(10), "status" boolean NOT NULL DEFAULT true, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), CONSTRAINT "PK_f3172007d4de5ae8e7692759d79" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_timings" ("id" SERIAL NOT NULL, "day_from" integer NOT NULL, "day_to" integer NOT NULL, "time_from" character varying(4) NOT NULL, "time_to" character varying(4) NOT NULL, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_c58214c9bc1097d360693a5df70" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_attributes" ("id" SERIAL NOT NULL, "attribute_code" character varying(100) NOT NULL, "attribute_name" character varying(255) NOT NULL, "attribute_value" text NOT NULL, "attribute_group" character varying(50) NOT NULL, "display_order" integer, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_1f04d0cef03934743b1d54e4ae8" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_barcodes" ("id" SERIAL NOT NULL, "barcode_type" integer NOT NULL, "barcode_type_name" character varying(50) NOT NULL, "barcode_value" character varying(255) NOT NULL, "full_code" character varying(255) NOT NULL, "is_primary" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_2dec43308bdb7c84b4dd95fead8" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_prices" ("id" SERIAL NOT NULL, "currency" character varying(3) NOT NULL DEFAULT 'INR', "base_price" numeric(10,2) NOT NULL, "maximum_price" numeric(10,2), "minimum_price_range" numeric(10,2), "maximum_price_range" numeric(10,2), "default_selection_price" numeric(10,2), "default_selection_max_price" numeric(10,2), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_7168da11af9b5b4c4155c109011" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_quantities" ("id" SERIAL NOT NULL, "unit_type" character varying(20) NOT NULL DEFAULT 'unit', "unit_value" numeric(8,3) NOT NULL DEFAULT '1', "available_count" integer NOT NULL DEFAULT '0', "maximum_count" integer NOT NULL DEFAULT '99', "unitized_unit" character varying(20), "unitized_value" numeric(8,3), "measure_unit" character varying(20), "measure_value" numeric(8,3), "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, CONSTRAINT "PK_72fb4e0ae97b061af75e7da9025" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item" ("id" SERIAL NOT NULL, "reference_id" character varying(255) NOT NULL, "code" character varying(255), "name" character varying(255) NOT NULL, "short_desc" text, "long_desc" text, "symbol_url" text, "images" json, "type" character varying(50) NOT NULL, "is_related" boolean NOT NULL DEFAULT false, "is_recommended" boolean NOT NULL DEFAULT false, "is_returnable" boolean NOT NULL DEFAULT false, "is_cancellable" boolean NOT NULL DEFAULT false, "return_window" character varying(50), "seller_pickup_return" boolean NOT NULL DEFAULT false, "time_to_ship" character varying(50), "available_on_cod" boolean NOT NULL DEFAULT false, "consumer_care_details" text, "status" boolean NOT NULL DEFAULT true, "enable_timestamp" TIMESTAMP, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "updated_at" TIMESTAMP NOT NULL DEFAULT now(), "storeId" integer, "locationId" integer, "fulfillmentId" integer, "categoryId" integer, "parentItemId" integer, CONSTRAINT "PK_d3c0c71f23e7adcf952a1d13423" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `CREATE TABLE "item_variants" ("id" SERIAL NOT NULL, "is_default" boolean NOT NULL DEFAULT false, "created_at" TIMESTAMP NOT NULL DEFAULT now(), "itemId" integer, "variantGroupId" integer, CONSTRAINT "PK_d5896ae5b95e6b60d50c6bbe61e" PRIMARY KEY ("id"))`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "parent_category_id" integer`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "type" character varying(50) NOT NULL`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "display_rank" integer`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "status" boolean NOT NULL DEFAULT true`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "created_at" TIMESTAMP NOT NULL DEFAULT now()`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "updated_at" TIMESTAMP NOT NULL DEFAULT now()`,
+    );
+    await queryRunner.query(`ALTER TABLE "category" ADD "storeId" integer`);
+    await queryRunner.query(
+      `ALTER TABLE "category" DROP COLUMN "reference_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "reference_id" character varying(255) NOT NULL`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_timings" ADD CONSTRAINT "FK_d8c87af79a2cf16d67285fc3b71" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_timings" ADD CONSTRAINT "FK_4e3d3d1181b8634712ffe28e312" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_close_timings" ADD CONSTRAINT "FK_a519fe761b28ebd6b4a933cd080" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_close_timings" ADD CONSTRAINT "FK_29e4782eb81d436375b89827aa0" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_items" ADD CONSTRAINT "FK_f17dee763de46516e73e79665b0" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_items" ADD CONSTRAINT "FK_9081be5b2163dc51beef0596690" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_qualifiers" ADD CONSTRAINT "FK_9068ee0ccc95db792a61d354ff9" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_benefits" ADD CONSTRAINT "FK_276932e202be35cb99c7742bbe6" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_benefits" ADD CONSTRAINT "FK_ce5f88375f31da5e064474a6dbd" FOREIGN KEY ("benefitItemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offers" ADD CONSTRAINT "FK_22f5c1e69d5ba4dc2ebe4d268d1" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_locations" ADD CONSTRAINT "FK_88f6f7a193c980784b5ff080037" FOREIGN KEY ("offerId") REFERENCES "offers"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_locations" ADD CONSTRAINT "FK_d8b7260ea4382f85bc21a1b226e" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_location" ADD CONSTRAINT "FK_427b6a250c65117c77d5aff8f56" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_fulfillment" ADD CONSTRAINT "FK_757eddfec22f1606a82445e017c" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_configs" ADD CONSTRAINT "FK_0491e49f35fe4837d09117518c4" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category_timings" ADD CONSTRAINT "FK_b24609484cdc467ac7f8db1f286" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category_configs" ADD CONSTRAINT "FK_c109b5e5a8ed8670a0ff55d365c" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_categories" ADD CONSTRAINT "FK_dfdbafcb9120d1f212f8786a405" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_categories" ADD CONSTRAINT "FK_165a4936ab2a8e771efa826a53b" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_customization_groups" ADD CONSTRAINT "FK_8c4e1b99dcbfa086045b79a9c83" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_customization_groups" ADD CONSTRAINT "FK_2ed09bba304d335cd97baf28425" FOREIGN KEY ("customizationGroupId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "customization_relationships" ADD CONSTRAINT "FK_c942012fb5e63848b10617c82ef" FOREIGN KEY ("parentCustomizationId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "customization_relationships" ADD CONSTRAINT "FK_a5fe2edac7ec2b7f2337c09e484" FOREIGN KEY ("childCustomizationGroupId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD CONSTRAINT "FK_52d64a21bc11cd2b4bbabcc5d4b" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "variant_groups" ADD CONSTRAINT "FK_47b548027b7f90778629a3aa044" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_timings" ADD CONSTRAINT "FK_b6282b7f0a0012c221314cfe8f2" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_attributes" ADD CONSTRAINT "FK_d2f52db45e62d7dec5e7a9de233" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_barcodes" ADD CONSTRAINT "FK_2af35d6d7cdd3d08e3178eb1282" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_prices" ADD CONSTRAINT "FK_f29a9596a9f540ac34880b21441" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_quantities" ADD CONSTRAINT "FK_e56adc59aaf65352ae37f807d16" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" ADD CONSTRAINT "FK_304562e55f7e1e9f08920cb0a11" FOREIGN KEY ("storeId") REFERENCES "store"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" ADD CONSTRAINT "FK_e97b6ed5f00c41c3ef3b7f22685" FOREIGN KEY ("locationId") REFERENCES "store_location"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" ADD CONSTRAINT "FK_7e113f28b580cd952beaddff2dc" FOREIGN KEY ("fulfillmentId") REFERENCES "store_fulfillment"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" ADD CONSTRAINT "FK_c0c8f47a702c974a77812169bc2" FOREIGN KEY ("categoryId") REFERENCES "category"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" ADD CONSTRAINT "FK_48d6fff4486b318e19709c3ba25" FOREIGN KEY ("parentItemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_variants" ADD CONSTRAINT "FK_de6d658692e25d4ae972926c5a7" FOREIGN KEY ("itemId") REFERENCES "item"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_variants" ADD CONSTRAINT "FK_3022190bee56cd988810d18f447" FOREIGN KEY ("variantGroupId") REFERENCES "variant_groups"("id") ON DELETE CASCADE ON UPDATE NO ACTION`,
+    );
+  }
 
-    public async down(queryRunner: QueryRunner): Promise<void> {
-        await queryRunner.query(`ALTER TABLE "item_variants" DROP CONSTRAINT "FK_3022190bee56cd988810d18f447"`);
-        await queryRunner.query(`ALTER TABLE "item_variants" DROP CONSTRAINT "FK_de6d658692e25d4ae972926c5a7"`);
-        await queryRunner.query(`ALTER TABLE "item" DROP CONSTRAINT "FK_48d6fff4486b318e19709c3ba25"`);
-        await queryRunner.query(`ALTER TABLE "item" DROP CONSTRAINT "FK_c0c8f47a702c974a77812169bc2"`);
-        await queryRunner.query(`ALTER TABLE "item" DROP CONSTRAINT "FK_7e113f28b580cd952beaddff2dc"`);
-        await queryRunner.query(`ALTER TABLE "item" DROP CONSTRAINT "FK_e97b6ed5f00c41c3ef3b7f22685"`);
-        await queryRunner.query(`ALTER TABLE "item" DROP CONSTRAINT "FK_304562e55f7e1e9f08920cb0a11"`);
-        await queryRunner.query(`ALTER TABLE "item_quantities" DROP CONSTRAINT "FK_e56adc59aaf65352ae37f807d16"`);
-        await queryRunner.query(`ALTER TABLE "item_prices" DROP CONSTRAINT "FK_f29a9596a9f540ac34880b21441"`);
-        await queryRunner.query(`ALTER TABLE "item_barcodes" DROP CONSTRAINT "FK_2af35d6d7cdd3d08e3178eb1282"`);
-        await queryRunner.query(`ALTER TABLE "item_attributes" DROP CONSTRAINT "FK_d2f52db45e62d7dec5e7a9de233"`);
-        await queryRunner.query(`ALTER TABLE "item_timings" DROP CONSTRAINT "FK_b6282b7f0a0012c221314cfe8f2"`);
-        await queryRunner.query(`ALTER TABLE "variant_groups" DROP CONSTRAINT "FK_47b548027b7f90778629a3aa044"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP CONSTRAINT "FK_52d64a21bc11cd2b4bbabcc5d4b"`);
-        await queryRunner.query(`ALTER TABLE "customization_relationships" DROP CONSTRAINT "FK_a5fe2edac7ec2b7f2337c09e484"`);
-        await queryRunner.query(`ALTER TABLE "customization_relationships" DROP CONSTRAINT "FK_c942012fb5e63848b10617c82ef"`);
-        await queryRunner.query(`ALTER TABLE "item_customization_groups" DROP CONSTRAINT "FK_2ed09bba304d335cd97baf28425"`);
-        await queryRunner.query(`ALTER TABLE "item_customization_groups" DROP CONSTRAINT "FK_8c4e1b99dcbfa086045b79a9c83"`);
-        await queryRunner.query(`ALTER TABLE "item_categories" DROP CONSTRAINT "FK_165a4936ab2a8e771efa826a53b"`);
-        await queryRunner.query(`ALTER TABLE "item_categories" DROP CONSTRAINT "FK_dfdbafcb9120d1f212f8786a405"`);
-        await queryRunner.query(`ALTER TABLE "category_configs" DROP CONSTRAINT "FK_c109b5e5a8ed8670a0ff55d365c"`);
-        await queryRunner.query(`ALTER TABLE "category_timings" DROP CONSTRAINT "FK_b24609484cdc467ac7f8db1f286"`);
-        await queryRunner.query(`ALTER TABLE "store_configs" DROP CONSTRAINT "FK_0491e49f35fe4837d09117518c4"`);
-        await queryRunner.query(`ALTER TABLE "store_fulfillment" DROP CONSTRAINT "FK_757eddfec22f1606a82445e017c"`);
-        await queryRunner.query(`ALTER TABLE "store_location" DROP CONSTRAINT "FK_427b6a250c65117c77d5aff8f56"`);
-        await queryRunner.query(`ALTER TABLE "offer_locations" DROP CONSTRAINT "FK_d8b7260ea4382f85bc21a1b226e"`);
-        await queryRunner.query(`ALTER TABLE "offer_locations" DROP CONSTRAINT "FK_88f6f7a193c980784b5ff080037"`);
-        await queryRunner.query(`ALTER TABLE "offers" DROP CONSTRAINT "FK_22f5c1e69d5ba4dc2ebe4d268d1"`);
-        await queryRunner.query(`ALTER TABLE "offer_benefits" DROP CONSTRAINT "FK_ce5f88375f31da5e064474a6dbd"`);
-        await queryRunner.query(`ALTER TABLE "offer_benefits" DROP CONSTRAINT "FK_276932e202be35cb99c7742bbe6"`);
-        await queryRunner.query(`ALTER TABLE "offer_qualifiers" DROP CONSTRAINT "FK_9068ee0ccc95db792a61d354ff9"`);
-        await queryRunner.query(`ALTER TABLE "offer_items" DROP CONSTRAINT "FK_9081be5b2163dc51beef0596690"`);
-        await queryRunner.query(`ALTER TABLE "offer_items" DROP CONSTRAINT "FK_f17dee763de46516e73e79665b0"`);
-        await queryRunner.query(`ALTER TABLE "store_close_timings" DROP CONSTRAINT "FK_29e4782eb81d436375b89827aa0"`);
-        await queryRunner.query(`ALTER TABLE "store_close_timings" DROP CONSTRAINT "FK_a519fe761b28ebd6b4a933cd080"`);
-        await queryRunner.query(`ALTER TABLE "store_timings" DROP CONSTRAINT "FK_4e3d3d1181b8634712ffe28e312"`);
-        await queryRunner.query(`ALTER TABLE "store_timings" DROP CONSTRAINT "FK_d8c87af79a2cf16d67285fc3b71"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "reference_id"`);
-        await queryRunner.query(`ALTER TABLE "category" ADD "reference_id" integer NOT NULL`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "storeId"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "updated_at"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "created_at"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "status"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "display_rank"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "type"`);
-        await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "parent_category_id"`);
-        await queryRunner.query(`DROP TABLE "item_variants"`);
-        await queryRunner.query(`DROP TABLE "item"`);
-        await queryRunner.query(`DROP TABLE "item_quantities"`);
-        await queryRunner.query(`DROP TABLE "item_prices"`);
-        await queryRunner.query(`DROP TABLE "item_barcodes"`);
-        await queryRunner.query(`DROP TABLE "item_attributes"`);
-        await queryRunner.query(`DROP TABLE "item_timings"`);
-        await queryRunner.query(`DROP TABLE "store"`);
-        await queryRunner.query(`DROP TABLE "variant_groups"`);
-        await queryRunner.query(`DROP TABLE "customization_relationships"`);
-        await queryRunner.query(`DROP TABLE "item_customization_groups"`);
-        await queryRunner.query(`DROP TABLE "item_categories"`);
-        await queryRunner.query(`DROP TABLE "category_configs"`);
-        await queryRunner.query(`DROP TABLE "category_timings"`);
-        await queryRunner.query(`DROP TABLE "store_configs"`);
-        await queryRunner.query(`DROP TABLE "store_fulfillment"`);
-        await queryRunner.query(`DROP TABLE "store_location"`);
-        await queryRunner.query(`DROP TABLE "offer_locations"`);
-        await queryRunner.query(`DROP TABLE "offers"`);
-        await queryRunner.query(`DROP TABLE "offer_benefits"`);
-        await queryRunner.query(`DROP TABLE "offer_qualifiers"`);
-        await queryRunner.query(`DROP TABLE "offer_items"`);
-        await queryRunner.query(`DROP TABLE "store_close_timings"`);
-        await queryRunner.query(`DROP TABLE "store_timings"`);
-    }
-
+  public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(
+      `ALTER TABLE "item_variants" DROP CONSTRAINT "FK_3022190bee56cd988810d18f447"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_variants" DROP CONSTRAINT "FK_de6d658692e25d4ae972926c5a7"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" DROP CONSTRAINT "FK_48d6fff4486b318e19709c3ba25"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" DROP CONSTRAINT "FK_c0c8f47a702c974a77812169bc2"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" DROP CONSTRAINT "FK_7e113f28b580cd952beaddff2dc"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" DROP CONSTRAINT "FK_e97b6ed5f00c41c3ef3b7f22685"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item" DROP CONSTRAINT "FK_304562e55f7e1e9f08920cb0a11"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_quantities" DROP CONSTRAINT "FK_e56adc59aaf65352ae37f807d16"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_prices" DROP CONSTRAINT "FK_f29a9596a9f540ac34880b21441"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_barcodes" DROP CONSTRAINT "FK_2af35d6d7cdd3d08e3178eb1282"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_attributes" DROP CONSTRAINT "FK_d2f52db45e62d7dec5e7a9de233"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_timings" DROP CONSTRAINT "FK_b6282b7f0a0012c221314cfe8f2"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "variant_groups" DROP CONSTRAINT "FK_47b548027b7f90778629a3aa044"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" DROP CONSTRAINT "FK_52d64a21bc11cd2b4bbabcc5d4b"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "customization_relationships" DROP CONSTRAINT "FK_a5fe2edac7ec2b7f2337c09e484"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "customization_relationships" DROP CONSTRAINT "FK_c942012fb5e63848b10617c82ef"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_customization_groups" DROP CONSTRAINT "FK_2ed09bba304d335cd97baf28425"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_customization_groups" DROP CONSTRAINT "FK_8c4e1b99dcbfa086045b79a9c83"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_categories" DROP CONSTRAINT "FK_165a4936ab2a8e771efa826a53b"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "item_categories" DROP CONSTRAINT "FK_dfdbafcb9120d1f212f8786a405"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category_configs" DROP CONSTRAINT "FK_c109b5e5a8ed8670a0ff55d365c"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category_timings" DROP CONSTRAINT "FK_b24609484cdc467ac7f8db1f286"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_configs" DROP CONSTRAINT "FK_0491e49f35fe4837d09117518c4"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_fulfillment" DROP CONSTRAINT "FK_757eddfec22f1606a82445e017c"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_location" DROP CONSTRAINT "FK_427b6a250c65117c77d5aff8f56"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_locations" DROP CONSTRAINT "FK_d8b7260ea4382f85bc21a1b226e"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_locations" DROP CONSTRAINT "FK_88f6f7a193c980784b5ff080037"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offers" DROP CONSTRAINT "FK_22f5c1e69d5ba4dc2ebe4d268d1"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_benefits" DROP CONSTRAINT "FK_ce5f88375f31da5e064474a6dbd"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_benefits" DROP CONSTRAINT "FK_276932e202be35cb99c7742bbe6"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_qualifiers" DROP CONSTRAINT "FK_9068ee0ccc95db792a61d354ff9"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_items" DROP CONSTRAINT "FK_9081be5b2163dc51beef0596690"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "offer_items" DROP CONSTRAINT "FK_f17dee763de46516e73e79665b0"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_close_timings" DROP CONSTRAINT "FK_29e4782eb81d436375b89827aa0"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_close_timings" DROP CONSTRAINT "FK_a519fe761b28ebd6b4a933cd080"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_timings" DROP CONSTRAINT "FK_4e3d3d1181b8634712ffe28e312"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "store_timings" DROP CONSTRAINT "FK_d8c87af79a2cf16d67285fc3b71"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" DROP COLUMN "reference_id"`,
+    );
+    await queryRunner.query(
+      `ALTER TABLE "category" ADD "reference_id" integer NOT NULL`,
+    );
+    await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "storeId"`);
+    await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "updated_at"`);
+    await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "created_at"`);
+    await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "status"`);
+    await queryRunner.query(
+      `ALTER TABLE "category" DROP COLUMN "display_rank"`,
+    );
+    await queryRunner.query(`ALTER TABLE "category" DROP COLUMN "type"`);
+    await queryRunner.query(
+      `ALTER TABLE "category" DROP COLUMN "parent_category_id"`,
+    );
+    await queryRunner.query(`DROP TABLE "item_variants"`);
+    await queryRunner.query(`DROP TABLE "item"`);
+    await queryRunner.query(`DROP TABLE "item_quantities"`);
+    await queryRunner.query(`DROP TABLE "item_prices"`);
+    await queryRunner.query(`DROP TABLE "item_barcodes"`);
+    await queryRunner.query(`DROP TABLE "item_attributes"`);
+    await queryRunner.query(`DROP TABLE "item_timings"`);
+    await queryRunner.query(`DROP TABLE "store"`);
+    await queryRunner.query(`DROP TABLE "variant_groups"`);
+    await queryRunner.query(`DROP TABLE "customization_relationships"`);
+    await queryRunner.query(`DROP TABLE "item_customization_groups"`);
+    await queryRunner.query(`DROP TABLE "item_categories"`);
+    await queryRunner.query(`DROP TABLE "category_configs"`);
+    await queryRunner.query(`DROP TABLE "category_timings"`);
+    await queryRunner.query(`DROP TABLE "store_configs"`);
+    await queryRunner.query(`DROP TABLE "store_fulfillment"`);
+    await queryRunner.query(`DROP TABLE "store_location"`);
+    await queryRunner.query(`DROP TABLE "offer_locations"`);
+    await queryRunner.query(`DROP TABLE "offers"`);
+    await queryRunner.query(`DROP TABLE "offer_benefits"`);
+    await queryRunner.query(`DROP TABLE "offer_qualifiers"`);
+    await queryRunner.query(`DROP TABLE "offer_items"`);
+    await queryRunner.query(`DROP TABLE "store_close_timings"`);
+    await queryRunner.query(`DROP TABLE "store_timings"`);
+  }
 }

@@ -1,8 +1,8 @@
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { User } from '../../user/entities/user.entity';
-import { UserAddress } from '../../user/entities/user-address.entity';
+import { Injectable } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { User } from "../../user/entities/user.entity";
+import { UserAddress } from "../../user/entities/user-address.entity";
 
 @Injectable()
 export class LocationService {
@@ -21,15 +21,23 @@ export class LocationService {
    * @param lng2 Longitude of second point
    * @returns Distance in kilometers
    */
-  calculateDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  calculateDistance(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
     const R = 6371; // Earth's radius in kilometers
     const dLat = this.toRadians(lat2 - lat1);
     const dLng = this.toRadians(lng2 - lng1);
-    
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-              Math.cos(this.toRadians(lat1)) * Math.cos(this.toRadians(lat2)) *
-              Math.sin(dLng / 2) * Math.sin(dLng / 2);
-    
+
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(this.toRadians(lat1)) *
+        Math.cos(this.toRadians(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
@@ -45,39 +53,43 @@ export class LocationService {
    * Get user's location from JWT token
    * Priority: Default address > Most recent address > Device location
    */
-  async getUserLocation(userId: number, deviceLat?: number, deviceLng?: number): Promise<{
+  async getUserLocation(
+    userId: number,
+    deviceLat?: number,
+    deviceLng?: number,
+  ): Promise<{
     lat: number;
     lng: number;
-    source: 'default_address' | 'recent_address' | 'device_location';
+    source: "default_address" | "recent_address" | "device_location";
     address?: UserAddress;
   }> {
     // Try to get default address first
     const defaultAddress = await this.userAddressRepository.findOne({
       where: { user: { id: userId }, is_default: true },
-      order: { created_at: 'DESC' }
+      order: { created_at: "DESC" },
     });
 
     if (defaultAddress) {
       return {
         lat: defaultAddress.latitude,
         lng: defaultAddress.longitude,
-        source: 'default_address',
-        address: defaultAddress
+        source: "default_address",
+        address: defaultAddress,
       };
     }
 
     // Try to get most recent address
     const recentAddress = await this.userAddressRepository.findOne({
       where: { user: { id: userId } },
-      order: { created_at: 'DESC' }
+      order: { created_at: "DESC" },
     });
 
     if (recentAddress) {
       return {
         lat: recentAddress.latitude,
         lng: recentAddress.longitude,
-        source: 'recent_address',
-        address: recentAddress
+        source: "recent_address",
+        address: recentAddress,
       };
     }
 
@@ -86,22 +98,26 @@ export class LocationService {
       return {
         lat: deviceLat,
         lng: deviceLng,
-        source: 'device_location'
+        source: "device_location",
       };
     }
 
     // Default to Madurai if no location available
     return {
-      lat: 9.9352300,
-      lng: 78.1304040,
-      source: 'device_location'
+      lat: 9.93523,
+      lng: 78.130404,
+      source: "device_location",
     };
   }
 
   /**
    * Build Haversine formula SQL query for distance calculation
    */
-  buildDistanceQuery(userLat: number, userLng: number, radiusKm: number = 10): string {
+  buildDistanceQuery(
+    userLat: number,
+    userLng: number,
+    radiusKm: number = 10,
+  ): string {
     return `
       (6371 * acos(
         cos(radians(${userLat})) * 
@@ -116,7 +132,11 @@ export class LocationService {
   /**
    * Build distance filter for WHERE clause
    */
-  buildDistanceFilter(userLat: number, userLng: number, radiusKm: number = 10): string {
+  buildDistanceFilter(
+    userLat: number,
+    userLng: number,
+    radiusKm: number = 10,
+  ): string {
     return `
       (6371 * acos(
         cos(radians(${userLat})) * 

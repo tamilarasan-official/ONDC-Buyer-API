@@ -1,22 +1,30 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsOptional, IsString, IsNumber, Min, Max, IsObject, ValidateNested } from 'class-validator';
-import { Type } from 'class-transformer';
+import { ApiProperty } from "@nestjs/swagger";
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  Min,
+  Max,
+  IsObject,
+  ValidateNested,
+} from "class-validator";
+import { Type } from "class-transformer";
 
 export class SearchRequestDto {
   @ApiProperty({
-    description: 'Search query term (restaurant name, dish name, category)',
-    example: 'pizza',
-    required: false
+    description: "Search query term (restaurant name, dish name, category)",
+    example: "pizza",
+    required: false,
   })
   @IsOptional()
   @IsString()
   query?: string;
 
   @ApiProperty({
-    description: 'Device latitude for location-based filtering',
-    example: 9.9352300,
+    description: "Device latitude for location-based filtering",
+    example: 9.93523,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -24,10 +32,10 @@ export class SearchRequestDto {
   lat?: number;
 
   @ApiProperty({
-    description: 'Device longitude for location-based filtering',
-    example: 78.1304040,
+    description: "Device longitude for location-based filtering",
+    example: 78.130404,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -35,12 +43,12 @@ export class SearchRequestDto {
   lng?: number;
 
   @ApiProperty({
-    description: 'Search radius in kilometers (default: 10km)',
+    description: "Search radius in kilometers (default: 10km)",
     example: 5,
     required: false,
-    type: 'number',
+    type: "number",
     minimum: 1,
-    maximum: 50
+    maximum: 50,
   })
   @IsOptional()
   @Type(() => Number)
@@ -50,10 +58,10 @@ export class SearchRequestDto {
   radius?: number;
 
   @ApiProperty({
-    description: 'Category ID to filter by specific category',
+    description: "Category ID to filter by specific category",
     example: 1,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -61,10 +69,10 @@ export class SearchRequestDto {
   category_id?: number;
 
   @ApiProperty({
-    description: 'Store ID to filter by specific restaurant',
+    description: "Store ID to filter by specific restaurant",
     example: 1,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -72,50 +80,64 @@ export class SearchRequestDto {
   store_id?: number;
 
   @ApiProperty({
-    description: 'Search type: restaurant, item, categories, or all',
-    example: 'all',
+    description: "Search type: restaurant, item, categories, or all",
+    example: "all",
     required: false,
-    enum: ['restaurant', 'item', 'categories', 'all']
+    enum: ["restaurant", "item", "categories", "all"],
   })
   @IsOptional()
   @IsString()
-  type?: 'restaurant' | 'item' | 'categories' | 'all';
+  type?: "restaurant" | "item" | "categories" | "all";
 
   @ApiProperty({
-    description: 'Sort by: distance, rating, price, name, best_sellers, highly_ordered',
-    example: 'distance',
+    description:
+      "Sort by: distance, rating, price, name, best_sellers, highly_ordered",
+    example: "distance",
     required: false,
-    enum: ['distance', 'rating', 'price', 'name', 'best_sellers', 'highly_ordered']
+    enum: [
+      "distance",
+      "rating",
+      "price",
+      "name",
+      "best_sellers",
+      "highly_ordered",
+    ],
   })
   @IsOptional()
   @IsString()
-  sort_by?: 'distance' | 'rating' | 'price' | 'name' | 'best_sellers' | 'highly_ordered';
+  sort_by?:
+    | "distance"
+    | "rating"
+    | "price"
+    | "name"
+    | "best_sellers"
+    | "highly_ordered";
 
   @ApiProperty({
-    description: 'Sort order: asc or desc',
-    example: 'asc',
+    description: "Sort order: asc or desc",
+    example: "asc",
     required: false,
-    enum: ['asc', 'desc']
+    enum: ["asc", "desc"],
   })
   @IsOptional()
   @IsString()
-  sort_order?: 'asc' | 'desc';
+  sort_order?: "asc" | "desc";
 
   @ApiProperty({
-    description: 'Dietary preference: veg, non-veg, eggterian',
-    example: 'veg',
+    description: "Dietary preference: veg, non-veg, eggterian",
+    example: "veg",
     required: false,
-    enum: ['veg', 'non-veg', 'eggterian']
+    enum: ["veg", "non-veg", "eggterian"],
   })
   @IsOptional()
   @IsString()
-  dietary_preference?: 'veg' | 'non-veg' | 'eggterian';
+  dietary_preference?: "veg" | "non-veg" | "eggterian";
 
   @ApiProperty({
-    description: 'Minimum price filter',
+    description: "Minimum price filter",
     example: 100,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -124,10 +146,10 @@ export class SearchRequestDto {
   min_price?: number;
 
   @ApiProperty({
-    description: 'Maximum price filter',
+    description: "Maximum price filter",
     example: 500,
     required: false,
-    type: 'number'
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -136,11 +158,11 @@ export class SearchRequestDto {
   max_price?: number;
 
   @ApiProperty({
-    description: 'Page number for pagination',
+    description: "Page number for pagination",
     example: 1,
     required: false,
-    type: 'number',
-    minimum: 1
+    type: "number",
+    minimum: 1,
   })
   @IsOptional()
   @Type(() => Number)
@@ -149,12 +171,12 @@ export class SearchRequestDto {
   page?: number;
 
   @ApiProperty({
-    description: 'Number of results per page',
+    description: "Number of results per page",
     example: 20,
     required: false,
-    type: 'number',
+    type: "number",
     minimum: 1,
-    maximum: 100
+    maximum: 100,
   })
   @IsOptional()
   @Type(() => Number)
@@ -167,9 +189,9 @@ export class SearchRequestDto {
 // Search Suggestions DTOs
 export class LocationDto {
   @ApiProperty({
-    description: 'Latitude coordinate',
-    example: 9.9352300,
-    type: 'number'
+    description: "Latitude coordinate",
+    example: 9.93523,
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -177,9 +199,9 @@ export class LocationDto {
   lat?: number;
 
   @ApiProperty({
-    description: 'Longitude coordinate', 
-    example: 78.1304040,
-    type: 'number'
+    description: "Longitude coordinate",
+    example: 78.130404,
+    type: "number",
   })
   @IsOptional()
   @Type(() => Number)
@@ -189,20 +211,20 @@ export class LocationDto {
 
 export class SearchFiltersDto {
   @ApiProperty({
-    description: 'Dietary preference filter',
-    example: 'veg',
-    enum: ['veg', 'non-veg', 'eggterian'],
-    required: false
+    description: "Dietary preference filter",
+    example: "veg",
+    enum: ["veg", "non-veg", "eggterian"],
+    required: false,
   })
   @IsOptional()
   @IsString()
-  dietary_preference?: 'veg' | 'non-veg' | 'eggterian';
+  dietary_preference?: "veg" | "non-veg" | "eggterian";
 
   @ApiProperty({
-    description: 'Minimum price filter',
+    description: "Minimum price filter",
     example: 100,
-    type: 'number',
-    required: false
+    type: "number",
+    required: false,
   })
   @IsOptional()
   @Type(() => Number)
@@ -211,10 +233,10 @@ export class SearchFiltersDto {
   min_price?: number;
 
   @ApiProperty({
-    description: 'Maximum price filter',
+    description: "Maximum price filter",
     example: 500,
-    type: 'number',
-    required: false
+    type: "number",
+    required: false,
   })
   @IsOptional()
   @Type(() => Number)
@@ -223,10 +245,10 @@ export class SearchFiltersDto {
   max_price?: number;
 
   @ApiProperty({
-    description: 'Category ID filter',
+    description: "Category ID filter",
     example: 1,
-    type: 'number',
-    required: false
+    type: "number",
+    required: false,
   })
   @IsOptional()
   @Type(() => Number)
@@ -234,10 +256,10 @@ export class SearchFiltersDto {
   category_id?: number;
 
   @ApiProperty({
-    description: 'Store ID filter',
+    description: "Store ID filter",
     example: 1,
-    type: 'number',
-    required: false
+    type: "number",
+    required: false,
   })
   @IsOptional()
   @Type(() => Number)
@@ -247,17 +269,17 @@ export class SearchFiltersDto {
 
 export class SearchSuggestionsRequestDto {
   @ApiProperty({
-    description: 'Search query string (minimum 2 characters)',
-    example: 'burgl',
-    minLength: 2
+    description: "Search query string (minimum 2 characters)",
+    example: "burgl",
+    minLength: 2,
   })
   @IsString()
   query: string;
 
   @ApiProperty({
-    description: 'User location for location-based suggestions',
+    description: "User location for location-based suggestions",
     type: LocationDto,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsObject()
@@ -266,9 +288,9 @@ export class SearchSuggestionsRequestDto {
   location?: LocationDto;
 
   @ApiProperty({
-    description: 'Search filters to apply',
+    description: "Search filters to apply",
     type: SearchFiltersDto,
-    required: false
+    required: false,
   })
   @IsOptional()
   @IsObject()
@@ -277,12 +299,12 @@ export class SearchSuggestionsRequestDto {
   filters?: SearchFiltersDto;
 
   @ApiProperty({
-    description: 'Maximum number of suggestions to return',
+    description: "Maximum number of suggestions to return",
     example: 10,
-    type: 'number',
+    type: "number",
     minimum: 1,
     maximum: 50,
-    required: false
+    required: false,
   })
   @IsOptional()
   @Type(() => Number)

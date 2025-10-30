@@ -1,5 +1,5 @@
-import { IsOptional, IsPositive, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsPositive, Min, Max } from "class-validator";
+import { Type } from "class-transformer";
 
 export class PaginationDto {
   @IsOptional()
@@ -22,7 +22,7 @@ export class PaginationDto {
   sortBy?: string;
 
   @IsOptional()
-  sortOrder?: 'ASC' | 'DESC' = 'DESC';
+  sortOrder?: "ASC" | "DESC" = "DESC";
 
   @IsOptional()
   status?: boolean;
@@ -40,7 +40,7 @@ export interface PaginationOptions {
   skip: number;
   search?: string;
   sortBy?: string;
-  sortOrder: 'ASC' | 'DESC';
+  sortOrder: "ASC" | "DESC";
   status?: boolean;
   relations?: string[];
 }
@@ -55,4 +55,4 @@ export interface PaginatedResponse<T> {
     hasNext: boolean;
     hasPrev: boolean;
   };
-} 
+}
