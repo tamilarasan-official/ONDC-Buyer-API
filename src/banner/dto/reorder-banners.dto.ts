@@ -8,6 +8,7 @@ export class BannerSequenceDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   id: number;
@@ -17,6 +18,7 @@ export class BannerSequenceDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   sequence: number;
@@ -44,6 +46,7 @@ export class MoveBannerDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   new_position: number;

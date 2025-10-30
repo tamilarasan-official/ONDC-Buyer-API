@@ -29,7 +29,6 @@ export class BannerController {
         background_color: { type: 'string', example: '#14b8a6' },
         promotion_type: { type: 'string', enum: ['restaurant_id', 'category_id', 'url'], example: 'restaurant_id', description: 'Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), url (external link)' },
         promotion_link: { type: 'string', example: '1', description: 'The actual link value: restaurant ID, category ID, or full URL depending on promotion_type' },
-        sequence: { type: 'number', example: 1, description: 'Auto-assigned if not provided' },
         status: { type: 'string', example: 'true', description: 'Status as string: "true" or "false"' },
         image: {
           type: 'string',
@@ -236,7 +235,6 @@ export class BannerController {
         background_color: { type: 'string', example: '#14b8a6' },
         promotion_type: { type: 'string', enum: ['restaurant_id', 'category_id', 'url'], example: 'restaurant_id', description: 'Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), url (external link)' },
         promotion_link: { type: 'string', example: '1', description: 'The actual link value: restaurant ID, category ID, or full URL depending on promotion_type' },
-        sequence: { type: 'number', example: 1 },
         status: { type: 'string', example: 'true', description: 'Status as string: "true" or "false"' },
         image: {
           type: 'string',

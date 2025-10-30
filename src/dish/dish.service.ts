@@ -3,10 +3,9 @@ import { CreateDishDto } from './dto/create-dish.dto';
 import { UpdateDishDto } from './dto/update-dish.dto';
 import { ReorderDishesDto, MoveDishDto } from './dto/reorder-dishes.dto';
 import { Dish } from './entities/dish.entity';
-import { QueryFailedError, Repository } from 'typeorm';
+import { QueryFailedError, Repository, In } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaginationDto } from 'src/shared/dto/pagination.dto';
-import { PaginationUtil } from 'src/shared/utils/pagination.util';
 import { UploadService } from 'src/shared/upload.service';
 
 @Injectable()
@@ -53,7 +52,7 @@ export class DishService {
       if (error instanceof QueryFailedError) {
         throw new ConflictException('Dish with this name already exists');
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to create dish. Please check your data and try again.');
     }
   }
 
@@ -73,18 +72,83 @@ export class DishService {
           paginationDto.sortOrder = 'ASC';
         }
         
-        return PaginationUtil.findWithPagination(
-          this.dishRepository,
-          paginationDto,
-          ['name', 'description', 'status', 'icon', 'food_type'],
-          orderField
-        );
+        // Build custom query to handle boolean status field properly
+        const baseQueryBuilder = this.dishRepository.createQueryBuilder('dish');
+        
+        // Apply search filter if provided (only on text fields)
+        if (paginationDto.search) {
+          baseQueryBuilder.andWhere(
+            '(dish.name ILIKE :search OR dish.description ILIKE :search OR dish.food_type ILIKE :search)',
+            { search: `%${paginationDto.search}%` }
+          );
+        }
+        
+        // Apply status filter if provided (boolean field - direct comparison)
+        if (paginationDto.status !== undefined) {
+          baseQueryBuilder.andWhere('dish.status = :status', { status: paginationDto.status });
+        }
+        
+        // Apply food_type filter if provided
+        if (paginationDto.food_type) {
+          baseQueryBuilder.andWhere('dish.food_type = :foodType', { foodType: paginationDto.food_type });
+        }
+        
+        // Get total count
+        const total = await baseQueryBuilder.getCount();
+        
+        // Create a new query builder for getting paginated results
+        const dataQueryBuilder = this.dishRepository.createQueryBuilder('dish');
+        
+        // Apply the same filters to data query
+        if (paginationDto.search) {
+          dataQueryBuilder.andWhere(
+            '(dish.name ILIKE :search OR dish.description ILIKE :search OR dish.food_type ILIKE :search)',
+            { search: `%${paginationDto.search}%` }
+          );
+        }
+        
+        if (paginationDto.status !== undefined) {
+          dataQueryBuilder.andWhere('dish.status = :status', { status: paginationDto.status });
+        }
+        
+        if (paginationDto.food_type) {
+          dataQueryBuilder.andWhere('dish.food_type = :foodType', { foodType: paginationDto.food_type });
+        }
+        
+        // Apply ordering - sequence always in ASC order
+        if (orderField === 'sequence') {
+          dataQueryBuilder.orderBy('dish.sequence', 'ASC');
+        } else {
+          dataQueryBuilder.orderBy(`dish.${orderField}`, paginationDto.sortOrder || 'ASC');
+        }
+        
+        // Apply pagination
+        const page = paginationDto.page || 1;
+        const limit = paginationDto.limit || 10;
+        const skip = (page - 1) * limit;
+        
+        dataQueryBuilder.skip(skip).take(limit);
+        
+        // Get paginated results
+        const data = await dataQueryBuilder.getMany();
+        
+        return {
+          data,
+          meta: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          }
+        };
       } else {
         // Return all dishes without pagination
         return this.findAllWithoutPagination(paginationDto, orderField);
       }
     } catch (error) {
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to retrieve dishes. Please check your parameters and try again.');
     }
   }
 
@@ -142,7 +206,7 @@ export class DishService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to retrieve dish details.');
     }
   }
 
@@ -190,7 +254,7 @@ export class DishService {
       if (error instanceof QueryFailedError) {
         throw new ConflictException('Dish with this name already exists');
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to update dish. Please check your data and try again.');
     }
   }
 
@@ -216,7 +280,7 @@ export class DishService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to delete dish. Please try again.');
     }
   }
 
@@ -226,7 +290,9 @@ export class DishService {
 
       // Validate all dish IDs exist
       const dishIds = dishes.map(d => d.id);
-      const existingDishes = await this.dishRepository.findByIds(dishIds);
+      const existingDishes = await this.dishRepository.find({
+        where: { id: In(dishIds) }
+      });
 
       if (existingDishes.length !== dishIds.length) {
         throw new BadRequestException('Some dishes not found');
@@ -242,6 +308,24 @@ export class DishService {
 
       // Start transaction
       return await this.dishRepository.manager.transaction(async manager => {
+        // If reordering a single item, check if target sequence is already occupied by another dish
+        if (dishes.length === 1) {
+          const targetDish = dishes[0];
+          const occupyingDish = await manager
+            .createQueryBuilder(Dish, 'dish')
+            .where('dish.sequence = :sequence', { sequence: targetDish.sequence })
+            .andWhere('dish.id != :id', { id: targetDish.id })
+            .getOne();
+
+          if (occupyingDish) {
+            // Swap sequences: move occupying dish to origin sequence
+            const originDish = existingDishes.find(d => d.id === targetDish.id);
+            if (originDish) {
+              await manager.update(Dish, { id: occupyingDish.id }, { sequence: originDish.sequence });
+            }
+          }
+        }
+
         // Update all dishes with new sequences
         for (const dish of dishes) {
           await manager.update(Dish, 
@@ -256,7 +340,7 @@ export class DishService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to reorder dishes. Please try again.');
     }
   }
 
@@ -315,7 +399,7 @@ export class DishService {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to move dish. Please try again.');
     }
   }
 
@@ -340,7 +424,7 @@ export class DishService {
         return { message: 'Sequences normalized successfully' };
       });
     } catch (error) {
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to normalize sequences. Please try again.');
     }
   }
 }

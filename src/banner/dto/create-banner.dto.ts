@@ -1,4 +1,4 @@
-import { IsBoolean, IsEnum, IsInt, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 import { Transform } from "class-transformer";
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -62,15 +62,6 @@ export class CreateBannerDto {
   @IsOptional()
   @IsString()
   promotion_link?: string;
-
-  @ApiProperty({
-    description: 'Sequence number for ordering (auto-assigned if not provided)',
-    example: 1,
-    required: false
-  })
-  @IsOptional()
-  @IsInt()
-  sequence?: number;
 
   @ApiProperty({
     description: 'Status of the banner (active/inactive)',

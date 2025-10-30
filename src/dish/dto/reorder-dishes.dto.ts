@@ -8,6 +8,7 @@ export class DishSequenceDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   id: number;
@@ -17,6 +18,7 @@ export class DishSequenceDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   sequence: number;
@@ -43,6 +45,7 @@ export class ReorderDishesDto {
     required: false,
     type: 'number'
   })
+  @Type(() => Number)
   @IsOptional()
   @IsInt()
   food_type_id?: number;
@@ -54,6 +57,7 @@ export class MoveDishDto {
     example: 1,
     type: 'number'
   })
+  @Type(() => Number)
   @IsInt()
   @IsNotEmpty()
   new_position: number;
@@ -64,6 +68,7 @@ export class MoveDishDto {
     required: false,
     type: 'number'
   })
+  @Type(() => Number)
   @IsOptional()
   @IsInt()
   food_type_id?: number;

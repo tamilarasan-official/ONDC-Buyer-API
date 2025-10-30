@@ -6,7 +6,6 @@ import { Banner } from './entities/banner.entity';
 import { QueryFailedError, Repository, In } from 'typeorm';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PaginationDto } from 'src/shared/dto/pagination.dto';
-import { PaginationUtil } from 'src/shared/utils/pagination.util';
 import { UploadService } from 'src/shared/upload.service';
 
 @Injectable()
@@ -38,16 +37,13 @@ export class BannerService {
         s3Key
       );
 
-      // Get next sequence number (auto-assign if not provided)
-      let sequence = createBannerDto.sequence;
-      if (sequence === undefined) {
-        const maxSequence = await this.bannerRepository
-          .createQueryBuilder('banner')
-          .select('MAX(banner.sequence)', 'max')
-          .getRawOne();
+      // Auto-assign next sequence number
+      const maxSequence = await this.bannerRepository
+        .createQueryBuilder('banner')
+        .select('MAX(banner.sequence)', 'max')
+        .getRawOne();
 
-        sequence = (maxSequence?.max || 0) + 1;
-      }
+      const sequence = (maxSequence?.max || 0) + 1;
 
       // Create banner with image URL and sequence
       const banner = this.bannerRepository.create({
@@ -64,7 +60,7 @@ export class BannerService {
       if (error instanceof QueryFailedError) {
         throw new ConflictException('Error creating banner');
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to create banner. Please check your data and try again.');
     }
   }
 
@@ -84,18 +80,74 @@ export class BannerService {
           paginationDto.sortOrder = 'ASC';
         }
         
-        return PaginationUtil.findWithPagination(
-          this.bannerRepository,
-          paginationDto,
-          ['title', 'subtitle', 'cta_button', 'status', 'promotion_type'],
-          orderField
-        );
+        // Build custom query to handle boolean status field properly
+        const baseQueryBuilder = this.bannerRepository.createQueryBuilder('banner');
+        
+        // Apply search filter if provided (only on text fields)
+        if (paginationDto.search) {
+          baseQueryBuilder.andWhere(
+            '(banner.title ILIKE :search OR banner.subtitle ILIKE :search OR banner.cta_button ILIKE :search OR banner.promotion_type ILIKE :search)',
+            { search: `%${paginationDto.search}%` }
+          );
+        }
+        
+        // Apply status filter if provided (boolean field - direct comparison)
+        if (paginationDto.status !== undefined) {
+          baseQueryBuilder.andWhere('banner.status = :status', { status: paginationDto.status });
+        }
+        
+        // Get total count
+        const total = await baseQueryBuilder.getCount();
+        
+        // Create a new query builder for getting paginated results
+        const dataQueryBuilder = this.bannerRepository.createQueryBuilder('banner');
+        
+        // Apply the same filters to data query
+        if (paginationDto.search) {
+          dataQueryBuilder.andWhere(
+            '(banner.title ILIKE :search OR banner.subtitle ILIKE :search OR banner.cta_button ILIKE :search OR banner.promotion_type ILIKE :search)',
+            { search: `%${paginationDto.search}%` }
+          );
+        }
+        
+        if (paginationDto.status !== undefined) {
+          dataQueryBuilder.andWhere('banner.status = :status', { status: paginationDto.status });
+        }
+        
+        // Apply ordering - sequence always in ASC order
+        if (orderField === 'sequence') {
+          dataQueryBuilder.orderBy('banner.sequence', 'ASC');
+        } else {
+          dataQueryBuilder.orderBy(`banner.${orderField}`, paginationDto.sortOrder || 'ASC');
+        }
+        
+        // Apply pagination
+        const page = paginationDto.page || 1;
+        const limit = paginationDto.limit || 10;
+        const skip = (page - 1) * limit;
+        
+        dataQueryBuilder.skip(skip).take(limit);
+        
+        // Get paginated results
+        const data = await dataQueryBuilder.getMany();
+        
+        return {
+          data,
+          meta: {
+            page,
+            limit,
+            total,
+            totalPages: Math.ceil(total / limit),
+            hasNext: page < Math.ceil(total / limit),
+            hasPrev: page > 1,
+          }
+        };
       } else {
         // Return all banners without pagination
         return this.findAllWithoutPagination(paginationDto, orderField);
       }
     } catch (error) {
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to retrieve banners. Please check your parameters and try again.');
     }
   }
 
@@ -148,7 +200,7 @@ export class BannerService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to retrieve banner details.');
     }
   }
 
@@ -160,7 +212,7 @@ export class BannerService {
       });
       return banners;
     } catch (error) {
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to retrieve active banners.');
     }
   }
 
@@ -214,7 +266,7 @@ export class BannerService {
       if (error instanceof QueryFailedError) {
         throw new ConflictException('Error updating banner');
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to update banner. Please check your data and try again.');
     }
   }
 
@@ -240,7 +292,7 @@ export class BannerService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to delete banner. Please try again.');
     }
   }
 
@@ -260,6 +312,24 @@ export class BannerService {
 
       // Start transaction
       return await this.bannerRepository.manager.transaction(async manager => {
+        // If reordering a single item, check if target sequence is already occupied by another banner
+        if (banners.length === 1) {
+          const targetBanner = banners[0];
+          const occupyingBanner = await manager
+            .createQueryBuilder(Banner, 'banner')
+            .where('banner.sequence = :sequence', { sequence: targetBanner.sequence })
+            .andWhere('banner.id != :id', { id: targetBanner.id })
+            .getOne();
+
+          if (occupyingBanner) {
+            // Swap sequences: move occupying banner to origin sequence
+            const originBanner = existingBanners.find(b => b.id === targetBanner.id);
+            if (originBanner) {
+              await manager.update(Banner, { id: occupyingBanner.id }, { sequence: originBanner.sequence });
+            }
+          }
+        }
+
         // Update all banners with new sequences
         for (const banner of banners) {
           await manager.update(Banner, 
@@ -274,7 +344,7 @@ export class BannerService {
       if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to reorder banners. Please try again.');
     }
   }
 
@@ -325,7 +395,7 @@ export class BannerService {
       if (error instanceof NotFoundException || error instanceof BadRequestException) {
         throw error;
       }
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to move banner. Please try again.');
     }
   }
 
@@ -344,7 +414,7 @@ export class BannerService {
         return { message: 'Sequences normalized successfully' };
       });
     } catch (error) {
-      throw new BadRequestException(error.message);
+      throw new BadRequestException('Failed to normalize sequences. Please try again.');
     }
   }
 }
