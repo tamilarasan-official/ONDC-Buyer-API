@@ -158,6 +158,7 @@ export class SellerPushService {
         }
       },
       delivery_type: "Delivery",
+      instructions: order.notes,
       pickup_date_time: "",
       payment_method: order.payment_method,
       payment_status: order.payment_status,
