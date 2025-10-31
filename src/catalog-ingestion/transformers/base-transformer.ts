@@ -253,6 +253,62 @@ export abstract class BaseTransformer {
   }
 
   /**
+   * Parse ISO8601 duration format to minutes
+   * Examples: PT10M = 10 minutes, PT1H30M = 90 minutes, PT45S = 0 minutes (rounded), P1DT2H = 1560 minutes
+   * Format: P[nD]T[nH][nM][nS] where P=period, T=time separator, D=days, H=hours, M=minutes, S=seconds
+   * @param duration - ISO8601 duration string (e.g., PT10M, PT1H30M)
+   * @param fallback - Fallback value in minutes if parsing fails
+   * @returns Duration in minutes
+   */
+  protected parseISO8601Duration(
+    duration: string | undefined,
+    fallback: number = 10,
+  ): number {
+    if (!duration || typeof duration !== "string") {
+      return fallback;
+    }
+
+    try {
+      // ISO8601 duration format: P[nD]T[nH][nM][nS]
+      // Examples: PT10M, PT1H30M, PT45S, P1DT2H30M
+      const durationRegex =
+        /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i;
+
+      const match = duration.trim().toUpperCase().match(durationRegex);
+
+      if (!match) {
+        this.logWarning(
+          `Invalid ISO8601 duration format: ${duration}, using fallback`,
+        );
+        return fallback;
+      }
+
+      // Extract components (match[0] is full match, so indices start at 1)
+      const days = parseInt(match[1] || "0", 10);
+      const hours = parseInt(match[2] || "0", 10);
+      const minutes = parseInt(match[3] || "0", 10);
+      const seconds = parseFloat(match[4] || "0");
+
+      // Convert everything to minutes
+      const totalMinutes =
+        days * 24 * 60 + hours * 60 + minutes + Math.round(seconds / 60);
+
+      // Validate: must be positive and reasonable (max 24 hours = 1440 minutes)
+      if (totalMinutes <= 0 || totalMinutes > 1440) {
+        this.logWarning(
+          `Duration ${duration} results in ${totalMinutes} minutes, using fallback`,
+        );
+        return fallback;
+      }
+
+      return totalMinutes;
+    } catch (error) {
+      this.logError(`Failed to parse ISO8601 duration: ${duration}`, error);
+      return fallback;
+    }
+  }
+
+  /**
    * Log transformation warning
    */
   protected logWarning(message: string, data?: any): void {

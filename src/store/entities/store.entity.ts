@@ -54,6 +54,9 @@ export class Store {
   @Column({ type: "text", array: true, nullable: true })
   tags?: string[]; // Array of cuisine tags like ["South Indian", "North Indian", "Chinese"]
 
+  @Column({ type: "varchar", length: 20, nullable: true })
+  preparation_time?: string; // Order preparation time in ISO8601 format (e.g., PT10M, PT1H30M) from ONDC descriptor.order_preparation_time
+
   @Column({ type: "boolean", default: true })
   status: boolean;
 

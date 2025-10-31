@@ -45,6 +45,26 @@ export class StoreTransformer extends BaseTransformer {
       // Extract and process tags from descriptor
       store.tags = this.processStoreTags(provider.descriptor.tags || []);
 
+      // Extract order preparation time from descriptor (store as ISO8601 string)
+      // Format: ISO8601 duration (e.g., PT10M, PT1H30M)
+      if (provider.descriptor.order_preparation_time) {
+        // Validate and sanitize ISO8601 duration format
+        const duration = provider.descriptor.order_preparation_time.trim().toUpperCase();
+        const durationRegex =
+          /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i;
+
+        if (durationRegex.test(duration)) {
+          store.preparation_time = duration;
+        } else {
+          this.logWarning(
+            `Invalid ISO8601 duration format: ${provider.descriptor.order_preparation_time}, skipping`,
+          );
+          store.preparation_time = undefined;
+        }
+      } else {
+        store.preparation_time = undefined;
+      }
+
       // Set store status based on ONDC time.label field
       // "enable" -> true, "disable" -> false, default -> true
       const statusLabel = provider.time?.label?.toLowerCase();

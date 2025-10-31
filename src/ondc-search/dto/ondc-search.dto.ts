@@ -97,6 +97,7 @@ export interface Provider {
     images?: string[];
     food_type?: string;
     tags?: string[];
+    order_preparation_time?: string; // ISO8601 duration format (e.g., PT10M for 10 minutes)
   };
   "@ondc/org/fssai_license_no"?: string;
   ttl?: string;

@@ -248,6 +248,7 @@ export class BuyerService {
           "s.fssai_license_no as s_fssai_license_no",
           "s.food_type as s_food_type",
           "s.tags as s_tags",
+          "s.preparation_time as s_preparation_time",
           "sl.gps_lat as sl_gps_lat",
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
@@ -318,8 +319,13 @@ export class BuyerService {
           const storeOpenData = await this.isStoreOpen(store.s_id);
           this.logger.log(`🕐 Store open: ${storeOpenData.isOpen}`);
 
-          // Calculate delivery time
-          const deliveryTime = this.calculateDeliveryTime(distance, store.s_id);
+          // Calculate delivery time with hyperlocal improvements
+          const deliveryTime = this.calculateDeliveryTime(
+            distance,
+            store.s_id,
+            ratingData.rating,
+            store.s_preparation_time || undefined, // Use store-specific preparation time from ONDC
+          );
           this.logger.log(`🚚 Delivery time: ${deliveryTime}`);
 
           // Fetch timings for the restaurant
@@ -844,6 +850,7 @@ export class BuyerService {
           "s.description as s_description",
           "s.logo_url as s_logo_url",
           "s.fssai_license_no as s_fssai_license_no",
+          "s.preparation_time as s_preparation_time",
           "sl.gps_lat as sl_gps_lat",
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
@@ -888,10 +895,12 @@ export class BuyerService {
           // Check if store is open
           const storeOpenData = await this.isStoreOpen(restaurant.s_id);
 
-          // Calculate delivery time
+          // Calculate delivery time with hyperlocal improvements
           const deliveryTime = this.calculateDeliveryTime(
             distance,
             restaurant.s_id,
+            ratingData.rating,
+            restaurant.s_preparation_time || undefined, // Use store-specific preparation time from ONDC
           );
 
           // Count items in this restaurant
@@ -1249,8 +1258,13 @@ export class BuyerService {
       // Check if store is open
       const storeOpenData = await this.isStoreOpen(restaurant.id);
 
-      // Calculate delivery time
-      const deliveryTime = this.calculateDeliveryTime(distance, restaurant.id);
+      // Calculate delivery time with hyperlocal improvements
+      const deliveryTime = this.calculateDeliveryTime(
+        distance,
+        restaurant.id,
+        ratingData.rating,
+        restaurant.preparation_time || undefined, // Use store-specific preparation time from ONDC
+      );
 
       // Get item counts
       const itemCount = await this.itemRepository
@@ -2088,6 +2102,7 @@ export class BuyerService {
           "s.fssai_license_no as s_fssai_license_no",
           "s.food_type as s_food_type",
           "s.tags as s_tags",
+          "s.preparation_time as s_preparation_time",
           "sl.gps_lat as sl_gps_lat",
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
@@ -2109,14 +2124,17 @@ export class BuyerService {
       const topRatedRestaurants = await Promise.all(
         restaurants.map(async (restaurant) => {
           const distance = parseFloat(restaurant.distance);
+          const avgRating = parseFloat(restaurant.avg_rating) || 0;
 
           // Check if store is open
           const storeOpenData = await this.isStoreOpen(restaurant.s_id);
 
-          // Calculate delivery time
+          // Calculate delivery time with hyperlocal improvements
           const deliveryTime = this.calculateDeliveryTime(
             distance,
             restaurant.s_id,
+            avgRating,
+            restaurant.s_preparation_time || undefined, // Use store-specific preparation time from ONDC
           );
 
           // Count items in this restaurant
@@ -2226,34 +2244,257 @@ export class BuyerService {
   }
 
   /**
-   * Calculate delivery time based on distance and store preparation time
+   * Calculate delivery time for hyperlocal delivery with smart adjustments
+   * Includes: time-of-day adjustments, distance-based calculation, store rating, and dynamic buffer
+   * @param distance - Distance in kilometers (from Haversine)
+   * @param storeId - Store ID (optional, for future store-specific optimizations)
+   * @param storeRating - Store rating (optional, for performance-based adjustments)
+   * @param storePreparationTime - Store-specific preparation time in ISO8601 format (e.g., PT10M, PT1H30M) from ONDC descriptor.order_preparation_time
+   * @returns Formatted delivery time string (e.g., "20-25 mins")
    */
-  private calculateDeliveryTime(distance: number, storeId?: number): string {
+  private calculateDeliveryTime(
+    distance: number,
+    storeId?: number,
+    storeRating?: number,
+    storePreparationTime?: string,
+  ): string {
     try {
-      // Base preparation time (in minutes)
-      const basePrepTime = 10;
+      const now = new Date();
 
-      // Distance-based delivery time (1 minute per km, minimum 5 minutes)
-      const deliveryTime = Math.max(5, Math.round(distance));
+      // ============================================
+      // 1. TIME-OF-DAY ADJUSTMENTS (Peak Hours)
+      // ============================================
+      const peakData = this.getPeakHourData(now);
+      const peakMultiplier = peakData.multiplier;
 
-      // Total time
-      const totalTime = basePrepTime + deliveryTime;
+      // ============================================
+      // 2. HYPERLOCAL DISTANCE-TO-TIME CALCULATION
+      // ============================================
+      const travelTime = this.calculateTravelTimeFromDistance(distance);
 
-      // Add some buffer time
-      const bufferTime = 5;
+      // ============================================
+      // 3. DYNAMIC PREPARATION TIME
+      // ============================================
+      // Parse ISO8601 duration string to minutes if provided, otherwise calculate based on rating
+      let basePrepTime: number;
+      if (storePreparationTime) {
+        // Parse ISO8601 duration format (e.g., PT10M, PT1H30M)
+        const parsedMinutes = this.parseISO8601Duration(storePreparationTime);
+        basePrepTime = parsedMinutes > 0 ? parsedMinutes : this.calculatePrepTime(storeRating);
+      } else {
+        basePrepTime = this.calculatePrepTime(storeRating);
+      }
+      const adjustedPrepTime = Math.round(basePrepTime * peakMultiplier);
+
+      // ============================================
+      // 4. TOTAL TIME CALCULATION
+      // ============================================
+      const totalTime = adjustedPrepTime + travelTime;
+
+      // ============================================
+      // 5. DYNAMIC BUFFER TIME
+      // ============================================
+      const bufferTime = this.getDynamicBuffer(now, peakData);
       const finalTime = totalTime + bufferTime;
 
-      // Round to nearest 5 minutes
-      const roundedTime = Math.ceil(finalTime / 5) * 5;
+      // ============================================
+      // 6. ROUND AND FORMAT
+      // ============================================
+      // Round to nearest 5 minutes, minimum 15 minutes for hyperlocal
+      const roundedTime = Math.max(15, Math.ceil(finalTime / 5) * 5);
 
-      // Format as range (e.g., "25-30 mins")
+      // Format as range (e.g., "20-25 mins")
       const minTime = roundedTime;
-      const maxTime = roundedTime + 5;
+      const maxTime = Math.min(60, roundedTime + 5); // Cap at 60 minutes for hyperlocal
 
       return `${minTime}-${maxTime} mins`;
     } catch (error) {
       this.logger.warn(`Failed to calculate delivery time: ${error.message}`);
       return "25-30 mins"; // Default fallback
+    }
+  }
+
+  /**
+   * Calculate travel time from distance (optimized for hyperlocal delivery)
+   * @param distance - Distance in kilometers
+   * @returns Travel time in minutes
+   */
+  private calculateTravelTimeFromDistance(distance: number): number {
+    if (distance <= 1) {
+      // Very close (< 1km): 3-4 minutes
+      return 3 + Math.round(distance);
+    } else if (distance <= 2) {
+      // Close (1-2km): 4-6 minutes (2 min/km average)
+      return 4 + Math.round(distance * 1.5);
+    } else if (distance <= 5) {
+      // Medium (2-5km): 6-10 minutes (1.5 min/km)
+      return 6 + Math.round(distance * 1.3);
+    } else if (distance <= 10) {
+      // Far (5-10km): 10-15 minutes (1 min/km)
+      return 10 + Math.round(distance);
+    } else {
+      // Very far (>10km): Standard calculation
+      return Math.max(12, Math.round(distance * 1.2));
+    }
+  }
+
+  /**
+   * Calculate preparation time based on store rating
+   * Higher rated stores tend to be more efficient
+   * @param storeRating - Store rating (1-5)
+   * @returns Base preparation time in minutes
+   */
+  private calculatePrepTime(storeRating?: number): number {
+    let basePrepTime = 10; // Default base prep time
+
+    if (storeRating !== undefined && storeRating > 0) {
+      if (storeRating >= 4.5) {
+        basePrepTime = 8; // Highly rated stores are faster
+      } else if (storeRating >= 4.0) {
+        basePrepTime = 9;
+      } else if (storeRating >= 3.5) {
+        basePrepTime = 10; // Average
+      } else if (storeRating >= 3.0) {
+        basePrepTime = 11;
+      } else {
+        basePrepTime = 12; // Lower rated stores might take longer
+      }
+    }
+
+    return basePrepTime;
+  }
+
+  /**
+   * Get peak hour data (multiplier and type)
+   * @param now - Current date/time
+   * @returns Peak hour information with multiplier
+   */
+  private getPeakHourData(now: Date): {
+    isPeak: boolean;
+    peakType?: "lunch" | "dinner";
+    multiplier: number;
+  } {
+    const hour = now.getHours();
+    const minutes = now.getMinutes();
+    const currentTime = hour * 60 + minutes;
+
+    // Lunch peak: 12:00 PM - 2:00 PM (720 - 840 minutes)
+    const lunchStart = 12 * 60;
+    const lunchEnd = 14 * 60;
+
+    // Dinner peak: 7:00 PM - 9:30 PM (1140 - 1290 minutes)
+    const dinnerStart = 19 * 60;
+    const dinnerEnd = 21 * 60 + 30;
+
+    if (currentTime >= lunchStart && currentTime <= lunchEnd) {
+      return { isPeak: true, peakType: "lunch", multiplier: 1.25 }; // 25% increase
+    }
+
+    if (currentTime >= dinnerStart && currentTime <= dinnerEnd) {
+      return { isPeak: true, peakType: "dinner", multiplier: 1.35 }; // 35% increase (dinner is busier)
+    }
+
+    // Off-peak hours (early morning, late night, mid-afternoon)
+    if (
+      (hour >= 9 && hour < 11) ||
+      (hour >= 15 && hour < 18) ||
+      hour >= 22 ||
+      hour < 9
+    ) {
+      return { isPeak: false, multiplier: 0.9 }; // 10% faster off-peak
+    }
+
+    // Normal hours
+    return { isPeak: false, multiplier: 1.0 };
+  }
+
+  /**
+   * Get dynamic buffer time based on current conditions
+   * @param now - Current date/time
+   * @param peakData - Peak hour information
+   * @returns Buffer time in minutes
+   */
+  private getDynamicBuffer(
+    now: Date,
+    peakData: { isPeak: boolean; peakType?: "lunch" | "dinner"; multiplier: number },
+  ): number {
+    if (peakData.isPeak) {
+      if (peakData.peakType === "dinner") {
+        return 10; // Dinner peak needs more buffer
+      } else {
+        return 8; // Lunch peak
+      }
+    }
+
+    // Off-peak hours (early morning, late night, mid-afternoon)
+    const hour = now.getHours();
+    if (
+      (hour >= 9 && hour < 11) ||
+      (hour >= 15 && hour < 18) ||
+      hour >= 22 ||
+      hour < 9
+    ) {
+      return 3; // Off-peak needs less buffer
+    }
+
+    return 5; // Normal buffer
+  }
+
+  /**
+   * Parse ISO8601 duration format to minutes
+   * Examples: PT10M = 10 minutes, PT1H30M = 90 minutes, PT45S = 0 minutes (rounded), P1DT2H = 1560 minutes
+   * Format: P[nD]T[nH][nM][nS] where P=period, T=time separator, D=days, H=hours, M=minutes, S=seconds
+   * @param duration - ISO8601 duration string (e.g., PT10M, PT1H30M)
+   * @param fallback - Fallback value in minutes if parsing fails
+   * @returns Duration in minutes
+   */
+  private parseISO8601Duration(
+    duration: string | undefined,
+    fallback: number = 10,
+  ): number {
+    if (!duration || typeof duration !== "string") {
+      return fallback;
+    }
+
+    try {
+      // ISO8601 duration format: P[nD]T[nH][nM][nS]
+      // Examples: PT10M, PT1H30M, PT45S, P1DT2H30M
+      const durationRegex =
+        /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i;
+
+      const match = duration.trim().toUpperCase().match(durationRegex);
+
+      if (!match) {
+        this.logger.warn(
+          `Invalid ISO8601 duration format: ${duration}, using fallback ${fallback} minutes`,
+        );
+        return fallback;
+      }
+
+      // Extract components (match[0] is full match, so indices start at 1)
+      const days = parseInt(match[1] || "0", 10);
+      const hours = parseInt(match[2] || "0", 10);
+      const minutes = parseInt(match[3] || "0", 10);
+      const seconds = parseFloat(match[4] || "0");
+
+      // Convert everything to minutes
+      const totalMinutes =
+        days * 24 * 60 + hours * 60 + minutes + Math.round(seconds / 60);
+
+      // Validate: must be positive and reasonable (max 24 hours = 1440 minutes)
+      if (totalMinutes <= 0 || totalMinutes > 1440) {
+        this.logger.warn(
+          `Duration ${duration} results in ${totalMinutes} minutes (out of range), using fallback ${fallback} minutes`,
+        );
+        return fallback;
+      }
+
+      return totalMinutes;
+    } catch (error) {
+      this.logger.warn(
+        `Failed to parse ISO8601 duration: ${duration}, using fallback ${fallback} minutes`,
+      );
+      return fallback;
     }
   }
 
