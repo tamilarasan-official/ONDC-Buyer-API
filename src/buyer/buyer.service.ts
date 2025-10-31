@@ -323,13 +323,15 @@ export class BuyerService {
           this.logger.log(`🚚 Delivery time: ${deliveryTime}`);
 
           // Fetch timings for the restaurant
-          const timings = await this.storeTimingsRepository.find({
+          const store_timings = await this.storeTimingsRepository.find({
             where: { store: { id: store.s_id } },
             order: { day_from: "ASC" },
           });
           this.logger.log(
-            `🕐 Found ${timings.length} timing entries for restaurant ${store.s_id}`,
+            `🕐 Found ${store_timings.length} timing entries for restaurant ${store.s_id}`,
           );
+
+          const timings = this.expandTimingsToDays(store_timings);
 
           return {
             id: store.s_id,
@@ -351,17 +353,7 @@ export class BuyerService {
             delivery_time: deliveryTime,
             offers_count: 0, // Will be calculated separately
             is_favorite: favoriteStoreIds.has(store.s_id),
-            timings: timings.map((timing) => ({
-              day: timing.day_from,
-              open_time: timing.time_from,
-              close_time: timing.time_to,
-              is_open: this.isDayOpen(
-                timing.day_from,
-                timing.day_to,
-                timing.time_from,
-                timing.time_to,
-              ),
-            })),
+            timings,
           };
         }),
       );
@@ -1307,18 +1299,7 @@ export class BuyerService {
             state: location.address_state,
             delivery_radius: location.delivery_radius_km,
           })) || [],
-        timings:
-          restaurant.timings?.map((timing) => ({
-            day: timing.day_from,
-            open_time: timing.time_from,
-            close_time: timing.time_to,
-            is_open: this.isDayOpen(
-              timing.day_from,
-              timing.day_to,
-              timing.time_from,
-              timing.time_to,
-            ),
-          })) || [],
+        timings: restaurant.timings ? this.expandTimingsToDays(restaurant.timings) : [],
         offers:
           restaurant.offers
             ?.filter(
@@ -1409,7 +1390,8 @@ export class BuyerService {
     if (!timings || timings.length === 0) return false;
 
     const now = new Date();
-    const currentDay = now.getDay(); // 0 = Sunday, 1 = Monday, etc.
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
+    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
     const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     const todayTiming = timings.find(
@@ -1430,8 +1412,8 @@ export class BuyerService {
 
   /**
    * Check if restaurant is open now based on timing window
-   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
-   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
+   * @param dayFrom - Starting day (1-7, where 1=Sunday, 7=Saturday)
+   * @param dayTo - Ending day (1-7, where 1=Sunday, 7=Saturday)
    * @param openTime - Opening time in HHMM format
    * @param closeTime - Closing time in HHMM format
    */
@@ -1442,17 +1424,16 @@ export class BuyerService {
     closeTime: string,
   ): boolean {
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
-    let currentDay = now.getDay();
-    currentDay = currentDay === 0 ? 7 : currentDay; // Convert Sunday from 0 to 7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
+    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
     if (dayFrom <= dayTo) {
-      // Normal range (e.g., Monday to Friday: 1-5)
+      // Normal range (e.g., Monday to Friday: 2-6)
       isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
     } else {
-      // Wrapped range (e.g., Friday to Monday: 5-1)
+      // Wrapped range (e.g., Saturday to Monday: 7-2)
       isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
     }
 
@@ -1472,9 +1453,71 @@ export class BuyerService {
   }
 
   /**
+   * Expand timing ranges into individual day entries
+   * Transforms timings with day_from-day_to ranges into separate entries for each day
+   * @param timings - Array of timing objects with day_from, day_to, time_from, time_to
+   * @returns Array of expanded timing entries, one per day
+   */
+  private expandTimingsToDays(timings: StoreTimings[]): Array<{
+    day: number;
+    open_time: string;
+    close_time: string;
+    is_open: boolean;
+  }> {
+    const expandedTimings: Array<{
+      day: number;
+      open_time: string;
+      close_time: string;
+      is_open: boolean;
+    }> = [];
+
+    for (const timing of timings) {
+      const dayFrom = timing.day_from;
+      const dayTo = timing.day_to;
+      
+      // Generate days in the range
+      const days: number[] = [];
+      
+      if (dayFrom <= dayTo) {
+        // Normal range (e.g., Monday to Friday: 2-6)
+        for (let day = dayFrom; day <= dayTo; day++) {
+          days.push(day);
+        }
+      } else {
+        // Wrapped range (e.g., Saturday to Monday: 7-2)
+        // Handle as two separate ranges: from dayFrom to 7, and from 1 to dayTo
+        for (let day = dayFrom; day <= 7; day++) {
+          days.push(day);
+        }
+        for (let day = 1; day <= dayTo; day++) {
+          days.push(day);
+        }
+      }
+
+      // Create an entry for each day
+      for (const day of days) {
+        expandedTimings.push({
+          day,
+          open_time: timing.time_from,
+          close_time: timing.time_to,
+          is_open: this.isDayOpen(
+            day,
+            day, // Same day for individual entry
+            timing.time_from,
+            timing.time_to,
+          ),
+        });
+      }
+    }
+
+    // Sort by day (1-7) for consistent ordering
+    return expandedTimings.sort((a, b) => a.day - b.day);
+  }
+
+  /**
    * Check if an item is currently available based on its timing window
-   * @param dayFrom - Starting day (1-7, Monday to Sunday, where 1=Monday, 7=Sunday)
-   * @param dayTo - Ending day (1-7, Monday to Sunday)
+   * @param dayFrom - Starting day (1-7, Sunday to Saturday, where 1=Sunday, 7=Saturday)
+   * @param dayTo - Ending day (1-7, Sunday to Saturday)
    * @param timeFrom - Start time in HHMM format
    * @param timeTo - End time in HHMM format
    * @returns boolean indicating if item is available now
@@ -1486,17 +1529,16 @@ export class BuyerService {
     timeTo: string,
   ): boolean {
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
-    let currentDay = now.getDay();
-    currentDay = currentDay === 0 ? 7 : currentDay; // Convert Sunday from 0 to 7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
+    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
     if (dayFrom <= dayTo) {
-      // Normal range (e.g., Monday to Friday: 1-5)
+      // Normal range (e.g., Monday to Friday: 2-6)
       isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
     } else {
-      // Wrapped range (e.g., Friday to Monday: 5-1)
+      // Wrapped range (e.g., Saturday to Monday: 7-2)
       isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
     }
 
@@ -1975,8 +2017,8 @@ export class BuyerService {
         .getRawOne();
 
       return {
-        rating: parseFloat(result.avgRating) || 0,
-        reviewCount: parseInt(result.reviewCount) || 0,
+        rating: parseFloat(result?.avgRating || '0') || 0,
+        reviewCount: parseInt(result?.reviewCount || '0') || 0,
       };
     } catch (error) {
       this.logger.warn(
@@ -2128,9 +2170,8 @@ export class BuyerService {
   ): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
     try {
       const now = new Date();
-      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Monday, 7=Sunday)
-      let currentDay = now.getDay();
-      currentDay = currentDay === 0 ? 7 : currentDay; // Convert Sunday from 0 to 7
+      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
+      const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
       const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
       // Check regular timings
@@ -2190,7 +2231,7 @@ export class BuyerService {
   private calculateDeliveryTime(distance: number, storeId?: number): string {
     try {
       // Base preparation time (in minutes)
-      const basePrepTime = 15;
+      const basePrepTime = 10;
 
       // Distance-based delivery time (1 minute per km, minimum 5 minutes)
       const deliveryTime = Math.max(5, Math.round(distance));
