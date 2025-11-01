@@ -49,7 +49,9 @@ export class StoreTransformer extends BaseTransformer {
       // Format: ISO8601 duration (e.g., PT10M, PT1H30M)
       if (provider.descriptor.order_preparation_time) {
         // Validate and sanitize ISO8601 duration format
-        const duration = provider.descriptor.order_preparation_time.trim().toUpperCase();
+        const duration = provider.descriptor.order_preparation_time
+          .trim()
+          .toUpperCase();
         const durationRegex =
           /^P(?:(\d+)D)?T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?$/i;
 

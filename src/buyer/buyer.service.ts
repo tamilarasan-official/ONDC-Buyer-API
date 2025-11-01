@@ -1313,7 +1313,9 @@ export class BuyerService {
             state: location.address_state,
             delivery_radius: location.delivery_radius_km,
           })) || [],
-        timings: restaurant.timings ? this.expandTimingsToDays(restaurant.timings) : [],
+        timings: restaurant.timings
+          ? this.expandTimingsToDays(restaurant.timings)
+          : [],
         offers:
           restaurant.offers
             ?.filter(
@@ -1488,10 +1490,10 @@ export class BuyerService {
     for (const timing of timings) {
       const dayFrom = timing.day_from;
       const dayTo = timing.day_to;
-      
+
       // Generate days in the range
       const days: number[] = [];
-      
+
       if (dayFrom <= dayTo) {
         // Normal range (e.g., Monday to Friday: 2-6)
         for (let day = dayFrom; day <= dayTo; day++) {
@@ -1514,12 +1516,9 @@ export class BuyerService {
           day,
           open_time: timing.time_from,
           close_time: timing.time_to,
-          is_open: this.isDayOpen(
-            day,
-            day, // Same day for individual entry
-            timing.time_from,
-            timing.time_to,
-          ),
+          // is_open indicates if the restaurant operates on this day (not if it's open right now)
+          // If there's a timing entry for this day, it means the restaurant operates on this day
+          is_open: true,
         });
       }
     }
@@ -2031,8 +2030,8 @@ export class BuyerService {
         .getRawOne();
 
       return {
-        rating: parseFloat(result?.avgRating || '0') || 0,
-        reviewCount: parseInt(result?.reviewCount || '0') || 0,
+        rating: parseFloat(result?.avgRating || "0") || 0,
+        reviewCount: parseInt(result?.reviewCount || "0") || 0,
       };
     } catch (error) {
       this.logger.warn(
@@ -2280,7 +2279,10 @@ export class BuyerService {
       if (storePreparationTime) {
         // Parse ISO8601 duration format (e.g., PT10M, PT1H30M)
         const parsedMinutes = this.parseISO8601Duration(storePreparationTime);
-        basePrepTime = parsedMinutes > 0 ? parsedMinutes : this.calculatePrepTime(storeRating);
+        basePrepTime =
+          parsedMinutes > 0
+            ? parsedMinutes
+            : this.calculatePrepTime(storeRating);
       } else {
         basePrepTime = this.calculatePrepTime(storeRating);
       }
@@ -2416,7 +2418,11 @@ export class BuyerService {
    */
   private getDynamicBuffer(
     now: Date,
-    peakData: { isPeak: boolean; peakType?: "lunch" | "dinner"; multiplier: number },
+    peakData: {
+      isPeak: boolean;
+      peakType?: "lunch" | "dinner";
+      multiplier: number;
+    },
   ): number {
     if (peakData.isPeak) {
       if (peakData.peakType === "dinner") {

@@ -114,7 +114,7 @@ export class LocationService {
    * Build Haversine formula SQL query for distance calculation
    * This matches the TypeScript calculateDistance() method exactly
    * More accurate than Spherical Law of Cosines, especially for small distances
-   * 
+   *
    * Formula: d = R * 2 * atan2(√a, √(1-a))
    * where a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
    */
@@ -130,14 +130,14 @@ export class LocationService {
     const sinDLngHalf = `sin(${dLng} / 2)`;
     const cosUserLat = `cos(radians(${userLat}))`;
     const cosStoreLat = `cos(radians(sl.gps_lat))`;
-    
+
     // Haversine 'a' component
     const haversineA = `(
       ${sinDLatHalf} * ${sinDLatHalf} +
       ${cosUserLat} * ${cosStoreLat} *
       ${sinDLngHalf} * ${sinDLngHalf}
     )`;
-    
+
     return `
       (6371 * 2 * atan2(
         sqrt(${haversineA}),
@@ -150,7 +150,7 @@ export class LocationService {
    * Build distance filter for WHERE clause using Haversine formula
    * This matches the TypeScript calculateDistance() method exactly
    * More accurate than Spherical Law of Cosines, especially for small distances
-   * 
+   *
    * Formula: d = R * 2 * atan2(√a, √(1-a))
    * where a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
    */
@@ -166,14 +166,14 @@ export class LocationService {
     const sinDLngHalf = `sin(${dLng} / 2)`;
     const cosUserLat = `cos(radians(${userLat}))`;
     const cosStoreLat = `cos(radians(sl.gps_lat))`;
-    
+
     // Haversine 'a' component
     const haversineA = `(
       ${sinDLatHalf} * ${sinDLatHalf} +
       ${cosUserLat} * ${cosStoreLat} *
       ${sinDLngHalf} * ${sinDLngHalf}
     )`;
-    
+
     return `
       (6371 * 2 * atan2(
         sqrt(${haversineA}),
