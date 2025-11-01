@@ -1,8 +1,10 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString } from "class-validator";
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString } from "class-validator";
 import { Transform } from "class-transformer";
 import { ApiProperty } from "@nestjs/swagger";
 
+
 export class CreateDishDto {
+  
   @ApiProperty({
     description: "Name of the dish",
     example: "Pizza",
@@ -28,6 +30,7 @@ export class CreateDishDto {
   })
   @IsString()
   @IsNotEmpty()
+  @IsIn(['pure-veg','veg', 'non-veg', 'egg', 'veg-and-non-veg'])
   food_type: string;
 
   @ApiProperty({
