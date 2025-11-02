@@ -1406,8 +1406,8 @@ export class BuyerService {
     if (!timings || timings.length === 0) return false;
 
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
-    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
+    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
     const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     const todayTiming = timings.find(
@@ -1428,8 +1428,8 @@ export class BuyerService {
 
   /**
    * Check if restaurant is open now based on timing window
-   * @param dayFrom - Starting day (1-7, where 1=Sunday, 7=Saturday)
-   * @param dayTo - Ending day (1-7, where 1=Sunday, 7=Saturday)
+   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
+   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
    * @param openTime - Opening time in HHMM format
    * @param closeTime - Closing time in HHMM format
    */
@@ -1440,8 +1440,8 @@ export class BuyerService {
     closeTime: string,
   ): boolean {
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
-    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
+    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
@@ -1529,8 +1529,8 @@ export class BuyerService {
 
   /**
    * Check if an item is currently available based on its timing window
-   * @param dayFrom - Starting day (1-7, Sunday to Saturday, where 1=Sunday, 7=Saturday)
-   * @param dayTo - Ending day (1-7, Sunday to Saturday)
+   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
+   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
    * @param timeFrom - Start time in HHMM format
    * @param timeTo - End time in HHMM format
    * @returns boolean indicating if item is available now
@@ -1542,8 +1542,10 @@ export class BuyerService {
     timeTo: string,
   ): boolean {
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
-    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
+    // JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    // DB: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
@@ -2187,8 +2189,8 @@ export class BuyerService {
   ): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
     try {
       const now = new Date();
-      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to our format (1=Sunday, 7=Saturday)
-      const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
+      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
+      const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
       const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
       // Check regular timings
