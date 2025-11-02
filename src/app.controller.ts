@@ -18,31 +18,6 @@ export class AppController {
   }
 
   /**
-   * Get app configuration including default location
-   */
-  @Get('config')
-  getAppConfig() {
-    return {
-      success: true,
-      message: 'App configuration retrieved successfully',
-      data: {
-        default_location: {
-          latitude: 9.93523,
-          longitude: 78.130404,
-          city: 'Madurai',
-          state: 'Tamil Nadu',
-          country: 'India',
-        },
-        app_info: {
-          name: 'Tazty',
-          version: '1.0.0',
-          service_area: 'Madurai, Tamil Nadu',
-        },
-      },
-    };
-  }
-
-  /**
    * ONDC webhook endpoint for receiving catalog data at root level (/on_search)
    */
   @Post("on_search")

@@ -177,20 +177,6 @@ Required environment variables (see .env.example):
 - MAILER_HOST, MAILER_PORT, MAILER_USER, MAILER_PASS, MAILER_FROM
 - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_BUCKET_NAME, AWS_BUCKET_URL, AWS_ENV_NAME
 
-## App Configuration
-
-### Default Location
-The app is configured to launch in Madurai, Tamil Nadu first. Default location is available via:
-- **API Endpoint**: `GET /config` returns default location and app info
-- **Backend Fallback**: LocationService returns Madurai coordinates (9.93523, 78.130404) when no user location is available
-
-### Frontend Integration for Location
-To avoid showing foreign locations (e.g., California) in the address picker:
-1. Check if location permission is granted
-2. If granted, use device's current location
-3. If denied or unavailable, fetch `GET /config` and use `default_location.latitude/longitude`
-4. Never hardcode California or other foreign locations
-
 ## Known Development Notes
 
 - OTP generation currently uses static OTP (see src/authentication/authentication.service.ts:20-32)
