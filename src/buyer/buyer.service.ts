@@ -1446,10 +1446,10 @@ export class BuyerService {
     // Check if current day is within the day range
     let isDayInRange = false;
     if (dayFrom <= dayTo) {
-      // Normal range (e.g., Monday to Friday: 2-6)
+      // Normal range (e.g., Monday to Friday: 1-5)
       isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
     } else {
-      // Wrapped range (e.g., Saturday to Monday: 7-2)
+      // Wrapped range (e.g., Saturday to Monday: 6-1)
       isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
     }
 
@@ -1495,12 +1495,12 @@ export class BuyerService {
       const days: number[] = [];
 
       if (dayFrom <= dayTo) {
-        // Normal range (e.g., Monday to Friday: 2-6)
+        // Normal range (e.g., Monday to Friday: 1-5)
         for (let day = dayFrom; day <= dayTo; day++) {
           days.push(day);
         }
       } else {
-        // Wrapped range (e.g., Saturday to Monday: 7-2)
+        // Wrapped range (e.g., Saturday to Monday: 6-1)
         // Handle as two separate ranges: from dayFrom to 7, and from 1 to dayTo
         for (let day = dayFrom; day <= 7; day++) {
           days.push(day);
@@ -1550,10 +1550,10 @@ export class BuyerService {
     // Check if current day is within the day range
     let isDayInRange = false;
     if (dayFrom <= dayTo) {
-      // Normal range (e.g., Monday to Friday: 2-6)
+      // Normal range (e.g., Monday to Friday: 1-5)
       isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
     } else {
-      // Wrapped range (e.g., Saturday to Monday: 7-2)
+      // Wrapped range (e.g., Saturday to Monday: 6-1)
       isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
     }
 
