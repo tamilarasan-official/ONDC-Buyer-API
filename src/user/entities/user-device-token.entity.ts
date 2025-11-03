@@ -13,6 +13,9 @@ export class UserDeviceToken {
   @PrimaryGeneratedColumn()
   id: number;
 
+  @Column({ name: "userId" })
+  userId: number;
+
   @ManyToOne(() => User, { onDelete: "CASCADE" })
   user: User;
 

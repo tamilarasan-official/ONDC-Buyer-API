@@ -462,7 +462,7 @@ export class NotificationService {
   ): Promise<void> {
     try {
       await this.userDeviceTokenRepository.delete({
-        user: { id: userId },
+        userId: userId,
         token: deviceToken,
       });
       this.logger.log(
@@ -495,7 +495,7 @@ export class NotificationService {
       // Check if token already exists
       const existingToken = await this.userDeviceTokenRepository.findOne({
         where: {
-          user: { id: userId },
+          userId: userId,
           token: deviceToken,
         },
       });
@@ -512,6 +512,7 @@ export class NotificationService {
       } else {
         // Create new token
         const newToken = this.userDeviceTokenRepository.create({
+          userId: userId,
           user: { id: userId },
           token: deviceToken,
           platform,
