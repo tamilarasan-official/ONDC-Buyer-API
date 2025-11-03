@@ -81,13 +81,13 @@ export class AddToCartDto {
     example: 2,
     type: "number",
     minimum: 1,
-    maximum: 10,
+    maximum: 50,
   })
   @IsNotEmpty()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(10)
+  @Max(50)
   quantity: number;
 
   @ApiProperty({
@@ -148,13 +148,13 @@ export class UpdateCartItemDto {
     example: 3,
     type: "number",
     minimum: 1,
-    maximum: 10,
+    maximum: 50,
   })
   @IsNotEmpty()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  @Max(10)
+  @Max(50)
   quantity: number;
 
   @ApiProperty({
