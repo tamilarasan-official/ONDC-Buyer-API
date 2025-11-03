@@ -335,7 +335,27 @@ export class FCMService {
    */
   async validateToken(token: string): Promise<boolean> {
     try {
-      // Send a test message to validate the token
+      // Skip validation if FCM is not initialized (dev mode)
+      if (!this.app) {
+        this.logger.warn(
+          `FCM not initialized - skipping token validation for: ${token.substring(0, 20)}...`,
+        );
+        return true;
+      }
+
+      // Basic format validation for Expo tokens
+      if (token.startsWith("ExponentPushToken[")) {
+        // Expo tokens are valid if they match the format
+        const isValid = /^ExponentPushToken\[[a-zA-Z0-9_-]+\]$/.test(token);
+        if (isValid) {
+          this.logger.log(
+            `Valid Expo token format: ${token.substring(0, 30)}...`,
+          );
+          return true;
+        }
+      }
+
+      // For FCM tokens, perform dry-run validation (doesn't actually send)
       const message: admin.messaging.Message = {
         token,
         data: { test: "true" },
@@ -343,10 +363,22 @@ export class FCMService {
         apns: { payload: { aps: { contentAvailable: true } } },
       };
 
-      await admin.messaging().send(message);
+      // Use validateOnly to check token without sending actual message
+      await admin.messaging().send(message, true); // true = dryRun mode
+      this.logger.log(`Token validated successfully: ${token.substring(0, 30)}...`);
       return true;
     } catch (error) {
-      this.logger.warn(`Token validation failed for ${token}:`, error.message);
+      this.logger.warn(
+        `Token validation failed for ${token.substring(0, 30)}...: ${error.message}`,
+      );
+      // In development/staging, be lenient and accept tokens anyway
+      const env = this.configService.get<string>("NODE_ENV");
+      if (env === "development" || env === "staging") {
+        this.logger.log(
+          `Accepting token despite validation failure (${env} mode)`,
+        );
+        return true;
+      }
       return false;
     }
   }

@@ -486,12 +486,6 @@ export class NotificationService {
     platform: string,
   ): Promise<void> {
     try {
-      // Validate token with FCM
-      const isValid = await this.fcmService.validateToken(deviceToken);
-      if (!isValid) {
-        throw new Error("Invalid device token");
-      }
-
       // Check if token already exists
       const existingToken = await this.userDeviceTokenRepository.findOne({
         where: {
