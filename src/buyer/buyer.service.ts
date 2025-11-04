@@ -400,7 +400,7 @@ export class BuyerService {
       .where("d.status = :status", { status: true })
       .select(["d.id", "d.name", "d.description", "d.icon"])
       .orderBy("d.name", "ASC")
-      .limit(5) // Based on image: Biryani, South Indian, Pizza, Burger, Cakes
+      .limit(10) // Increased from 5 to 10 dishes
       .getMany();
 
     return dishes.map((dish) => ({
