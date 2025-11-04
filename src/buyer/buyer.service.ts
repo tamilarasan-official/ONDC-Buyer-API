@@ -2568,6 +2568,13 @@ export class BuyerService {
   ) {
     const { query, location, filters, limit = 10 } = request;
 
+    // DEBUG: Log the entire request object
+    this.logger.log(`🔍 DEBUG - Full request object: ${JSON.stringify(request)}`);
+    this.logger.log(`🔍 DEBUG - request.lat: ${(request as any).lat}`);
+    this.logger.log(`🔍 DEBUG - request.lng: ${(request as any).lng}`);
+    this.logger.log(`🔍 DEBUG - location?.lat: ${location?.lat}`);
+    this.logger.log(`🔍 DEBUG - location?.lng: ${location?.lng}`);
+
     // Handle both nested location object AND root-level lat/lng for backwards compatibility
     const requestLat = location?.lat || (request as any).lat;
     const requestLng = location?.lng || (request as any).lng;
