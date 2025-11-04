@@ -336,10 +336,42 @@ export class WhatsOnYourMindDto {
   description: string;
 
   @ApiProperty({
+    description: "Food type",
+    example: "Non Veg",
+  })
+  food_type: string;
+
+  @ApiProperty({
     description: "Dish icon URL",
     example: "https://example.com/biryani-icon.jpg",
   })
   icon: string;
+
+  @ApiProperty({
+    description: "Display sequence order",
+    example: 1,
+    type: "number",
+  })
+  sequence: number;
+
+  @ApiProperty({
+    description: "Status of the dish",
+    example: true,
+    type: "boolean",
+  })
+  status: boolean;
+
+  @ApiProperty({
+    description: "Creation timestamp",
+    example: "2025-01-15T12:00:00Z",
+  })
+  created_at: Date;
+
+  @ApiProperty({
+    description: "Last update timestamp",
+    example: "2025-01-15T12:00:00Z",
+  })
+  updated_at: Date;
 }
 
 export class PromotionalBannerDto {

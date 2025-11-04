@@ -398,7 +398,17 @@ export class BuyerService {
     const dishes = await this.dishRepository
       .createQueryBuilder("d")
       .where("d.status = :status", { status: true })
-      .select(["d.id", "d.name", "d.description", "d.icon"])
+      .select([
+        "d.id",
+        "d.name",
+        "d.description",
+        "d.icon",
+        "d.food_type",
+        "d.sequence",
+        "d.status",
+        "d.created_at",
+        "d.updated_at",
+      ])
       .orderBy("d.name", "ASC")
       .limit(10) // Increased from 5 to 10 dishes
       .getMany();
@@ -407,7 +417,12 @@ export class BuyerService {
       id: dish.id,
       name: dish.name,
       description: dish.description,
+      food_type: dish.food_type,
       icon: dish.icon,
+      sequence: dish.sequence,
+      status: dish.status,
+      created_at: dish.created_at,
+      updated_at: dish.updated_at,
     }));
   }
 
