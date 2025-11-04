@@ -643,14 +643,26 @@ export class BuyerService {
         limit = 20,
       } = searchParams;
 
-      // Get user location
-      const userLocation = userId
-        ? await this.locationService.getUserLocation(userId, lat, lng)
-        : {
-            lat: lat || 9.93523,
-            lng: lng || 78.130404,
-            source: "device_location",
-          };
+      // Get user location - prioritize lat/lng from request
+      let userLocation;
+      if (lat && lng) {
+        // Use location from request if provided
+        userLocation = {
+          lat,
+          lng,
+          source: "device_location",
+        };
+      } else if (userId) {
+        // Only fetch user's saved location if not provided in request
+        userLocation = await this.locationService.getUserLocation(userId);
+      } else {
+        // Guest user without location - use default
+        userLocation = {
+          lat: 9.93523,
+          lng: 78.130404,
+          source: "device_location",
+        };
+      }
 
       this.logger.log(
         `🔍 Search query: "${query}" | Location: ${userLocation.lat}, ${userLocation.lng} | Type: ${type}`,
@@ -2565,25 +2577,34 @@ export class BuyerService {
     const suggestions: any[] = [];
 
     try {
-      // Get user location using the same logic as search endpoint
+      // Get user location - prioritize location from request
       let userLocation;
-      if (userId) {
+
+      // If location is explicitly provided in request, use it directly
+      if (location?.lat && location?.lng) {
         this.logger.log(
-          `🔍 Fetching location for authenticated user: ${userId}`,
+          `📍 Using location from request: ${location.lat}, ${location.lng}`,
         );
-        userLocation = await this.locationService.getUserLocation(
-          userId,
-          location?.lat,
-          location?.lng,
+        userLocation = {
+          lat: location.lat,
+          lng: location.lng,
+          source: "device_location" as const,
+        };
+      } else if (userId) {
+        // Only fetch user's saved location if not provided in request
+        this.logger.log(
+          `🔍 No location in request, fetching saved location for user: ${userId}`,
         );
+        userLocation = await this.locationService.getUserLocation(userId);
         this.logger.log(
           `📍 User location from service: ${userLocation.lat}, ${userLocation.lng} (source: ${userLocation.source})`,
         );
       } else {
-        this.logger.log(`🔍 Using device location for guest user`);
+        // Guest user without location - use default
+        this.logger.log(`🔍 Guest user without location, using default`);
         userLocation = {
-          lat: location?.lat || 9.93523,
-          lng: location?.lng || 78.130404,
+          lat: 9.93523,
+          lng: 78.130404,
           source: "device_location" as const,
         };
       }
