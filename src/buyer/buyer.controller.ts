@@ -91,7 +91,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get home page data",
     description:
-      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banner (dynamically fetched from banner management system). Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants.',
+      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banners (dynamically fetched from banner management system - returns all active banners ordered by sequence). Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants.',
   })
   @ApiQuery({
     name: "lat",
@@ -1330,7 +1330,10 @@ export class BuyerController {
 
     try {
       // Validate basic token format
-      if (!tokenData.device_token || typeof tokenData.device_token !== "string") {
+      if (
+        !tokenData.device_token ||
+        typeof tokenData.device_token !== "string"
+      ) {
         throw new BadRequestException("Device token is required");
       }
 

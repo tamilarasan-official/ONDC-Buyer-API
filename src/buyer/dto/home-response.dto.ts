@@ -373,6 +373,28 @@ export class PromotionalBannerDto {
     example: "#14b8a6",
   })
   background_color: string;
+
+  @ApiProperty({
+    description: "Promotion type (restaurant_id, category_id, or url)",
+    example: "restaurant_id",
+    required: false,
+  })
+  promotion_type?: string;
+
+  @ApiProperty({
+    description: "Promotion link (restaurant ID, category ID, or external URL)",
+    example: "1050",
+    required: false,
+  })
+  promotion_link?: string;
+
+  @ApiProperty({
+    description: "Display sequence order",
+    example: 1,
+    type: "number",
+    required: false,
+  })
+  sequence?: number;
 }
 
 export class PaginationMetaDto {
@@ -433,10 +455,10 @@ export class HomeDataDto {
 
   @ApiProperty({
     description:
-      "Promotional banner information (fetched from banner management system - returns first active banner ordered by sequence, or default banner if none available)",
-    type: PromotionalBannerDto,
+      "Promotional banners information (fetched from banner management system - returns all active banners ordered by sequence, or default banner if none available)",
+    type: [PromotionalBannerDto],
   })
-  promotional_banner: PromotionalBannerDto;
+  promotional_banner: PromotionalBannerDto[];
 }
 
 export class HomeResponseDto {

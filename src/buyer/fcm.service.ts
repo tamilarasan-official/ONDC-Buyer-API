@@ -365,7 +365,9 @@ export class FCMService {
 
       // Use validateOnly to check token without sending actual message
       await admin.messaging().send(message, true); // true = dryRun mode
-      this.logger.log(`Token validated successfully: ${token.substring(0, 30)}...`);
+      this.logger.log(
+        `Token validated successfully: ${token.substring(0, 30)}...`,
+      );
       return true;
     } catch (error) {
       this.logger.warn(

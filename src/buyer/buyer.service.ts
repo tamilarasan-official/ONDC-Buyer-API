@@ -416,16 +416,47 @@ export class BuyerService {
    */
   private async getPromotionalBanner() {
     try {
-      // Get the first active banner ordered by sequence
-      const banner = await this.bannerRepository.findOne({
+      // Get all active banners ordered by sequence
+      const banners = await this.bannerRepository.find({
         where: { status: true },
         order: { sequence: "ASC" },
       });
 
-      // Return default banner if no active banner found
-      if (!banner) {
-        this.logger.warn("No active banner found, returning default banner");
-        return {
+      // Return default banner if no active banners found
+      if (!banners || banners.length === 0) {
+        this.logger.warn("No active banners found, returning default banner");
+        return [
+          {
+            title: "Craving Something Delicious?",
+            subtitle:
+              "Get your favorite meals delivered hot & fast—right to your doorstep.",
+            cta_button: "Order Now!",
+            image_url:
+              "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
+            background_color: "#14b8a6",
+          },
+        ];
+      }
+
+      // Return all banner data from database
+      return banners.map((banner) => ({
+        title: banner.title,
+        subtitle: banner.subtitle || undefined,
+        cta_button: banner.cta_button || undefined,
+        image_url: banner.image_url,
+        background_color: banner.background_color || undefined,
+        promotion_type: banner.promotion_type || undefined,
+        promotion_link: banner.promotion_link || undefined,
+        sequence: banner.sequence,
+      }));
+    } catch (error) {
+      this.logger.error(
+        `Error fetching promotional banners: ${error.message}`,
+        error.stack,
+      );
+      // Return default banner on error
+      return [
+        {
           title: "Craving Something Delicious?",
           subtitle:
             "Get your favorite meals delivered hot & fast—right to your doorstep.",
@@ -433,32 +464,8 @@ export class BuyerService {
           image_url:
             "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
           background_color: "#14b8a6",
-        };
-      }
-
-      // Return banner data from database
-      return {
-        title: banner.title,
-        subtitle: banner.subtitle || undefined,
-        cta_button: banner.cta_button || undefined,
-        image_url: banner.image_url,
-        background_color: banner.background_color || undefined,
-      };
-    } catch (error) {
-      this.logger.error(
-        `Error fetching promotional banner: ${error.message}`,
-        error.stack,
-      );
-      // Return default banner on error
-      return {
-        title: "Craving Something Delicious?",
-        subtitle:
-          "Get your favorite meals delivered hot & fast—right to your doorstep.",
-        cta_button: "Order Now!",
-        image_url:
-          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-        background_color: "#14b8a6",
-      };
+        },
+      ];
     }
   }
 
