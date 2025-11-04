@@ -2568,10 +2568,14 @@ export class BuyerService {
   ) {
     const { query, location, filters, limit = 10 } = request;
 
+    // Handle both nested location object AND root-level lat/lng for backwards compatibility
+    const requestLat = location?.lat || (request as any).lat;
+    const requestLng = location?.lng || (request as any).lng;
+
     this.logger.log(`🔍 Getting search suggestions for: "${query}"`);
     this.logger.log(`👤 User ID: ${userId || "guest"}`);
     this.logger.log(
-      `📍 Input location - lat: ${location?.lat}, lng: ${location?.lng}`,
+      `📍 Input location - lat: ${requestLat}, lng: ${requestLng}`,
     );
 
     const suggestions: any[] = [];
@@ -2580,14 +2584,14 @@ export class BuyerService {
       // Get user location - prioritize location from request
       let userLocation;
 
-      // If location is explicitly provided in request, use it directly
-      if (location?.lat && location?.lng) {
+      // If location is explicitly provided in request (nested OR root level), use it directly
+      if (requestLat && requestLng) {
         this.logger.log(
-          `📍 Using location from request: ${location.lat}, ${location.lng}`,
+          `📍 Using location from request: ${requestLat}, ${requestLng}`,
         );
         userLocation = {
-          lat: location.lat,
-          lng: location.lng,
+          lat: requestLat,
+          lng: requestLng,
           source: "device_location" as const,
         };
       } else if (userId) {
