@@ -932,6 +932,14 @@ export class BuyerService {
             .andWhere("i.status = :status", { status: true })
             .getCount();
 
+          // Fetch timings for the restaurant
+          const store_timings = await this.storeTimingsRepository.find({
+            where: { store: { id: restaurant.s_id } },
+            order: { day_from: "ASC" },
+          });
+
+          const timings = this.expandTimingsToDays(store_timings);
+
           return {
             id: restaurant.s_id,
             name: restaurant.s_name,
@@ -951,6 +959,7 @@ export class BuyerService {
             items_count: itemsCount,
             is_open: storeOpenData.isOpen,
             is_favorite: favoriteStoreIds.has(restaurant.s_id),
+            timings,
           };
         }),
       );
@@ -2167,6 +2176,14 @@ export class BuyerService {
             .andWhere("i.status = :status", { status: true })
             .getCount();
 
+          // Fetch timings for the restaurant
+          const store_timings = await this.storeTimingsRepository.find({
+            where: { store: { id: restaurant.s_id } },
+            order: { day_from: "ASC" },
+          });
+
+          const timings = this.expandTimingsToDays(store_timings);
+
           return {
             id: restaurant.s_id,
             name: restaurant.s_name,
@@ -2189,6 +2206,7 @@ export class BuyerService {
             items_count: itemsCount,
             is_open: storeOpenData.isOpen,
             is_favorite: favoriteStoreIds.has(restaurant.s_id),
+            timings,
           };
         }),
       );

@@ -1,4 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { RestaurantTimingDto } from "./home-response.dto";
 
 export class SearchRestaurantDto {
   @ApiProperty({
@@ -89,6 +90,12 @@ export class SearchRestaurantDto {
     type: "boolean",
   })
   is_open: boolean;
+
+  @ApiProperty({
+    description: "Restaurant timings for all days of the week",
+    type: [RestaurantTimingDto],
+  })
+  timings: RestaurantTimingDto[];
 }
 
 export class TopRatedRestaurantDto {
@@ -187,6 +194,12 @@ export class TopRatedRestaurantDto {
     type: "boolean",
   })
   is_open: boolean;
+
+  @ApiProperty({
+    description: "Restaurant timings for all days of the week",
+    type: [RestaurantTimingDto],
+  })
+  timings: RestaurantTimingDto[];
 }
 
 export class SearchItemDto {
