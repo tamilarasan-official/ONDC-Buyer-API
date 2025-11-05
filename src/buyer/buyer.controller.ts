@@ -66,11 +66,16 @@ import {
   VerifyPaymentResponseDto,
 } from "./dto/order-response.dto";
 import { SellerStatusUpdateDto } from "./dto/seller-status-update.dto";
+import {
+  StoreStatusUpdateDto,
+  StoreStatusUpdateItemDto,
+} from "../store/dto/store-status-update.dto";
 import { CartService } from "./cart.service";
 import { OrderService } from "./order.service";
 import { NotificationService } from "./notification.service";
 import { ReviewService } from "./review.service";
 import { RazorpayService } from "./razorpay.service";
+import { StoreService } from "../store/store.service";
 
 @ApiTags("Buyer App APIs")
 @Controller("api/buyer")
@@ -83,6 +88,7 @@ export class BuyerController {
     private readonly notificationService: NotificationService,
     private readonly reviewService: ReviewService,
     private readonly razorpayService: RazorpayService,
+    private readonly storeService: StoreService,
   ) {}
 
   @Get("home")
@@ -1973,4 +1979,167 @@ export class BuyerController {
   ) {
     return this.orderService.updateOrderStatusFromSeller(sellerStatusUpdateDto);
   }
+
+  @Post("webhook/store-status")
+  @ApiOperation({
+    summary: "Store status update webhook",
+    description:
+      "Webhook endpoint to receive store status updates from sellers. Supports multiple store updates in a single request. Accepts store_id as either ONDC reference_id (e.g., 'P1', 'P2') or numeric database ID (e.g., '1', '2').",
+  })
+  @ApiBody({
+    type: [StoreStatusUpdateItemDto],
+    description: "Store status update payload (array of store updates). Request body should be a direct array.",
+    examples: {
+      singleOpen: {
+        summary: "Single store - Open",
+        description: "Open a single store using ONDC reference_id",
+        value: [
+          {
+            store_id: "P1",
+            status: "open",
+          },
+        ],
+      },
+      singleClosed: {
+        summary: "Single store - Closed",
+        description: "Close a single store using numeric ID with optional message",
+        value: [
+          {
+            store_id: "1",
+            status: "closed",
+            message: "Temporarily closed for maintenance",
+          },
+        ],
+      },
+      multipleStores: {
+        summary: "Multiple stores - Mixed status",
+        description: "Update multiple stores with different statuses in one request",
+        value: [
+          {
+            store_id: "P1",
+            status: "open",
+          },
+          {
+            store_id: "P2",
+            status: "closed",
+            message: "Closed for inventory update",
+          },
+          {
+            store_id: "3",
+            status: "open",
+          },
+        ],
+      },
+      allOpen: {
+        summary: "Multiple stores - All open",
+        description: "Open multiple stores at once",
+        value: [
+          {
+            store_id: "P1",
+            status: "open",
+          },
+          {
+            store_id: "P2",
+            status: "open",
+          },
+          {
+            store_id: "P3",
+            status: "open",
+          },
+        ],
+      },
+      allClosed: {
+        summary: "Multiple stores - All closed",
+        description: "Close multiple stores with reasons",
+        value: [
+          {
+            store_id: "P1",
+            status: "closed",
+            message: "Holiday closure",
+          },
+          {
+            store_id: "P2",
+            status: "closed",
+            message: "Maintenance work",
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Status updated successfully. Response includes results for all stores, with partial failures if any.",
+    schema: {
+      type: "object",
+      properties: {
+        success: {
+          type: "boolean",
+          example: true,
+          description: "True if all stores updated successfully, false if any failed",
+        },
+        message: {
+          type: "string",
+          example: "All 2 store(s) updated successfully",
+        },
+        updated: {
+          type: "array",
+          description: "Array of successfully updated stores",
+          items: {
+            type: "object",
+            properties: {
+              success: { type: "boolean", example: true },
+              message: { type: "string", example: "Store status updated successfully" },
+              store_id: { type: "string", example: "P1" },
+              store_name: { type: "string", example: "Restaurant Name" },
+              status: { type: "string", example: "open" },
+              previous_status: { type: "string", example: "closed" },
+              new_status: { type: "string", example: "open" },
+              seller_message: { type: "string", example: "Store reopened" },
+            },
+          },
+        },
+        failed: {
+          type: "array",
+          description: "Array of failed updates (only present if any failures)",
+          items: {
+            type: "object",
+            properties: {
+              store_id: { type: "string", example: "P999" },
+              error: { type: "string", example: "Store with ID or reference_id 'P999' not found" },
+              status: { type: "number", example: 404 },
+            },
+          },
+        },
+        total: { type: "number", example: 2 },
+        successful: { type: "number", example: 2 },
+        failed_count: { type: "number", example: 0 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid request or validation error (e.g., invalid status value, missing required fields)",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 400 },
+        message: {
+          type: "array",
+          items: { type: "string" },
+          example: ["status must be one of the following values: open, closed"],
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
+  })
+  async updateStoreStatusFromSeller(
+    @Body() stores: StoreStatusUpdateItemDto[],
+  ) {
+    // Transform array to DTO format
+    const storeStatusUpdateDto: StoreStatusUpdateDto = {
+      stores: stores,
+    };
+    return this.storeService.updateStoreStatusFromSeller(storeStatusUpdateDto);
+  }
+  
 }
