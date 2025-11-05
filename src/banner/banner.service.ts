@@ -12,12 +12,15 @@ import { QueryFailedError, Repository, In } from "typeorm";
 import { InjectRepository } from "@nestjs/typeorm";
 import { PaginationDto } from "src/shared/dto/pagination.dto";
 import { UploadService } from "src/shared/upload.service";
+import { Store } from "../store/entities/store.entity";
 
 @Injectable()
 export class BannerService {
   constructor(
     @InjectRepository(Banner)
     private readonly bannerRepository: Repository<Banner>,
+    @InjectRepository(Store)
+    private readonly storeRepository: Repository<Store>,
     private readonly uploadService: UploadService,
   ) {}
 
@@ -37,6 +40,25 @@ export class BannerService {
         throw new BadRequestException(
           "Invalid file type. Only JPG, PNG, and WebP are allowed.",
         );
+      }
+
+      const promotion_type = createBannerDto.promotion_type;
+      const promotion_link = createBannerDto.promotion_link;
+      let promotion_id: number | null = null;
+      if (promotion_type === "restaurant_id") {
+        const store = await this.storeRepository.findOne({ where: { reference_id: promotion_link } });
+        promotion_id = store?.id || null;
+        if (!promotion_id) {
+          throw new BadRequestException("Restaurant not found");
+        }
+      }
+      if (promotion_type === "category_id") {
+        // promotion_id = await this.categoryRepository.findOne({ where: { reference_id: promotion_link } });
+        throw new BadRequestException("Category not supported yet");
+      }
+      if (promotion_type === "url") {
+        promotion_id = null;
+        throw new BadRequestException("URL not supported yet");
       }
 
       // Generate file name from banner title (remove spaces and special characters)
