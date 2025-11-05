@@ -2,7 +2,7 @@ import { ApiProperty } from "@nestjs/swagger";
 import {
   IsNotEmpty,
   IsString,
-  IsIn,
+  IsBoolean,
   IsArray,
   ValidateNested,
   IsOptional,
@@ -21,16 +21,13 @@ export class StoreStatusUpdateItemDto {
   store_id: string;
 
   @ApiProperty({
-    description: "Store status - 'open' to open the store, 'closed' to close it",
-    example: "open",
-    type: "string",
-    enum: ["open", "closed"],
-    enumName: "StoreStatus",
+    description: "Store status - true to enable the store, false to disable it",
+    example: true,
+    type: "boolean",
   })
   @IsNotEmpty()
-  @IsString()
-  @IsIn(["open", "closed"])
-  status: "open" | "closed";
+  @IsBoolean()
+  status: boolean;
 
   @ApiProperty({
     description: "Optional message or reason for status change. Useful for logging and tracking why a store was closed or opened.",
@@ -49,8 +46,8 @@ export class StoreStatusUpdateDto {
     type: [StoreStatusUpdateItemDto],
     example: [
       {
-        store_id: "123",
-        status: "open",
+        store_id: "P1",
+        status: true,
       },
     ],
   })

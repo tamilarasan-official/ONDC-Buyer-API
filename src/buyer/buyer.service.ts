@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { Repository, LessThanOrEqual, MoreThanOrEqual, In } from "typeorm";
 import { LocationService } from "../shared/services/location.service";
 import { Store } from "../store/entities/store.entity";
 import { StoreLocation } from "../store/entities/store-location.entity";
@@ -31,6 +31,7 @@ import { ItemReview } from "../review/entities/item-review.entity";
 import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-restaurant.entity";
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
+import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 
 @Injectable()
 export class BuyerService {
@@ -49,6 +50,8 @@ export class BuyerService {
     private readonly offersRepository: Repository<Offers>,
     @InjectRepository(StoreTimings)
     private readonly storeTimingsRepository: Repository<StoreTimings>,
+    @InjectRepository(StoreCloseTimings)
+    private readonly storeCloseTimingsRepository: Repository<StoreCloseTimings>,
     @InjectRepository(StoreConfigs)
     private readonly storeConfigsRepository: Repository<StoreConfigs>,
     @InjectRepository(ItemPrices)
@@ -299,6 +302,22 @@ export class BuyerService {
       }
 
       this.logger.log(`🔍 Processing ${stores.length} restaurants...`);
+
+      // Batch fetch all active close timings for all stores at once (optimization to avoid N+1 queries)
+      const storeIds = stores.map((store) => store.s_id);
+      const now = new Date();
+      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
+        where: {
+          store: { id: In(storeIds) },
+          close_start_datetime: LessThanOrEqual(now),
+          close_end_datetime: MoreThanOrEqual(now),
+        },
+      });
+      // Create a Set of store IDs with active close timings for O(1) lookup
+      const storesWithActiveCloseTimings = new Set(
+        activeCloseTimings.map((ct) => ct.store.id),
+      );
+
       // Calculate ratings, open status, and delivery times for each restaurant
       const storesWithRatings = await Promise.all(
         stores.map(async (store, index) => {
@@ -337,7 +356,8 @@ export class BuyerService {
             `🕐 Found ${store_timings.length} timing entries for restaurant ${store.s_id}`,
           );
 
-          const timings = this.expandTimingsToDays(store_timings);
+          const hasActiveCloseTiming = storesWithActiveCloseTimings.has(store.s_id);
+          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
 
           return {
             id: store.s_id,
@@ -360,6 +380,7 @@ export class BuyerService {
             offers_count: 0, // Will be calculated separately
             is_favorite: favoriteStoreIds.has(store.s_id),
             timings,
+            is_open: storeOpenData.isOpen
           };
         }),
       );
@@ -916,6 +937,21 @@ export class BuyerService {
 
       const restaurants = await queryBuilder.getRawMany();
 
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      const restaurantIds = restaurants.map((r) => r.s_id);
+      const now = new Date();
+      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
+        where: {
+          store: { id: In(restaurantIds) },
+          close_start_datetime: LessThanOrEqual(now),
+          close_end_datetime: MoreThanOrEqual(now),
+        },
+      });
+      // Create a Set of restaurant IDs with active close timings for O(1) lookup
+      const restaurantsWithActiveCloseTimings = new Set(
+        activeCloseTimings.map((ct) => ct.store.id),
+      );
+
       // Calculate ratings and additional data for each restaurant
       const restaurantsWithData = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -950,7 +986,8 @@ export class BuyerService {
             order: { day_from: "ASC" },
           });
 
-          const timings = this.expandTimingsToDays(store_timings);
+          const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
 
           return {
             id: restaurant.s_id,
@@ -1273,6 +1310,7 @@ export class BuyerService {
         .createQueryBuilder("s")
         .leftJoinAndSelect("s.locations", "sl")
         .leftJoinAndSelect("s.timings", "st")
+        .leftJoinAndSelect("s.closeTimings", "sct")
         .leftJoinAndSelect("s.offers", "o")
         .leftJoinAndSelect("s.configs", "sc")
         .where("s.id = :id", { id: restaurantId })
@@ -1357,7 +1395,15 @@ export class BuyerService {
             delivery_radius: location.delivery_radius_km,
           })) || [],
         timings: restaurant.timings
-          ? this.expandTimingsToDays(restaurant.timings)
+          ? (() => {
+              // Check for active close timing for this single restaurant
+              const now = new Date();
+              const hasActiveCloseTiming = restaurant.closeTimings?.some(
+                (ct) =>
+                  ct.close_start_datetime <= now && ct.close_end_datetime >= now,
+              ) || false;
+              return this.expandTimingsToDays(restaurant.timings, hasActiveCloseTiming);
+            })()
           : [],
         offers:
           restaurant.offers
@@ -1515,9 +1561,13 @@ export class BuyerService {
    * Expand timing ranges into individual day entries
    * Transforms timings with day_from-day_to ranges into separate entries for each day
    * @param timings - Array of timing objects with day_from, day_to, time_from, time_to
+   * @param hasActiveCloseTiming - Whether the store has an active close timing (pre-computed to avoid N+1 queries)
    * @returns Array of expanded timing entries, one per day
    */
-  private expandTimingsToDays(timings: StoreTimings[]): Array<{
+  private expandTimingsToDays(
+    timings: StoreTimings[],
+    hasActiveCloseTiming: boolean = false,
+  ): Array<{
     day: number;
     open_time: string;
     close_time: string;
@@ -1529,6 +1579,11 @@ export class BuyerService {
       close_time: string;
       is_open: boolean;
     }> = [];
+
+    const now = new Date();
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
+    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
+    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     for (const timing of timings) {
       const dayFrom = timing.day_from;
@@ -1555,13 +1610,29 @@ export class BuyerService {
 
       // Create an entry for each day
       for (const day of days) {
+        // Calculate is_open: true only if this day is today AND current time is within operating hours AND no active close timing
+        let isOpen = false;
+
+        // Only check if this day entry is today
+        if (day === currentDay && !hasActiveCloseTiming) {
+          // Check if current time is within operating hours for this timing entry
+          const openTime = parseInt(timing.time_from);
+          const closeTime = parseInt(timing.time_to);
+
+          if (closeTime < openTime) {
+            // Overnight hours (e.g., 2200 to 0200)
+            isOpen = currentTime >= openTime || currentTime <= closeTime;
+          } else {
+            // Normal hours (e.g., 0900 to 2200)
+            isOpen = currentTime >= openTime && currentTime <= closeTime;
+          }
+        }
+
         expandedTimings.push({
           day,
           open_time: timing.time_from,
           close_time: timing.time_to,
-          // is_open indicates if the restaurant operates on this day (not if it's open right now)
-          // If there's a timing entry for this day, it means the restaurant operates on this day
-          is_open: true,
+          is_open: isOpen,
         });
       }
     }
@@ -2164,6 +2235,21 @@ export class BuyerService {
         .limit(5)
         .getRawMany();
 
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      const restaurantIds = restaurants.map((r) => r.s_id);
+      const now = new Date();
+      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
+        where: {
+          store: { id: In(restaurantIds) },
+          close_start_datetime: LessThanOrEqual(now),
+          close_end_datetime: MoreThanOrEqual(now),
+        },
+      });
+      // Create a Set of restaurant IDs with active close timings for O(1) lookup
+      const restaurantsWithActiveCloseTimings = new Set(
+        activeCloseTimings.map((ct) => ct.store.id),
+      );
+
       // Process and enrich restaurant data
       const topRatedRestaurants = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -2194,7 +2280,8 @@ export class BuyerService {
             order: { day_from: "ASC" },
           });
 
-          const timings = this.expandTimingsToDays(store_timings);
+          const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
 
           return {
             id: restaurant.s_id,

@@ -21,6 +21,7 @@ import { StoreModule } from "../store/store.module";
 import { Store } from "../store/entities/store.entity";
 import { StoreLocation } from "../store/entities/store-location.entity";
 import { StoreTimings } from "../store/entities/store-timings.entity";
+import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 import { StoreConfigs } from "../store/entities/store-configs.entity";
 import { Category } from "../category/entities/category.entity";
 import { Item } from "../item/entities/item.entity";
@@ -56,6 +57,7 @@ import { Banner } from "../banner/entities/banner.entity";
       Store,
       StoreLocation,
       StoreTimings,
+      StoreCloseTimings,
       StoreConfigs,
       Category,
       Item,

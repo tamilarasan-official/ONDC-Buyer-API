@@ -70,6 +70,10 @@ import {
   StoreStatusUpdateDto,
   StoreStatusUpdateItemDto,
 } from "../store/dto/store-status-update.dto";
+import {
+  StoreCloseTimingDto,
+  StoreCloseTimingItemDto,
+} from "../store/dto/store-close-timing.dto";
 import { CartService } from "./cart.service";
 import { OrderService } from "./order.service";
 import { NotificationService } from "./notification.service";
@@ -1984,30 +1988,30 @@ export class BuyerController {
   @ApiOperation({
     summary: "Store status update webhook",
     description:
-      "Webhook endpoint to receive store status updates from sellers. Supports multiple store updates in a single request. Accepts store_id as either ONDC reference_id (e.g., 'P1', 'P2') or numeric database ID (e.g., '1', '2').",
+      "Webhook endpoint to receive store status updates from sellers. Supports multiple store updates in a single request. Accepts store_id as either ONDC reference_id (e.g., 'P1', 'P2') or numeric database ID (e.g., '1', '2'). Status is boolean: true to enable the store, false to disable it.",
   })
   @ApiBody({
     type: [StoreStatusUpdateItemDto],
     description: "Store status update payload (array of store updates). Request body should be a direct array.",
     examples: {
-      singleOpen: {
-        summary: "Single store - Open",
-        description: "Open a single store using ONDC reference_id",
+      singleEnable: {
+        summary: "Single store - Enable",
+        description: "Enable a single store using ONDC reference_id",
         value: [
           {
             store_id: "P1",
-            status: "open",
+            status: true,
           },
         ],
       },
-      singleClosed: {
-        summary: "Single store - Closed",
-        description: "Close a single store using numeric ID with optional message",
+      singleDisable: {
+        summary: "Single store - Disable",
+        description: "Disable a single store using numeric ID with optional message",
         value: [
           {
             store_id: "1",
-            status: "closed",
-            message: "Temporarily closed for maintenance",
+            status: false,
+            message: "Temporarily disabled for maintenance",
           },
         ],
       },
@@ -2017,49 +2021,49 @@ export class BuyerController {
         value: [
           {
             store_id: "P1",
-            status: "open",
+            status: true,
           },
           {
             store_id: "P2",
-            status: "closed",
-            message: "Closed for inventory update",
+            status: false,
+            message: "Disabled for inventory update",
           },
           {
             store_id: "3",
-            status: "open",
+            status: true,
           },
         ],
       },
-      allOpen: {
-        summary: "Multiple stores - All open",
-        description: "Open multiple stores at once",
+      allEnable: {
+        summary: "Multiple stores - All enable",
+        description: "Enable multiple stores at once",
         value: [
           {
             store_id: "P1",
-            status: "open",
+            status: true,
           },
           {
             store_id: "P2",
-            status: "open",
+            status: true,
           },
           {
             store_id: "P3",
-            status: "open",
+            status: true,
           },
         ],
       },
-      allClosed: {
-        summary: "Multiple stores - All closed",
-        description: "Close multiple stores with reasons",
+      allDisable: {
+        summary: "Multiple stores - All disable",
+        description: "Disable multiple stores with reasons",
         value: [
           {
             store_id: "P1",
-            status: "closed",
+            status: false,
             message: "Holiday closure",
           },
           {
             store_id: "P2",
-            status: "closed",
+            status: false,
             message: "Maintenance work",
           },
         ],
@@ -2091,9 +2095,9 @@ export class BuyerController {
               message: { type: "string", example: "Store status updated successfully" },
               store_id: { type: "string", example: "P1" },
               store_name: { type: "string", example: "Restaurant Name" },
-              status: { type: "string", example: "open" },
-              previous_status: { type: "string", example: "closed" },
-              new_status: { type: "string", example: "open" },
+              status: { type: "boolean", example: true },
+              previous_status: { type: "boolean", example: false },
+              new_status: { type: "boolean", example: true },
               seller_message: { type: "string", example: "Store reopened" },
             },
           },
@@ -2126,7 +2130,7 @@ export class BuyerController {
         message: {
           type: "array",
           items: { type: "string" },
-          example: ["status must be one of the following values: open, closed"],
+          example: ["status must be a boolean value"],
         },
         error: { type: "string", example: "Bad Request" },
       },
@@ -2140,6 +2144,167 @@ export class BuyerController {
       stores: stores,
     };
     return this.storeService.updateStoreStatusFromSeller(storeStatusUpdateDto);
+  }
+
+  @Post("webhook/store-timing-status")
+  @ApiOperation({
+    summary: "Store timing status webhook",
+    description:
+      "Webhook endpoint to manage temporary store closures outside normal hours. Updates the store_close_timings table. Does not modify store_timings (regular schedule). Accepts store_id as either ONDC reference_id (e.g., 'P1', 'P2') or numeric database ID (e.g., '1', '2').",
+  })
+  @ApiBody({
+    type: [StoreCloseTimingItemDto],
+    description: "Store close timing update payload (array of store updates). Request body should be a direct array.",
+    examples: {
+      closeStore: {
+        summary: "Close store temporarily",
+        description: "Close a store temporarily with start and end datetime",
+        value: [
+          {
+            store_id: "P1",
+            status: "closed",
+            close_start_datetime: "2025-01-10T10:00:00Z",
+            close_end_datetime: "2025-01-15T23:59:59Z",
+            message: "Temporarily closed for maintenance",
+          },
+        ],
+      },
+      closeStoreDefaultStart: {
+        summary: "Close store (default start time)",
+        description: "Close a store starting now with specified end datetime",
+        value: [
+          {
+            store_id: "P1",
+            status: "closed",
+            close_end_datetime: "2025-01-15T23:59:59Z",
+            message: "Closed for inventory update",
+          },
+        ],
+      },
+      reopenStore: {
+        summary: "Reopen store",
+        description: "Reopen a store by ending active close timings",
+        value: [
+          {
+            store_id: "P1",
+            status: "open",
+          },
+        ],
+      },
+      closeWithLocation: {
+        summary: "Close specific location",
+        description: "Close a specific location of a store",
+        value: [
+          {
+            store_id: "P1",
+            status: "closed",
+            close_start_datetime: "2025-01-10T10:00:00Z",
+            close_end_datetime: "2025-01-15T23:59:59Z",
+            location_id: 1,
+            message: "Location temporarily closed",
+          },
+        ],
+      },
+      multipleStores: {
+        summary: "Multiple stores",
+        description: "Update multiple stores in one request",
+        value: [
+          {
+            store_id: "P1",
+            status: "closed",
+            close_end_datetime: "2025-01-15T23:59:59Z",
+            message: "Maintenance",
+          },
+          {
+            store_id: "P2",
+            status: "open",
+          },
+        ],
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Close timing updated successfully. Response includes results for all stores, with partial failures if any.",
+    schema: {
+      type: "object",
+      properties: {
+        success: {
+          type: "boolean",
+          example: true,
+          description: "True if all stores updated successfully, false if any failed",
+        },
+        message: {
+          type: "string",
+          example: "All 2 store close timing(s) updated successfully",
+        },
+        updated: {
+          type: "array",
+          description: "Array of successfully updated stores",
+          items: {
+            type: "object",
+            properties: {
+              success: { type: "boolean", example: true },
+              message: { type: "string", example: "Store close timing created successfully" },
+              store_id: { type: "string", example: "P1" },
+              store_name: { type: "string", example: "Restaurant Name" },
+              status: { type: "string", example: "closed" },
+              close_timing: {
+                type: "object",
+                description: "Close timing details (null for 'open' status if no active timings)",
+                properties: {
+                  id: { type: "number", example: 1 },
+                  close_start_datetime: { type: "string", example: "2025-01-10T10:00:00Z" },
+                  close_end_datetime: { type: "string", example: "2025-01-15T23:59:59Z" },
+                  reason: { type: "string", example: "Temporarily closed for maintenance" },
+                  location_id: { type: "number", example: 1, nullable: true },
+                },
+              },
+            },
+          },
+        },
+        failed: {
+          type: "array",
+          description: "Array of failed updates (only present if any failures)",
+          items: {
+            type: "object",
+            properties: {
+              store_id: { type: "string", example: "P999" },
+              error: { type: "string", example: "Store with ID or reference_id 'P999' not found" },
+              status: { type: "number", example: 404 },
+            },
+          },
+        },
+        total: { type: "number", example: 2 },
+        successful: { type: "number", example: 2 },
+        failed_count: { type: "number", example: 0 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid request or validation error (e.g., missing close_end_datetime for 'closed' status, invalid datetime format)",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 400 },
+        message: {
+          type: "array",
+          items: { type: "string" },
+          example: ["close_end_datetime is required when status is 'closed'"],
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
+  })
+  async updateStoreTimingStatusFromSeller(
+    @Body() stores: StoreCloseTimingItemDto[],
+  ) {
+    // Transform array to DTO format
+    const storeCloseTimingDto: StoreCloseTimingDto = {
+      stores: stores,
+    };
+    return this.storeService.updateStoreTimingStatusFromSeller(storeCloseTimingDto);
   }
   
 }
