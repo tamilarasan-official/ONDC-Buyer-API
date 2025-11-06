@@ -1548,7 +1548,7 @@ export class BuyerService {
     if (!isDayInRange) return false;
 
     // Check if current time is within operating hours
-    const currentTime = now.getHours() * 100 + now.getMinutes();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
     const open = parseInt(openTime);
     const close = parseInt(closeTime);
 
@@ -1684,7 +1684,7 @@ export class BuyerService {
     if (!isDayInRange) return false;
 
     // Check if current time is within the time range
-    const currentTime = now.getHours() * 100 + now.getMinutes();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
     const open = parseInt(timeFrom);
     const close = parseInt(timeTo);
 
