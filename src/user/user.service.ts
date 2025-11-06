@@ -219,10 +219,14 @@ export class UserService {
 
   async getAllAddresses(user: any) {
     try {
-      const addresses = await this.userAddressRepository.find({
-        where: { user: { id: user.id } },
-        order: { is_default: "DESC", created_at: "DESC" },
-      });
+      // Optimized query using QueryBuilder for better performance
+      // Uses direct column reference instead of relation to avoid unnecessary joins
+      const addresses = await this.userAddressRepository
+        .createQueryBuilder("address")
+        .where("address.user_id = :userId", { userId: user.id })
+        .orderBy("address.is_default", "DESC")
+        .addOrderBy("address.created_at", "DESC")
+        .getMany();
 
       return addresses;
     } catch (error) {
