@@ -313,6 +313,7 @@ export class BuyerService {
           close_start_datetime: LessThanOrEqual(now),
           close_end_datetime: MoreThanOrEqual(now),
         },
+        relations: ["store"],
       });
       // Create a Set of store IDs with active close timings for O(1) lookup
       const storesWithActiveCloseTimings = new Set(
