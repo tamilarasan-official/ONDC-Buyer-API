@@ -299,8 +299,26 @@ export class OrderService {
       }
 
       // Step 2: Load full order data with relations for the paginated IDs
-      const ids = orderIds.map((row) => row.id);
-      this.logger.log(`📌 Order IDs to fetch: ${JSON.stringify(ids)}`);
+      const ids = orderIds.map((row) => row.id).filter((id) => id !== undefined && id !== null);
+      this.logger.log(`📌 Order IDs to fetch (${ids.length}): ${JSON.stringify(ids)}`);
+
+      // Safety check: if no valid IDs, return empty
+      if (ids.length === 0) {
+        this.logger.warn(`⚠️ No valid IDs extracted from orderIds`);
+        return {
+          success: true,
+          message: "Orders retrieved successfully",
+          data: [],
+          meta: {
+            page,
+            limit,
+            total,
+            total_pages: Math.ceil(total / limit),
+            has_next: false,
+            has_prev: page > 1,
+          },
+        };
+      }
 
       const orders = await this.orderRepository
         .createQueryBuilder("o")
