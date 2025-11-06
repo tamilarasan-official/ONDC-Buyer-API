@@ -299,13 +299,15 @@ export class OrderService {
 
       // Step 2: Load full order data with relations for the paginated IDs
       const ids = orderIds.map((row) => row.o_id);
+      this.logger.log(`📌 Order IDs to fetch: ${JSON.stringify(ids)}`);
+
       const orders = await this.orderRepository
         .createQueryBuilder("o")
         .leftJoinAndSelect("o.store", "s")
         .leftJoinAndSelect("o.order_items", "oi")
         .leftJoinAndSelect("oi.item", "i")
         .leftJoinAndSelect("o.tracking", "t")
-        .whereInIds(ids)
+        .where("o.id IN (:...ids)", { ids })
         .orderBy("o.created_at", "DESC")
         .addOrderBy("t.timestamp", "ASC")
         .getMany();
