@@ -28,6 +28,7 @@ import { ItemVariants } from "../variant/entities/item-variants.entity";
 import { Dish } from "../dish/entities/dish.entity";
 import { RestaurantReview } from "../review/entities/restaurant-review.entity";
 import { ItemReview } from "../review/entities/item-review.entity";
+import { TimezoneUtil } from "../shared/utils/timezone.util";
 import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-restaurant.entity";
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
@@ -604,13 +605,14 @@ export class BuyerService {
     try {
       this.logger.log(`🎁 Getting active offers`);
 
+      const now = TimezoneUtil.getCurrentISTTime();
       const offers = await this.offersRepository
         .createQueryBuilder("o")
         .leftJoin("o.store", "s")
         .where("o.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere("o.valid_from <= :now", { now: new Date() })
-        .andWhere("o.valid_to >= :now", { now: new Date() })
+        .andWhere("o.valid_from <= :now", { now })
+        .andWhere("o.valid_to >= :now", { now })
         .select([
           "o.id",
           "o.name",
@@ -1364,12 +1366,13 @@ export class BuyerService {
         .getCount();
 
       // Get active offers count
+      const now = TimezoneUtil.getCurrentISTTime();
       const offersCount = await this.offersRepository
         .createQueryBuilder("o")
         .where("o.storeId = :storeId", { storeId: restaurant.id })
         .andWhere("o.status = :status", { status: true })
-        .andWhere("o.valid_from <= :now", { now: new Date() })
-        .andWhere("o.valid_to >= :now", { now: new Date() })
+        .andWhere("o.valid_from <= :now", { now })
+        .andWhere("o.valid_to >= :now", { now })
         .getCount();
 
       // Format response
@@ -1407,12 +1410,14 @@ export class BuyerService {
           : [],
         offers:
           restaurant.offers
-            ?.filter(
-              (offer) =>
+            ?.filter((offer) => {
+              const nowIST = TimezoneUtil.getCurrentISTTime();
+              return (
                 offer.status &&
-                new Date(offer.valid_from) <= new Date() &&
-                new Date(offer.valid_to) >= new Date(),
-            )
+                new Date(offer.valid_from) <= nowIST &&
+                new Date(offer.valid_to) >= nowIST
+              );
+            })
             .map((offer) => ({
               id: offer.id,
               name: offer.name,
@@ -1494,10 +1499,9 @@ export class BuyerService {
   private checkRestaurantOpen(timings: StoreTimings[]): boolean {
     if (!timings || timings.length === 0) return false;
 
-    const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    // Use IST timezone
+    const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
 
     const todayTiming = timings.find(
       (timing) => timing.day_from <= currentDay && timing.day_to >= currentDay,
@@ -1528,9 +1532,8 @@ export class BuyerService {
     openTime: string,
     closeTime: string,
   ): boolean {
-    const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
+    // Use IST timezone
+    const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
@@ -1665,11 +1668,8 @@ export class BuyerService {
     timeFrom: string,
     timeTo: string,
   ): boolean {
-    const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
-    // JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-    // DB: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
+    // Use IST timezone
+    const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
 
     // Check if current day is within the day range
     let isDayInRange = false;
@@ -2337,10 +2337,13 @@ export class BuyerService {
     storeId: number,
   ): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
     try {
-      const now = new Date();
-      // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
-      const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
-      const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+      // Use IST timezone for all time calculations
+      const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
+      const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
+
+      this.logger.log(
+        `🕐 Checking store ${storeId} open status - IST Day: ${currentDay}, Time: ${currentTime} (${TimezoneUtil.formatTimeHHMM(currentTime)})`,
+      );
 
       // Check regular timings
       const todayTiming = await this.storeTimingsRepository
@@ -2372,6 +2375,7 @@ export class BuyerService {
       }
 
       // Check for special closures (holidays, maintenance, etc.)
+      const now = TimezoneUtil.getCurrentISTTime();
       const specialClosure = await this.storeRepository
         .createQueryBuilder("s")
         .leftJoin("s.closeTimings", "sct")
@@ -2409,7 +2413,8 @@ export class BuyerService {
     storePreparationTime?: string,
   ): string {
     try {
-      const now = new Date();
+      // Use IST timezone for time calculations
+      const now = TimezoneUtil.getCurrentISTTime();
 
       // ============================================
       // 1. TIME-OF-DAY ADJUSTMENTS (Peak Hours)
@@ -2666,7 +2671,9 @@ export class BuyerService {
     const { query, location, filters, limit = 10 } = request;
 
     // DEBUG: Log the entire request object
-    this.logger.log(`🔍 DEBUG - Full request object: ${JSON.stringify(request)}`);
+    this.logger.log(
+      `🔍 DEBUG - Full request object: ${JSON.stringify(request)}`,
+    );
     this.logger.log(`🔍 DEBUG - request.lat: ${(request as any).lat}`);
     this.logger.log(`🔍 DEBUG - request.lng: ${(request as any).lng}`);
     this.logger.log(`🔍 DEBUG - location?.lat: ${location?.lat}`);
