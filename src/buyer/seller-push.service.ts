@@ -190,6 +190,7 @@ export class SellerPushService {
       total_amount: Number(order.total_amount).toFixed(2),
       external_order_no: order.order_number,
       order_through: "tazty",
+      collected_by:order.payment_method === "cod" ? "seller" : "buyer",
     };
   }
 
