@@ -270,7 +270,7 @@ export class OrderService {
         .take(limit);
 
       const [orderIds, total] = await Promise.all([
-        queryBuilder.select("o.id").getRawMany(),
+        queryBuilder.select("o.id", "id").getRawMany(),
         this.orderRepository
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
@@ -279,6 +279,7 @@ export class OrderService {
       ]);
 
       this.logger.log(`📊 Found ${orderIds.length} orders on page ${page} of ${total} total`);
+      this.logger.log(`🔍 First order ID sample: ${JSON.stringify(orderIds[0])}`);
 
       // If no orders found, return empty result
       if (orderIds.length === 0) {
@@ -298,7 +299,7 @@ export class OrderService {
       }
 
       // Step 2: Load full order data with relations for the paginated IDs
-      const ids = orderIds.map((row) => row.o_id);
+      const ids = orderIds.map((row) => row.id);
       this.logger.log(`📌 Order IDs to fetch: ${JSON.stringify(ids)}`);
 
       const orders = await this.orderRepository
