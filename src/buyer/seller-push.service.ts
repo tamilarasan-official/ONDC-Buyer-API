@@ -48,6 +48,7 @@ export class SellerPushService {
       this.logger.log(
         `✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`,
       );
+      return response.data;
     } catch (error) {
       this.logger.error(
         `❌ Failed to push order ${order.order_number} to seller: ${error.message}`,

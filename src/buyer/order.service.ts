@@ -175,8 +175,9 @@ export class OrderService {
           .where("o.id = :orderId", { orderId: savedOrder.id })
           .getOne();
 
-        if (orderWithRelations) {
-          await this.sellerPushService.pushOrderToSeller(orderWithRelations);
+        if (orderWithRelations && orderWithRelations.status === "confirmed") {
+          const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
+          console.log("SELLER PUSH RESPONSE:", response);
           this.logger.log(
             `✅ Order ${savedOrder.order_number} pushed to seller successfully`,
           );
@@ -723,6 +724,38 @@ export class OrderService {
       );
 
       await this.orderRepository.update(orderId, { status });
+
+      // Push order to seller if status is confirmed
+      if (status === "confirmed") {
+        const orderWithRelations = await this.orderRepository
+          .createQueryBuilder("o")
+          .leftJoinAndSelect("o.user", "u")
+          .leftJoinAndSelect("o.store", "s")
+          .leftJoinAndSelect("o.order_items", "oi")
+          .leftJoinAndSelect("oi.item", "i")
+          .where("o.id = :orderId", { orderId: orderId })
+          .getOne();
+
+        if(orderWithRelations && orderWithRelations.status === "confirmed") {
+          try {
+            const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
+            console.log("SELLER PUSH RESPONSE:", response);
+            this.logger.log(
+              `✅ Order ${orderId} status updated to ${status} and pushed to seller successfully`,
+            );
+          } catch (error) {
+            this.logger.error(
+              `❌ Error pushing order ${orderId} to seller: ${error.message}`,
+              error.stack,
+            );
+          }
+        }
+        else {
+          this.logger.error(
+            `❌ Order ${orderId} not found or status is not confirmed`,
+          );
+        }
+      }
 
       // Create tracking entry
       await this.createOrderTracking(orderId, status, `Order ${status}`);
