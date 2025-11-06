@@ -1583,7 +1583,8 @@ export class BuyerService {
       is_open: boolean;
     }> = [];
 
-    const now = new Date();
+    // Use IST timezone for current day and time calculation
+    const now = TimezoneUtil.getCurrentISTTime();
     // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to format (1=Sunday, 7=Saturday)
     // JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
     // Format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
