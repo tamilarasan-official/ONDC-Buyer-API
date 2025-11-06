@@ -258,22 +258,61 @@ export class OrderService {
    */
   async getUserOrders(userId: number, page: number = 1, limit: number = 10) {
     try {
-      this.logger.log(`📋 Getting orders for user ${userId}, page ${page}`);
+      this.logger.log(`📋 Getting orders for user ${userId}, page ${page}, limit ${limit}`);
 
-      const [orders, total] = await this.orderRepository
+      // Step 1: Get paginated order IDs and total count (without joins to avoid duplication)
+      const queryBuilder = this.orderRepository
+        .createQueryBuilder("o")
+        .leftJoin("o.user", "u")
+        .where("u.id = :userId", { userId })
+        .orderBy("o.created_at", "DESC")
+        .skip((page - 1) * limit)
+        .take(limit);
+
+      const [orderIds, total] = await Promise.all([
+        queryBuilder.select("o.id").getRawMany(),
+        this.orderRepository
+          .createQueryBuilder("o")
+          .leftJoin("o.user", "u")
+          .where("u.id = :userId", { userId })
+          .getCount(),
+      ]);
+
+      this.logger.log(`📊 Found ${orderIds.length} orders on page ${page} of ${total} total`);
+
+      // If no orders found, return empty result
+      if (orderIds.length === 0) {
+        return {
+          success: true,
+          message: "Orders retrieved successfully",
+          data: [],
+          meta: {
+            page,
+            limit,
+            total,
+            total_pages: Math.ceil(total / limit),
+            has_next: false,
+            has_prev: page > 1,
+          },
+        };
+      }
+
+      // Step 2: Load full order data with relations for the paginated IDs
+      const ids = orderIds.map((row) => row.o_id);
+      const orders = await this.orderRepository
         .createQueryBuilder("o")
         .leftJoinAndSelect("o.store", "s")
         .leftJoinAndSelect("o.order_items", "oi")
         .leftJoinAndSelect("oi.item", "i")
         .leftJoinAndSelect("o.tracking", "t")
-        .leftJoin("o.user", "u")
-        .where("u.id = :userId", { userId })
+        .whereInIds(ids)
         .orderBy("o.created_at", "DESC")
         .addOrderBy("t.timestamp", "ASC")
-        .skip((page - 1) * limit)
-        .take(limit)
-        .getManyAndCount();
+        .getMany();
 
+      this.logger.log(`✅ Loaded ${orders.length} orders with relations`);
+
+      // Step 3: Format orders
       const formattedOrders = await Promise.all(
         orders.map((order) => this.formatOrderData(order)),
       );
