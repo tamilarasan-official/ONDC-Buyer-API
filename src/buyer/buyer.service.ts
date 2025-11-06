@@ -1581,24 +1581,34 @@ export class BuyerService {
     }> = [];
 
     const now = new Date();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
-    const currentDay = now.getDay() === 0 ? 7 : now.getDay(); // Monday=1, ..., Saturday=6, Sunday=7
+    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to format (1=Sunday, 7=Saturday)
+    // JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    // Format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
+    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
     const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     for (const timing of timings) {
-      const dayFrom = timing.day_from;
-      const dayTo = timing.day_to;
+      // Convert day_from and day_to from old format (1=Monday, 7=Sunday) to new format (1=Sunday, 7=Saturday)
+      // Old: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+      // New: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
+      const convertDay = (oldDay: number): number => {
+        // Map: Mon(1)->2, Tue(2)->3, Wed(3)->4, Thu(4)->5, Fri(5)->6, Sat(6)->7, Sun(7)->1
+        return oldDay === 7 ? 1 : oldDay + 1;
+      };
+      
+      const dayFrom = convertDay(timing.day_from);
+      const dayTo = convertDay(timing.day_to);
 
       // Generate days in the range
       const days: number[] = [];
 
       if (dayFrom <= dayTo) {
-        // Normal range (e.g., Monday to Friday: 1-5)
+        // Normal range (e.g., Sunday to Thursday: 1-5)
         for (let day = dayFrom; day <= dayTo; day++) {
           days.push(day);
         }
       } else {
-        // Wrapped range (e.g., Saturday to Monday: 6-1)
+        // Wrapped range (e.g., Friday to Sunday: 6-1)
         // Handle as two separate ranges: from dayFrom to 7, and from 1 to dayTo
         for (let day = dayFrom; day <= 7; day++) {
           days.push(day);
