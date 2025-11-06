@@ -261,16 +261,15 @@ export class OrderService {
       this.logger.log(`📋 Getting orders for user ${userId}, page ${page}, limit ${limit}`);
 
       // Step 1: Get paginated order IDs and total count (without joins to avoid duplication)
-      const queryBuilder = this.orderRepository
-        .createQueryBuilder("o")
-        .leftJoin("o.user", "u")
-        .where("u.id = :userId", { userId })
-        .orderBy("o.created_at", "DESC")
-        .skip((page - 1) * limit)
-        .take(limit);
-
-      const [orderIds, total] = await Promise.all([
-        queryBuilder.select("o.id", "id").getRawMany(),
+      const [paginatedOrders, total] = await Promise.all([
+        this.orderRepository
+          .createQueryBuilder("o")
+          .leftJoin("o.user", "u")
+          .where("u.id = :userId", { userId })
+          .orderBy("o.created_at", "DESC")
+          .skip((page - 1) * limit)
+          .take(limit)
+          .getMany(),
         this.orderRepository
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
@@ -278,11 +277,11 @@ export class OrderService {
           .getCount(),
       ]);
 
-      this.logger.log(`📊 Found ${orderIds.length} orders on page ${page} of ${total} total`);
-      this.logger.log(`🔍 First order ID sample: ${JSON.stringify(orderIds[0])}`);
+      this.logger.log(`📊 Found ${paginatedOrders.length} orders on page ${page} of ${total} total`);
+      this.logger.log(`🔍 First order ID sample: ${JSON.stringify(paginatedOrders[0]?.id)}`);
 
       // If no orders found, return empty result
-      if (orderIds.length === 0) {
+      if (paginatedOrders.length === 0) {
         return {
           success: true,
           message: "Orders retrieved successfully",
@@ -298,8 +297,8 @@ export class OrderService {
         };
       }
 
-      // Step 2: Load full order data with relations for the paginated IDs
-      const ids = orderIds.map((row) => row.id).filter((id) => id !== undefined && id !== null);
+      // Step 2: Extract IDs from paginated orders
+      const ids = paginatedOrders.map((order) => order.id).filter((id) => id !== undefined && id !== null);
       this.logger.log(`📌 Order IDs to fetch (${ids.length}): ${JSON.stringify(ids)}`);
 
       // Safety check: if no valid IDs, return empty
