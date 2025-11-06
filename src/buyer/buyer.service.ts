@@ -1585,23 +1585,17 @@ export class BuyerService {
 
     // Use IST timezone for current day and time calculation
     const now = TimezoneUtil.getCurrentISTTime();
-    // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to format (1=Sunday, 7=Saturday)
-    // JS: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-    // Format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-    const currentDay = (now.getDay() % 7) + 1; // Sunday=1, Monday=2, ..., Saturday=7
+    // Convert JavaScript's getDay() to database format (1=Monday, 7=Sunday)
+    // JS getDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    // Database format: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+    const jsDay = now.getDay();
+    const currentDay = jsDay === 0 ? 7 : jsDay; // Sunday=7, Monday=1, ..., Saturday=6
     const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     for (const timing of timings) {
-      // Convert day_from and day_to from old format (1=Monday, 7=Sunday) to new format (1=Sunday, 7=Saturday)
-      // Old: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
-      // New: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-      const convertDay = (oldDay: number): number => {
-        // Map: Mon(1)->2, Tue(2)->3, Wed(3)->4, Thu(4)->5, Fri(5)->6, Sat(6)->7, Sun(7)->1
-        return oldDay === 7 ? 1 : oldDay + 1;
-      };
-      
-      const dayFrom = convertDay(timing.day_from);
-      const dayTo = convertDay(timing.day_to);
+      // Database format is already 1=Monday, 7=Sunday, so no conversion needed
+      const dayFrom = timing.day_from;
+      const dayTo = timing.day_to;
 
       // Generate days in the range
       const days: number[] = [];
