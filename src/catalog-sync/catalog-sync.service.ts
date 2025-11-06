@@ -202,9 +202,9 @@ export class CatalogSyncService {
     this.logger.log("🩺 Starting HEALTH CHECK sync");
 
     try {
-      // Test with Bangalore only for health check
+      // Test with Madurai only for health check
       const searchResult =
-        await this.ondcSearchService.performCatalogRefresh("std:080");
+        await this.ondcSearchService.performCatalogRefresh("std:0452");
 
       const duration = Date.now() - startTime;
 

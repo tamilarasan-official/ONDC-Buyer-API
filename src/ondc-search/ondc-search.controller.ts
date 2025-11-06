@@ -18,6 +18,65 @@ export class OndcSearchController {
    * Test endpoint for ONDC catalog refresh - sends SEARCH request only
    */
   @Post("catalog-refresh")
+  @ApiOperation({
+    summary: "Trigger ONDC catalog refresh",
+    description:
+      "Sends a SEARCH request to ONDC network to refresh catalog data. The catalog data will be received asynchronously via /on_search webhook endpoint.",
+  })
+  @ApiBody({
+    description: "Catalog refresh parameters",
+    schema: {
+      type: "object",
+      properties: {
+        city: {
+          type: "string",
+          example: "std:0452",
+          description: "City code for catalog refresh (e.g., std:0452 for Madurai, std:080 for Bangalore)",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Search request sent successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: {
+          type: "string",
+          example:
+            "Search request sent to ONDC. Catalog data will be received via /on_search webhook.",
+        },
+        data: {
+          type: "object",
+          properties: {
+            message_id: {
+              type: "string",
+              example: "f6ea6c85-4338-4503-a0d1-5a888bb916f4",
+            },
+            ack_status: { type: "string", example: "ACK" },
+            status: {
+              type: "string",
+              example: "waiting_for_catalog",
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Catalog refresh failed",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Catalog refresh failed" },
+        error: { type: "string", example: "Search request failed" },
+      },
+    },
+  })
   async catalogRefresh(@Body() body: { city?: string }) {
     try {
       const result = await this.ondcSearchService.performCatalogRefresh(
