@@ -185,7 +185,7 @@ export class SellerPushService {
       instructions: order.notes,
       pickup_date_time: "",
       payment_method: order.payment_method,
-      payment_status: order.payment_status,
+      payment_status: order.payment_status === "paid" ? "received" : "pending",
       delivery_charge: Number(order.delivery_fee).toFixed(2),
       total_amount: Number(order.total_amount).toFixed(2),
       external_order_no: order.order_number,
