@@ -387,9 +387,13 @@ export class BuyerService {
         }),
       );
 
-      // Sort by distance, then rating (highest first), then name
+      // Sort by is_open (opened first), then distance, then rating (highest first), then name
       storesWithRatings.sort((a, b) => {
-        // First sort by distance
+        // First sort by is_open (opened restaurants first)
+        if (a.is_open !== b.is_open) {
+          return a.is_open ? -1 : 1; // true (-1) comes before false (1)
+        }
+        // Then sort by distance
         if (a.distance !== b.distance) {
           return a.distance - b.distance;
         }
