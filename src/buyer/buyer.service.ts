@@ -373,14 +373,9 @@ export class BuyerService {
         }),
       );
 
-      // Sort ALL restaurants by is_open (opened first), then distance, then rating (highest first), then name
-      // This ensures opened restaurants appear first across ALL pages
+      // Sort ALL restaurants by distance, then rating (highest first), then name
       allStoresWithRatings.sort((a, b) => {
-        // First sort by is_open (opened restaurants first)
-        if (a.is_open !== b.is_open) {
-          return a.is_open ? -1 : 1; // true (-1) comes before false (1)
-        }
-        // Then sort by distance
+        // Sort by distance
         if (a.distance !== b.distance) {
           return a.distance - b.distance;
         }
