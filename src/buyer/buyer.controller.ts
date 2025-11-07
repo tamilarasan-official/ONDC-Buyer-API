@@ -135,8 +135,8 @@ export class BuyerController {
     name: "limit",
     required: false,
     type: Number,
-    description: "Number of restaurants per page (default: 20)",
-    example: 20,
+    description: "Number of restaurants per page (default: 10)",
+    example: 10,
   })
   @ApiResponse({
     status: 200,
@@ -195,7 +195,7 @@ export class BuyerController {
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
     const isVegMode = vegMode === "true";
     const pageNum = page ? parseInt(page) : 1;
-    const limitNum = limit ? parseInt(limit) : 20;
+    const limitNum = limit ? parseInt(limit) : 10;
 
     return this.buyerService.getHomeData(
       userId,

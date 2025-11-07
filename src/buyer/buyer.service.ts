@@ -93,7 +93,7 @@ export class BuyerService {
     deviceLng?: number,
     vegMode?: boolean,
     page: number = 1,
-    limit: number = 20,
+    limit: number = 10,
   ) {
     this.logger.log(
       `🏠 Getting home page data for user: ${userId || "guest"} (page: ${page}, limit: ${limit})`,
@@ -197,7 +197,7 @@ export class BuyerService {
     vegMode?: boolean,
     userId?: number,
     page: number = 1,
-    limit: number = 20,
+    limit: number = 10,
   ) {
     try {
       this.logger.log(
