@@ -50,3 +50,6 @@ temp/
 logs/
 
 data-source.ts
+# Test scripts
+test-*.js
+check-*.js
