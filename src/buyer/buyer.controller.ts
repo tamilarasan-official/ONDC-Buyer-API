@@ -1328,6 +1328,25 @@ export class BuyerController {
     summary: "Register device token",
     description: "Register device token for push notifications",
   })
+  @ApiBody({
+    description: "Device token registration payload",
+    schema: {
+      type: "object",
+      required: ["device_token", "platform"],
+      properties: {
+        device_token: {
+          type: "string",
+          example: "fcm_token_123456789",
+          description: "FCM/APNS device token received from the client application",
+        },
+        platform: {
+          type: "string",
+          example: "android",
+          description: "Origin platform of the device token (e.g., android, ios, web)",
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: "Device token registered successfully",
@@ -1404,6 +1423,15 @@ export class BuyerController {
   @ApiOperation({
     summary: "Unregister device token",
     description: "Unregister device token for push notifications",
+  })
+  @ApiParam({
+    name: "token",
+    required: true,
+    description: "Device token string to unregister",
+    schema: {
+      type: "string",
+      example: "fcm_token_123456789",
+    },
   })
   @ApiResponse({
     status: 200,
