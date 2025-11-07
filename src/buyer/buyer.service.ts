@@ -274,20 +274,6 @@ export class BuyerService {
         return { restaurants: [], total: 0 };
       }
 
-      // Apply pagination
-      const skip = (page - 1) * limit;
-      const stores = allStores.slice(skip, skip + limit);
-      this.logger.log(
-        `📄 Returning page ${page}: ${stores.length} restaurants (${skip + 1}-${skip + stores.length} of ${totalCount})`,
-      );
-
-      // Debug: Log paginated stores
-      stores.forEach((store, index) => {
-        this.logger.log(
-          `🏪 Store ${skip + index + 1}: ${store.s_name} (ID: ${store.s_id}) - Distance: ${store.distance}km - Lat: ${store.sl_gps_lat}, Lng: ${store.sl_gps_lng}`,
-        );
-      });
-
       // Get user's favorite restaurant IDs
       let favoriteStoreIds: Set<number> = new Set();
       if (userId) {
@@ -302,14 +288,14 @@ export class BuyerService {
         );
       }
 
-      this.logger.log(`🔍 Processing ${stores.length} restaurants...`);
+      this.logger.log(`🔍 Processing all ${allStores.length} restaurants...`);
 
-      // Batch fetch all active close timings for all stores at once (optimization to avoid N+1 queries)
-      const storeIds = stores.map((store) => store.s_id);
+      // Batch fetch all active close timings for ALL stores at once (optimization to avoid N+1 queries)
+      const allStoreIds = allStores.map((store) => store.s_id);
       const now = new Date();
       const activeCloseTimings = await this.storeCloseTimingsRepository.find({
         where: {
-          store: { id: In(storeIds) },
+          store: { id: In(allStoreIds) },
           close_start_datetime: LessThanOrEqual(now),
           close_end_datetime: MoreThanOrEqual(now),
         },
@@ -320,11 +306,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store.id),
       );
 
-      // Calculate ratings, open status, and delivery times for each restaurant
-      const storesWithRatings = await Promise.all(
-        stores.map(async (store, index) => {
+      // Calculate ratings, open status, and delivery times for ALL restaurants
+      const allStoresWithRatings = await Promise.all(
+        allStores.map(async (store, index) => {
           this.logger.log(
-            `🔍 Processing restaurant ${index + 1}/${stores.length}: ${store.s_name} (ID: ${store.s_id})`,
+            `🔍 Processing restaurant ${index + 1}/${allStores.length}: ${store.s_name} (ID: ${store.s_id})`,
           );
 
           const distance = store.distance;
@@ -387,8 +373,9 @@ export class BuyerService {
         }),
       );
 
-      // Sort by is_open (opened first), then distance, then rating (highest first), then name
-      storesWithRatings.sort((a, b) => {
+      // Sort ALL restaurants by is_open (opened first), then distance, then rating (highest first), then name
+      // This ensures opened restaurants appear first across ALL pages
+      allStoresWithRatings.sort((a, b) => {
         // First sort by is_open (opened restaurants first)
         if (a.is_open !== b.is_open) {
           return a.is_open ? -1 : 1; // true (-1) comes before false (1)
@@ -406,9 +393,24 @@ export class BuyerService {
       });
 
       this.logger.log(
-        `✅ Successfully processed and sorted ${storesWithRatings.length} restaurants`,
+        `✅ Successfully processed and sorted all ${allStoresWithRatings.length} restaurants`,
       );
-      return { restaurants: storesWithRatings, total: totalCount };
+
+      // Apply pagination AFTER sorting all restaurants
+      const skip = (page - 1) * limit;
+      const paginatedRestaurants = allStoresWithRatings.slice(skip, skip + limit);
+      this.logger.log(
+        `📄 Returning page ${page}: ${paginatedRestaurants.length} restaurants (${skip + 1}-${skip + paginatedRestaurants.length} of ${totalCount})`,
+      );
+
+      // Debug: Log paginated restaurants
+      paginatedRestaurants.forEach((store, index) => {
+        this.logger.log(
+          `🏪 Restaurant ${skip + index + 1}: ${store.name} (ID: ${store.id}) - Open: ${store.is_open} - Distance: ${store.distance}km`,
+        );
+      });
+
+      return { restaurants: paginatedRestaurants, total: totalCount };
     } catch (error) {
       this.logger.error(
         `❌ Error getting nearby restaurants: ${error.message}`,
