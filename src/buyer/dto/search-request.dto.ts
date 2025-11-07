@@ -288,7 +288,8 @@ export class SearchSuggestionsRequestDto {
   location?: LocationDto;
 
   @ApiProperty({
-    description: "Latitude (backwards compatibility - use location.lat instead)",
+    description:
+      "Latitude (backwards compatibility - use location.lat instead)",
     example: 9.93523,
     type: "number",
     required: false,
@@ -299,7 +300,8 @@ export class SearchSuggestionsRequestDto {
   lat?: number;
 
   @ApiProperty({
-    description: "Longitude (backwards compatibility - use location.lng instead)",
+    description:
+      "Longitude (backwards compatibility - use location.lng instead)",
     example: 78.130404,
     type: "number",
     required: false,

@@ -46,7 +46,9 @@ export class BannerService {
       const promotion_link = createBannerDto.promotion_link;
       let promotion_id: number | null = null;
       if (promotion_type === "restaurant_id") {
-        const store = await this.storeRepository.findOne({ where: { reference_id: promotion_link } });
+        const store = await this.storeRepository.findOne({
+          where: { reference_id: promotion_link },
+        });
         promotion_id = store?.id || null;
         if (!promotion_id) {
           throw new BadRequestException("Restaurant not found");
