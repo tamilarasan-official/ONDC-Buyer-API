@@ -82,7 +82,7 @@ export class SellerStatusService {
       [SellerStatus.PACKED]: "Order packed and ready for pickup",
       [SellerStatus.AGENT_ASSIGNED]: "Delivery agent assigned",
       [SellerStatus.PICKED]: "Order picked up by delivery agent",
-      [SellerStatus.OUT_OF_DELIVERY]: "Order out for delivery",
+      [SellerStatus.OUT_FOR_DELIVERY]: "Order out for delivery",
       [SellerStatus.DELIVERED]: "Order delivered successfully",
       [SellerStatus.CANCELLED]: "Order cancelled",
     };
