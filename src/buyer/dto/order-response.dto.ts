@@ -304,8 +304,15 @@ export class OrderSummaryDto {
   discount_amount: number;
 
   @ApiProperty({
+    description: "Tip amount",
+    example: 50.0,
+    type: "number",
+  })
+  tip_amount: number;
+
+  @ApiProperty({
     description: "Final total amount",
-    example: 685.64,
+    example: 735.64,
     type: "number",
   })
   total_amount: number;

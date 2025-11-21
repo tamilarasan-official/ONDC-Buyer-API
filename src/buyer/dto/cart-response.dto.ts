@@ -175,8 +175,23 @@ export class CartSummaryDto {
   discount_amount: number;
 
   @ApiProperty({
+    description: "Tip amount",
+    example: 50.0,
+    type: "number",
+  })
+  tip_amount: number;
+
+  @ApiProperty({
+    description: "Maximum tip amount allowed (constant: ₹100.00)",
+    example: 100.0,
+    type: "number",
+    required: false,
+  })
+  max_tip_amount?: number;
+
+  @ApiProperty({
     description: "Final total amount",
-    example: 685.64,
+    example: 735.64,
     type: "number",
   })
   final_amount: number;

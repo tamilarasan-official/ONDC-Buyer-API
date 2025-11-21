@@ -222,3 +222,18 @@ export class ApplyOfferDto {
   @IsNumber()
   offer_id?: number;
 }
+
+export class UpdateTipDto {
+  @ApiProperty({
+    description: "Tip amount to add to cart",
+    example: 50.00,
+    type: "number",
+    minimum: 0,
+    required: true,
+  })
+  @IsNotEmpty()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tip_amount: number;
+}

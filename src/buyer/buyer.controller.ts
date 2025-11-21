@@ -43,6 +43,7 @@ import {
   UpdateCartItemDto,
   RemoveFromCartDto,
   ApplyOfferDto,
+  UpdateTipDto,
 } from "./dto/cart-request.dto";
 import {
   CartResponseDto,
@@ -827,6 +828,97 @@ export class BuyerController {
   async applyOffer(@Req() req: any, @Body() applyOfferDto: ApplyOfferDto) {
     const userId = req.user.id;
     return this.cartService.applyOffer(userId, applyOfferDto);
+  }
+
+  @Put("cart/tip")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth("JWT-auth")
+  @ApiOperation({
+    summary: "Update tip amount in cart",
+    description:
+      "Update the tip amount for the current cart. Tip amount is validated against maximum allowed tip (constant: ₹100.00).",
+  })
+  @ApiBody({
+    type: UpdateTipDto,
+    description: "Tip amount to add to cart",
+    examples: {
+      tip50: {
+        summary: "Add ₹50 tip",
+        value: {
+          tip_amount: 50.0,
+        },
+      },
+      tip100: {
+        summary: "Add ₹100 tip",
+        value: {
+          tip_amount: 100.0,
+        },
+      },
+      noTip: {
+        summary: "Remove tip (set to 0)",
+        value: {
+          tip_amount: 0.0,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Tip amount updated successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Tip amount updated successfully" },
+        data: {
+          type: "object",
+          properties: {
+            tip_amount: { type: "number", example: 50.0 },
+            max_tip_amount: {
+              type: "number",
+              example: 100.0,
+              description: "Maximum tip amount (constant: ₹100.00)",
+            },
+            cart_summary: {
+              type: "object",
+              properties: {
+                subtotal: { type: "number", example: 500.0 },
+                delivery_fee: { type: "number", example: 30.0 },
+                tax_amount: { type: "number", example: 50.0 },
+                discount_amount: { type: "number", example: 0.0 },
+                tip_amount: { type: "number", example: 50.0 },
+                max_tip_amount: {
+                  type: "number",
+                  example: 100.0,
+                  description: "Maximum tip amount (constant: ₹100.00)",
+                },
+                final_amount: { type: "number", example: 630.0 },
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid tip amount or exceeds maximum limit",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: {
+          type: "string",
+          example:
+            "Tip amount cannot exceed maximum allowed tip of ₹100.00",
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
+  })
+  async updateTip(@Req() req: any, @Body() updateTipDto: UpdateTipDto) {
+    const userId = req.user.id;
+    return this.cartService.updateTip(userId, updateTipDto.tip_amount);
   }
 
   @Post("orders")

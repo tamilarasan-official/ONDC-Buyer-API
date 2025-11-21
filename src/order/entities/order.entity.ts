@@ -72,6 +72,9 @@ export class Order {
   @Column({ type: "decimal", precision: 10, scale: 2 })
   discount_amount: number;
 
+  @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
+  tip_amount: number;
+
   @Column({ type: "decimal", precision: 10, scale: 2 })
   total_amount: number;
 

@@ -27,6 +27,9 @@ import { BuyerService } from "./buyer.service";
 @Injectable()
 export class CartService {
   private readonly logger = new Logger(CartService.name);
+  
+  // Maximum tip amount constant (fixed amount in INR)
+  private readonly MAX_TIP_AMOUNT = 450.0;
 
   constructor(
     @InjectRepository(Cart)
@@ -84,6 +87,8 @@ export class CartService {
               delivery_fee: 0,
               tax_amount: 0,
               discount_amount: 0,
+              tip_amount: 0,
+              max_tip_amount: null,
               final_amount: 0,
             },
             total_items: 0,
@@ -269,6 +274,8 @@ export class CartService {
             delivery_fee: 0,
             tax_amount: 0,
             discount_amount: 0,
+            tip_amount: 0,
+            max_tip_amount: null,
             final_amount: 0,
           };
 
@@ -417,6 +424,8 @@ export class CartService {
             delivery_fee: 0,
             tax_amount: 0,
             discount_amount: 0,
+            tip_amount: 0,
+            max_tip_amount: null,
             final_amount: 0,
           };
 
@@ -487,6 +496,8 @@ export class CartService {
             delivery_fee: 0,
             tax_amount: 0,
             discount_amount: 0,
+            tip_amount: 0,
+            max_tip_amount: null,
             final_amount: 0,
           };
 
@@ -597,9 +608,15 @@ export class CartService {
       );
       const discountAmount = Math.min(subtotal * 0.1, 100); // 10% discount, max 100
 
-      // Update cart with discount
+      // Update cart with discount (preserve tip)
+      const tipAmount = Number(cart.tip_amount || 0);
       cart.discount_amount = discountAmount;
-      cart.final_amount = cart.total_amount - discountAmount;
+      cart.final_amount =
+        cart.total_amount +
+        cart.delivery_fee +
+        cart.tax_amount +
+        tipAmount -
+        discountAmount;
       await this.cartRepository.save(cart);
 
       const cartSummary = await this.calculateCartSummary(cart);
@@ -625,6 +642,79 @@ export class CartService {
   }
 
   /**
+   * Update tip amount in cart with max tip validation
+   */
+  async updateTip(userId: number, tipAmount: number) {
+    try {
+      this.logger.log(
+        `💰 Updating tip amount for user ${userId}: ${tipAmount}`,
+      );
+
+      const cart = await this.cartRepository
+        .createQueryBuilder("c")
+        .leftJoinAndSelect("c.store", "s")
+        .leftJoinAndSelect("s.configs", "sc")
+        .leftJoinAndSelect("c.cart_items", "ci")
+        .leftJoin("c.user", "u")
+        .where("u.id = :userId", { userId })
+        .andWhere("c.is_active = :isActive", { isActive: true })
+        .getOne();
+
+      if (!cart) {
+        throw new BadRequestException("Cart is empty");
+      }
+
+      // Validate tip amount (must be >= 0)
+      if (tipAmount < 0) {
+        throw new BadRequestException("Tip amount cannot be negative");
+      }
+
+      // Validate against max tip amount (constant: fixed amount)
+      if (tipAmount > this.MAX_TIP_AMOUNT) {
+        throw new BadRequestException(
+          `Tip amount cannot exceed maximum allowed tip of ₹${this.MAX_TIP_AMOUNT.toFixed(2)}`,
+        );
+      }
+
+      // Update tip amount
+      cart.tip_amount = Number(tipAmount.toFixed(2));
+
+      // Recalculate final amount including tip
+      const finalAmount =
+        cart.total_amount +
+        cart.delivery_fee +
+        cart.tax_amount +
+        cart.tip_amount -
+        cart.discount_amount;
+
+      cart.final_amount = Number(finalAmount.toFixed(2));
+      await this.cartRepository.save(cart);
+
+      const cartSummary = await this.calculateCartSummary(cart);
+
+      this.logger.log(
+        `✅ Tip updated successfully. New final amount: ₹${cart.final_amount}`,
+      );
+
+      return {
+        success: true,
+        message: "Tip amount updated successfully",
+        data: {
+          tip_amount: Number(tipAmount.toFixed(2)),
+          max_tip_amount: this.MAX_TIP_AMOUNT,
+          cart_summary: cartSummary,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `❌ Error updating tip: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Create new cart
    */
   private async createCart(userId: number, storeId: number): Promise<Cart> {
@@ -635,6 +725,7 @@ export class CartService {
       delivery_fee: 0,
       tax_amount: 0,
       discount_amount: 0,
+      tip_amount: 0,
       final_amount: 0,
       is_active: true,
     });
@@ -668,11 +759,24 @@ export class CartService {
     }
     taxAmount = Number(taxAmount.toFixed(2));
 
-    const finalAmount = Number((subtotal + deliveryFee + taxAmount).toFixed(2));
+    // Get current tip amount (preserve existing tip)
+    const currentCart = await this.cartRepository.findOne({
+      where: { id: cartId },
+    });
+    const tipAmount = Number(currentCart?.tip_amount || 0);
+    const discountAmount = Number(currentCart?.discount_amount || 0);
+
+    const finalAmount = Number(
+      (subtotal + deliveryFee + taxAmount + tipAmount - discountAmount).toFixed(
+        2,
+      ),
+    );
 
     this.logger.log(`subtotal: ${Number(subtotal)}`);
     this.logger.log(`deliveryFee: ${Number(deliveryFee)}`);
     this.logger.log(`taxAmount: ${Number(taxAmount)}`);
+    this.logger.log(`tipAmount: ${Number(tipAmount)}`);
+    this.logger.log(`discountAmount: ${Number(discountAmount)}`);
     this.logger.log(`finalAmount: ${Number(finalAmount)}`);
 
     await this.cartRepository.update(cartId, {
@@ -697,6 +801,7 @@ export class CartService {
     const deliveryFee = Number(cart.delivery_fee || 0);
     const taxAmount = Number(cart.tax_amount || 0);
     const discountAmount = Number(cart.discount_amount || 0);
+    const tipAmount = Number(cart.tip_amount || 0);
     const finalAmount = Number(cart.final_amount || 0);
 
     return {
@@ -704,6 +809,8 @@ export class CartService {
       delivery_fee: Number(deliveryFee.toFixed(2)),
       tax_amount: Number(taxAmount.toFixed(2)),
       discount_amount: Number(discountAmount.toFixed(2)),
+      tip_amount: Number(tipAmount.toFixed(2)),
+      max_tip_amount: this.MAX_TIP_AMOUNT,
       final_amount: Number(finalAmount.toFixed(2)),
       applied_offer:
         discountAmount > 0

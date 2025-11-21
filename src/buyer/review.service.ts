@@ -142,6 +142,7 @@ export class ReviewService {
           const orderItem = order.order_items.find(
             (oi) => oi.item.id === foodRating.item_id,
           );
+          
           if (!orderItem) {
             this.logger.warn(
               `Item ${foodRating.item_id} not found in order ${createReviewDto.order_id}`,

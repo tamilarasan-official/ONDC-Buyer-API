@@ -35,6 +35,9 @@ export class Cart {
   discount_amount: number;
 
   @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
+  tip_amount: number;
+
+  @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
   final_amount: number;
 
   @Column({ type: "boolean", default: true })
