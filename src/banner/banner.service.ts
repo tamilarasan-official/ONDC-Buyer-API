@@ -64,9 +64,11 @@ export class BannerService {
       }
 
       // Generate file name from banner title (remove spaces and special characters)
+      // Include timestamp for cache busting
+      const timestamp = Date.now();
       const fileName = createBannerDto.title.replace(/[^a-zA-Z0-9]/g, "");
       const fileExtension = imageFile.originalname.split(".").pop();
-      const s3Key = `banners/${fileName}.${fileExtension}`;
+      const s3Key = `banners/${fileName}-${timestamp}.${fileExtension}`;
 
       // Upload file to S3
       const imageUrl = await this.uploadService.uploadFile(
@@ -320,12 +322,14 @@ export class BannerService {
         }
 
         // Generate new file name
+        // Include timestamp for cache busting
+        const timestamp = Date.now();
         const fileName = (updateBannerDto.title || banner.title).replace(
           /[^a-zA-Z0-9]/g,
           "",
         );
         const fileExtension = imageFile.originalname.split(".").pop();
-        const s3Key = `banners/${fileName}.${fileExtension}`;
+        const s3Key = `banners/${fileName}-${timestamp}.${fileExtension}`;
 
         // Upload new file
         const imageUrl = await this.uploadService.uploadFile(
