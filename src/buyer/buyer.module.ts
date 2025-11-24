@@ -11,6 +11,7 @@ import { ReviewService } from "./review.service";
 import { SellerPushService } from "./seller-push.service";
 import { SellerStatusService } from "../shared/services/seller-status.service";
 import { LocationService } from "../shared/services/location.service";
+import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
 import { FCMService } from "./fcm.service";
 import { InvoiceService } from "./invoice.service";
 import { InvoiceController } from "./invoice.controller";
@@ -105,6 +106,7 @@ import { Banner } from "../banner/entities/banner.entity";
     SellerPushService,
     SellerStatusService,
     LocationService,
+    DeliveryPricingService,
     FCMService,
     InvoiceService,
   ],

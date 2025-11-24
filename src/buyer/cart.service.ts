@@ -23,6 +23,8 @@ import {
   ApplyOfferDto,
 } from "./dto/cart-request.dto";
 import { BuyerService } from "./buyer.service";
+import { LocationService } from "../shared/services/location.service";
+import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
 
 @Injectable()
 export class CartService {
@@ -50,6 +52,8 @@ export class CartService {
     private readonly offersRepository: Repository<Offers>,
     @Inject(forwardRef(() => BuyerService))
     private readonly buyerService: BuyerService,
+    private readonly locationService: LocationService,
+    private readonly deliveryPricingService: DeliveryPricingService,
   ) {}
 
   /**
@@ -746,7 +750,59 @@ export class CartService {
       (sum, item) => sum + Number(item.total_price),
       0,
     );
-    const deliveryFee = 0;
+
+    // Get cart with store and user relations for delivery fee calculation
+    const cart = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: ["store", "store.locations", "user"],
+    });
+
+    let deliveryFee = 0;
+
+    // Calculate delivery fee from API if cart has items and locations are available
+    if (cart && cartItems.length > 0) {
+      if (
+        cart.store?.locations &&
+        cart.store.locations.length > 0 &&
+        cart.user
+      ) {
+        const storeLocation = cart.store.locations[0];
+        const pickupLat = Number(storeLocation.gps_lat);
+        const pickupLng = Number(storeLocation.gps_lng);
+
+        try {
+          // Get user location (dropoff)
+          const userLocation = await this.locationService.getUserLocation(
+            cart.user.id,
+          );
+
+          // Call delivery pricing API
+          deliveryFee = await this.deliveryPricingService.getDeliveryCharge(
+            pickupLat,
+            pickupLng,
+            Number(userLocation.lat),
+            Number(userLocation.lng),
+          );
+
+          this.logger.log(
+            `📦 Delivery fee calculated: ₹${deliveryFee} for cart ${cartId}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `❌ Failed to fetch delivery fee for cart ${cartId}: ${error.message}`,
+          );
+          deliveryFee = 0; // Fallback to 0 on error
+        }
+      } else {
+        this.logger.warn(
+          `⚠️ Cannot calculate delivery fee: missing store location or user for cart ${cartId}`,
+        );
+        deliveryFee = 0;
+      }
+    } else {
+      // Cart is empty or doesn't exist, delivery fee is 0
+      deliveryFee = 0;
+    }
 
     // Calculate tax based on item's tax rate and type
     let taxAmount = 0;
