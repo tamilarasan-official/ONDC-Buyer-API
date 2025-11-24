@@ -17,6 +17,7 @@ export class ONDCSearchRequestDto {
     bap_id: string;
     bap_uri: string;
     bpp_id: string;
+    bpp_uri: string;
     transaction_id: string; // UUID
     message_id: string; // UUID
     timestamp: string; // ISO datetime
@@ -46,6 +47,11 @@ export class ONDCSearchRequestDto {
       category?: {
         id?: string;
       };
+    };
+    catalog?: {
+      "bpp/providers"?: [{
+        id?: string;
+      }];
     };
   };
 }

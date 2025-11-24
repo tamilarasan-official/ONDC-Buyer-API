@@ -23,6 +23,7 @@ import { StoreLocation } from "../store/entities/store-location.entity";
 import { StoreTimings } from "../store/entities/store-timings.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 import { StoreConfigs } from "../store/entities/store-configs.entity";
+import { StoreFulfillment } from "../store/entities/store-fulfillment.entity";
 import { Category } from "../category/entities/category.entity";
 import { Item } from "../item/entities/item.entity";
 import { ItemPrices } from "../item/entities/item-prices.entity";
@@ -59,6 +60,7 @@ import { Banner } from "../banner/entities/banner.entity";
       StoreTimings,
       StoreCloseTimings,
       StoreConfigs,
+      StoreFulfillment,
       Category,
       Item,
       ItemPrices,

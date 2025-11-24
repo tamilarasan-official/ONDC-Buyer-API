@@ -11,15 +11,19 @@ import {
 @Injectable()
 export class OndcSearchService {
   private readonly logger = new Logger(OndcSearchService.name);
-  private readonly ondcSearchUrl: string;
+  private readonly bap_id: string;
+  private readonly bap_uri: string;
+  private readonly bpp_id: string;
+  private readonly bpp_uri: string;
 
   constructor(
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
   ) {
-    this.ondcSearchUrl =
-      this.configService.get<string>("ONDC_SEARCH_URL") ||
-      "https://ondcbeta.squadcube.in/sqc/search";
+    this.bap_id = this.configService.get<string>("ONDC_BAP_ID") || "";
+    this.bap_uri = this.configService.get<string>("ONDC_BAP_URI") || "";
+    this.bpp_id = this.configService.get<string>("ONDC_BPP_ID") || "";
+    this.bpp_uri = this.configService.get<string>("ONDC_BPP_URI") || "";
   }
 
   /**
@@ -31,6 +35,7 @@ export class OndcSearchService {
     area_code?: string;
     search_term?: string;
     category_id?: string;
+    storeId?: string;
   }): Promise<ONDCSearchResponseDto[]> {
     try {
       const searchRequest = this.buildSearchRequest(searchParams);
@@ -39,8 +44,9 @@ export class OndcSearchService {
         `Performing ONDC search for city: ${searchParams.city || "default"}`,
       );
 
+      const ondcSearchUrl = `${this.bpp_uri}/search`;
       const response = await firstValueFrom(
-        this.httpService.post(this.ondcSearchUrl, searchRequest, {
+        this.httpService.post(ondcSearchUrl, searchRequest, {
           headers: {
             "Content-Type": "application/json",
             Accept: "application/json",
@@ -102,26 +108,30 @@ export class OndcSearchService {
     area_code?: string;
     search_term?: string;
     category_id?: string;
+    storeId?: string;
   }): ONDCSearchRequestDto {
     const transactionId = uuidv4();
     const messageId = uuidv4();
     const timestamp = new Date().toISOString();
+     
+    if (!this.bap_id || !this.bap_uri || !this.bpp_id || !this.bpp_uri) {
+      throw new HttpException(
+        "ONDC_BAP_ID, ONDC_BAP_URI, ONDC_BPP_ID, and ONDC_BPP_URI must be configured",
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
 
-    const searchRequest: ONDCSearchRequestDto = {
+    let searchRequest: ONDCSearchRequestDto = {
       context: {
         domain: "ONDC:RET11", // F&B domain
         action: "search",
         country: "IND",
         city: searchParams.city || "std:0452",
         core_version: "1.2.0",
-        bap_id:
-          this.configService.get<string>("ONDC_BAP_ID") || "devapi.tazty.in",
-        bap_uri:
-          this.configService.get<string>("ONDC_BAP_URI") ||
-          "https://devapi.tazty.in",
-        bpp_id:
-          this.configService.get<string>("ONDC_BPP_ID") ||
-          "ondcbeta.squadcube.in",
+        bap_id: this.bap_id,
+        bap_uri: this.bap_uri,
+        bpp_id: this.bpp_id,
+        bpp_uri:this.bpp_uri,
         transaction_id: transactionId,
         message_id: messageId,
         timestamp: timestamp,
@@ -163,6 +173,12 @@ export class OndcSearchService {
       };
     }
 
+    if (searchParams.storeId) {
+      searchRequest.message.catalog = {
+        "bpp/providers": [{ id: searchParams.storeId }],
+      };
+    }
+
     return searchRequest;
   }
 
@@ -171,14 +187,17 @@ export class OndcSearchService {
    */
   async performCatalogRefresh(
     city: string = "std:0452",
+    storeId?: string,
   ): Promise<{ success: boolean; message_id: string; ack_status: string }> {
     this.logger.log(`Starting complete catalog refresh for city: ${city}`);
 
     try {
       // Step 1: Send SEARCH request (gets acknowledgement only)
-      const searchRequest = this.buildSearchRequest({ city });
+      const searchRequest = this.buildSearchRequest({ city, storeId });
+      
+      const ondcSearchUrl = `${this.bpp_uri}/search`;
       const searchResponse = await this.httpService.axiosRef.post(
-        this.ondcSearchUrl,
+        ondcSearchUrl,
         searchRequest,
       );
 
@@ -215,6 +234,7 @@ export class OndcSearchService {
     category_id?: string;
     gps?: string;
     area_code?: string;
+    storeId?: string;
   }): Promise<ONDCSearchResponseDto[]> {
     this.logger.log(
       `Performing specific search: ${JSON.stringify(searchParams)}`,

@@ -9,6 +9,7 @@ import { Repository, LessThanOrEqual, MoreThanOrEqual, In } from "typeorm";
 import { LocationService } from "../shared/services/location.service";
 import { Store } from "../store/entities/store.entity";
 import { StoreLocation } from "../store/entities/store-location.entity";
+import { StoreFulfillment } from "../store/entities/store-fulfillment.entity";
 import { Category } from "../category/entities/category.entity";
 import { Item } from "../item/entities/item.entity";
 import { Offers } from "../offer/entities/offers.entity";
@@ -55,6 +56,8 @@ export class BuyerService {
     private readonly storeCloseTimingsRepository: Repository<StoreCloseTimings>,
     @InjectRepository(StoreConfigs)
     private readonly storeConfigsRepository: Repository<StoreConfigs>,
+    @InjectRepository(StoreFulfillment)
+    private readonly storeFulfillmentRepository: Repository<StoreFulfillment>,
     @InjectRepository(ItemPrices)
     private readonly itemPricesRepository: Repository<ItemPrices>,
     @InjectRepository(ItemQuantities)
@@ -240,6 +243,9 @@ export class BuyerService {
       const queryBuilder = this.storeRepository
         .createQueryBuilder("s")
         .innerJoin("s.locations", "sl")
+        .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
+          deliveryType: "Delivery",
+        })
         .where("s.status = :status", { status: true })
         .andWhere("sl.gps_lat IS NOT NULL")
         .andWhere("sl.gps_lng IS NOT NULL")
@@ -257,6 +263,8 @@ export class BuyerService {
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
           "sl.address_locality as sl_address_locality",
+          "sf.contact_phone as sf_contact_phone",
+          "sf.contact_email as sf_contact_email",
           distanceSubquery,
         ])
         .orderBy("distance", "ASC")
@@ -368,7 +376,9 @@ export class BuyerService {
             offers_count: 0, // Will be calculated separately
             is_favorite: favoriteStoreIds.has(store.s_id),
             timings,
-            is_open: storeOpenData.isOpen
+            is_open: storeOpenData.isOpen,
+            phone_number: store.sf_contact_phone || null,
+            email: store.sf_contact_email || null,
           };
         }),
       );
@@ -478,16 +488,40 @@ export class BuyerService {
       }
 
       // Return all banner data from database
-      return banners.map((banner) => ({
-        title: banner.title,
-        subtitle: banner.subtitle || undefined,
-        cta_button: banner.cta_button || undefined,
-        image_url: banner.image_url,
-        background_color: banner.background_color || undefined,
-        promotion_type: banner.promotion_type || undefined,
-        promotion_link: banner.promotion_link || undefined,
-        sequence: banner.sequence,
-      }));
+      return Promise.all(
+        banners.map(async (banner) => {
+          if (banner.promotion_type === "restaurant_id") {
+            const restaurant = await this.storeRepository.findOne({
+              where: { reference_id: banner.promotion_link },
+            });
+            if(!restaurant){
+              return null;
+            }
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type || undefined,
+              promotion_link:
+                restaurant?.id?.toString() || banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
+          } else {
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type || undefined,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
+          }
+        }),
+      );
     } catch (error) {
       this.logger.error(
         `Error fetching promotional banners: ${error.message}`,
@@ -856,6 +890,9 @@ export class BuyerService {
         .leftJoin("s.items", "i")
         .leftJoin("i.prices", "p")
         .leftJoin("i.attributes", "a")
+        .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
+          deliveryType: "Delivery",
+        })
         .where("s.status = :status", { status: true })
         .andWhere(distanceFilter);
 
@@ -914,9 +951,11 @@ export class BuyerService {
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
           "sl.address_locality as sl_address_locality",
+          "sf.contact_phone as sf_contact_phone",
+          "sf.contact_email as sf_contact_email",
           `${distanceQuery}`,
         ])
-        .groupBy("s.id, sl.id");
+        .groupBy("s.id, sl.id, sf.id");
 
       // Apply sorting
       if (sortBy === "distance") {
@@ -1013,6 +1052,8 @@ export class BuyerService {
             is_open: storeOpenData.isOpen,
             is_favorite: favoriteStoreIds.has(restaurant.s_id),
             timings,
+            phone_number: restaurant.sf_contact_phone || null,
+            email: restaurant.sf_contact_email || null,
           };
         }),
       );
@@ -1317,6 +1358,7 @@ export class BuyerService {
         .leftJoinAndSelect("s.closeTimings", "sct")
         .leftJoinAndSelect("s.offers", "o")
         .leftJoinAndSelect("s.configs", "sc")
+        .leftJoinAndSelect("s.fulfillments", "sf")
         .where("s.id = :id", { id: restaurantId })
         .andWhere("s.status = :status", { status: true })
         .getOne();
@@ -1324,6 +1366,11 @@ export class BuyerService {
       if (!restaurant) {
         throw new Error("Restaurant not found");
       }
+
+      // Get Delivery fulfillment for phone and email
+      const deliveryFulfillment = restaurant.fulfillments?.find(
+        (f) => f.type === "Delivery",
+      );
 
       // Calculate distance if location data is available
       let distance = 0;
@@ -1440,6 +1487,8 @@ export class BuyerService {
         delivery_time: deliveryTime,
         min_order_value: restaurant.configs?.[0]?.min_order_value || 0,
         delivery_fee: 30.0, // TODO: Calculate based on distance and store config
+        phone_number: deliveryFulfillment?.contact_phone || null,
+        email: deliveryFulfillment?.contact_email || null,
       };
 
       // Add categorized items if requested
@@ -2216,6 +2265,9 @@ export class BuyerService {
         .createQueryBuilder("s")
         .leftJoin("s.locations", "sl")
         .leftJoin("s.restaurant_reviews", "rr")
+        .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
+          deliveryType: "Delivery",
+        })
         .select([
           "s.id as s_id",
           "s.name as s_name",
@@ -2229,13 +2281,15 @@ export class BuyerService {
           "sl.gps_lng as sl_gps_lng",
           "sl.address_city as sl_address_city",
           "sl.address_locality as sl_address_locality",
+          "sf.contact_phone as sf_contact_phone",
+          "sf.contact_email as sf_contact_email",
           `${distanceQuery}`,
           "AVG(rr.rating) as avg_rating",
           "COUNT(rr.id) as review_count",
         ])
         .where("s.status = :status", { status: true })
         .andWhere(distanceFilter)
-        .groupBy("s.id, sl.id")
+        .groupBy("s.id, sl.id, sf.id")
         .having("AVG(rr.rating) > 0") // Only include restaurants with at least one review
         .orderBy("avg_rating", "DESC")
         .addOrderBy("review_count", "DESC") // Secondary sort by review count
@@ -2313,6 +2367,8 @@ export class BuyerService {
             is_open: storeOpenData.isOpen,
             is_favorite: favoriteStoreIds.has(restaurant.s_id),
             timings,
+            phone_number: restaurant.sf_contact_phone || null,
+            email: restaurant.sf_contact_email || null,
           };
         }),
       );
@@ -2762,6 +2818,9 @@ export class BuyerService {
           .createQueryBuilder("s")
           .leftJoin("s.locations", "sl")
           .leftJoin("s.items", "i") // Join with items to search by item names
+          .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
+            deliveryType: "Delivery",
+          })
           .where("s.status = :status", { status: true })
           .andWhere("sl.gps_lat IS NOT NULL")
           .andWhere("sl.gps_lng IS NOT NULL")
@@ -2780,6 +2839,8 @@ export class BuyerService {
             "sl.gps_lng",
             "sl.address_city",
             "sl.address_locality",
+            "sf.contact_phone as sf_contact_phone",
+            "sf.contact_email as sf_contact_email",
           ])
           .addSelect(
             `(6371 * acos(cos(radians(:userLat)) * cos(radians(sl.gps_lat)) * cos(radians(sl.gps_lng) - radians(:userLng)) + sin(radians(:userLat)) * sin(radians(sl.gps_lat))))`,
@@ -2790,7 +2851,7 @@ export class BuyerService {
             userLng: userLocation.lng,
           })
           .groupBy(
-            "s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality",
+            "s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality, sf.id",
           ) // Group to avoid duplicates
           .orderBy("distance", "ASC")
           .limit(remainingLimit)
@@ -2816,6 +2877,8 @@ export class BuyerService {
               city: restaurant.sl_address_city,
               locality: restaurant.sl_address_locality,
             },
+            phone_number: restaurant.sf_contact_phone || null,
+            email: restaurant.sf_contact_email || null,
           });
         }
       }

@@ -584,6 +584,22 @@ export class RestaurantDetailsDto {
     search?: string;
     dietary_preference?: string;
   };
+
+  @ApiProperty({
+    description: "Restaurant phone number from Delivery fulfillment",
+    example: "+919876543210",
+    required: false,
+    nullable: true,
+  })
+  phone_number?: string | null;
+
+  @ApiProperty({
+    description: "Restaurant email from Delivery fulfillment",
+    example: "contact@restaurant.com",
+    required: false,
+    nullable: true,
+  })
+  email?: string | null;
 }
 
 export class RestaurantDetailsResponseDto {

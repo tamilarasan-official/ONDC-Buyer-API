@@ -21,7 +21,7 @@ export class OndcSearchController {
   @ApiOperation({
     summary: "Trigger ONDC catalog refresh",
     description:
-      "Sends a SEARCH request to ONDC network to refresh catalog data. The catalog data will be received asynchronously via /on_search webhook endpoint.",
+      "Sends a SEARCH request to ONDC network to refresh catalog data. The search URL is dynamically constructed from the configured BPP URI. The catalog data will be received asynchronously via /on_search webhook endpoint. Optionally filter by specific store ID.",
   })
   @ApiBody({
     description: "Catalog refresh parameters",
@@ -32,6 +32,11 @@ export class OndcSearchController {
           type: "string",
           example: "std:0452",
           description: "City code for catalog refresh (e.g., std:0452 for Madurai, std:080 for Bangalore)",
+        },
+        storeId: {
+          type: "string",
+          example: "965",
+          description: "Optional store/provider ID to refresh specific store catalog",
         },
       },
     },
@@ -77,10 +82,11 @@ export class OndcSearchController {
       },
     },
   })
-  async catalogRefresh(@Body() body: { city?: string }) {
+  async catalogRefresh(@Body() body: { city?: string, storeId?: string }) {
     try {
       const result = await this.ondcSearchService.performCatalogRefresh(
         body.city,
+        body.storeId,
       );
 
       return {
@@ -110,7 +116,7 @@ export class OndcSearchController {
   @ApiOperation({
     summary: "Perform ONDC search",
     description:
-      "Test endpoint to perform specific ONDC search with custom parameters",
+      "Test endpoint to perform specific ONDC search with custom parameters. The search URL is dynamically constructed from the configured BPP URI. Optionally filter by specific store ID.",
   })
   @ApiBody({
     description: "Search parameters for ONDC search",
@@ -141,6 +147,11 @@ export class OndcSearchController {
           type: "string",
           example: "560001",
           description: "Area code",
+        },
+        storeId: {
+          type: "string",
+          example: "965",
+          description: "Optional store/provider ID to search specific store",
         },
       },
     },
@@ -185,6 +196,7 @@ export class OndcSearchController {
       category_id?: string;
       gps?: string;
       area_code?: string;
+      storeId?: string;
     },
   ) {
     try {
@@ -788,12 +800,80 @@ export class OndcSearchController {
    * Complete catalog refresh with ingestion endpoint - now just sends SEARCH request
    */
   @Post("catalog-refresh-and-ingest")
-  async catalogRefreshAndIngest(@Body() body: { city?: string }) {
+  @ApiOperation({
+    summary: "Trigger catalog refresh and wait for ingestion",
+    description:
+      "Sends a SEARCH request to ONDC network. The search URL is dynamically constructed from the configured BPP URI. Catalog data will be received asynchronously via /on_search webhook endpoint. Optionally filter by specific store ID.",
+  })
+  @ApiBody({
+    description: "Catalog refresh parameters",
+    schema: {
+      type: "object",
+      properties: {
+        city: {
+          type: "string",
+          example: "std:0452",
+          description: "City code for catalog refresh (e.g., std:0452 for Madurai, std:080 for Bangalore)",
+        },
+        storeId: {
+          type: "string",
+          example: "965",
+          description: "Optional store/provider ID to refresh specific store catalog",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Search request sent successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: {
+          type: "string",
+          example:
+            "Search request sent to ONDC. Multiple catalog data will be received via /on_search webhook.",
+        },
+        data: {
+          type: "object",
+          properties: {
+            search_stats: {
+              type: "object",
+              properties: {
+                message_id: { type: "string", example: "f6ea6c85-4338-4503-a0d1-5a888bb916f4" },
+                ack_status: { type: "string", example: "ACK" },
+                status: { type: "string", example: "waiting_for_multiple_catalogs" },
+              },
+            },
+            note: {
+              type: "string",
+              example: "Each provider will send separate catalog data via /on_search webhook",
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Catalog refresh failed",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Catalog refresh failed" },
+        error: { type: "string", example: "Search request failed: NACK" },
+      },
+    },
+  })
+  async catalogRefreshAndIngest(@Body() body: { city?: string, storeId?: string }) {
     try {
       // Step 1: Send SEARCH request to ONDC (gets acknowledgement only)
       this.logger.log("Starting catalog refresh process");
       const searchResult = await this.ondcSearchService.performCatalogRefresh(
-        body.city,
+        body?.city||"std:0452",
+        body?.storeId,
       );
 
       if (!searchResult.success) {
