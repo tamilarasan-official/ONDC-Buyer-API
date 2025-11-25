@@ -1,5 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { IsOptional, IsEnum } from "class-validator";
 import { DietaryPreference } from "../../shared/enums/dietary-preference.enum";
+import { StoreDietaryPreference } from "../../shared/enums/store-dietary-preference.enum";
 
 export class RestaurantTimingDto {
   @ApiProperty({
@@ -336,11 +338,15 @@ export class RestaurantItemDto {
   dietary_preference: DietaryPreference;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
     required: false,
   })
-  food_type?: string;
+  @IsOptional()
+  @IsEnum(StoreDietaryPreference)
+  food_type?: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Cuisine tags",
@@ -503,11 +509,15 @@ export class RestaurantDetailsDto {
   gst_number: string;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
     required: false,
   })
-  food_type?: string;
+  @IsOptional()
+  @IsEnum(StoreDietaryPreference)
+  food_type?: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Cuisine tags",

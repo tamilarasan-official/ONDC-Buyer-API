@@ -49,7 +49,7 @@ export class Store {
   gst_number?: string; // GST registration number like "22AAAAA0000A1Z5"
 
   @Column({ type: "varchar", length: 50, nullable: true })
-  food_type?: string; // Food type like "Veg", "Non Veg", "Vegan"
+  food_type?: string; // Food type: "pure-veg", "veg", "non-veg", "egg", "veg-and-non-veg" (StoreDietaryPreference enum values)
 
   @Column({ type: "text", array: true, nullable: true })
   tags?: string[]; // Array of cuisine tags like ["South Indian", "North Indian", "Chinese"]

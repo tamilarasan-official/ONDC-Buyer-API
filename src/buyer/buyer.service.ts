@@ -35,6 +35,8 @@ import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entit
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
+import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
+import { VegMode } from "../shared/enums/veg-mode.enum";
 
 @Injectable()
 export class BuyerService {
@@ -95,7 +97,7 @@ export class BuyerService {
     userId?: number,
     deviceLat?: number,
     deviceLng?: number,
-    vegMode?: boolean,
+    vegMode?: VegMode,
     page: number = 1,
     limit: number = 10,
   ) {
@@ -152,7 +154,7 @@ export class BuyerService {
             page,
             limit,
           ),
-          this.getWhatsOnYourMind(),
+          this.getWhatsOnYourMind(vegMode),
           this.getPromotionalBanner(),
         ]);
 
@@ -198,7 +200,7 @@ export class BuyerService {
     userLat: number,
     userLng: number,
     radiusKm: number,
-    vegMode?: boolean,
+    vegMode?: VegMode,
     userId?: number,
     page: number = 1,
     limit: number = 10,
@@ -207,7 +209,13 @@ export class BuyerService {
       this.logger.log(
         `🔍 Getting nearby restaurants within ${radiusKm}km of ${userLat}, ${userLng} (page: ${page}, limit: ${limit})`,
       );
-      this.logger.log(`🥬 Veg mode: ${vegMode ? "enabled" : "disabled"}`);
+      if (vegMode) {
+        this.logger.log(
+          `🥬 Veg mode: ${vegMode} (${vegMode === VegMode.ALL ? "showing all restaurants with veg items only" : "showing pure-veg restaurants only"})`,
+        );
+      } else {
+        this.logger.log(`🥬 Veg mode: disabled (showing all restaurants)`);
+      }
 
       // First, let's check total stores in database
       const totalStores = await this.storeRepository.count();
@@ -250,7 +258,22 @@ export class BuyerService {
         .where("s.status = :status", { status: true })
         .andWhere("sl.gps_lat IS NOT NULL")
         .andWhere("sl.gps_lng IS NOT NULL")
-        .andWhere(distanceFilter)
+        .andWhere(distanceFilter);
+
+      // Apply veg_mode filter based on mode
+      if (vegMode === VegMode.PURE) {
+        // Option 2: Show only pure-veg restaurants
+        queryBuilder.andWhere("s.food_type = :pureVeg", {
+          pureVeg: StoreDietaryPreference.PURE_VEG,
+        });
+        this.logger.log(
+          `🥬 Veg mode filter: showing only pure-veg restaurants`,
+        );
+      }
+      // Note: For VegMode.ALL, we don't filter restaurants here
+      // Instead, we'll filter items in the response processing
+
+      queryBuilder
         .select([
           "DISTINCT s.id as s_id",
           "s.name as s_name",
@@ -362,7 +385,7 @@ export class BuyerService {
             description: store.s_description,
             logo_url: store.s_logo_url,
             fssai_license: store.s_fssai_license_no,
-            food_type: store.s_food_type || "",
+            food_type: (store.s_food_type as StoreDietaryPreference) || undefined,
             cuisine_tags: store.s_tags ? store.s_tags.join(", ") : "",
             location: {
               lat: store.sl_gps_lat,
@@ -428,11 +451,28 @@ export class BuyerService {
 
   /**
    * MODIFY: Get "What's On Your Mind?" dishes (was getPopularCategories)
+   * Filters to veg dishes if vegMode is ALL
    */
-  private async getWhatsOnYourMind() {
-    const dishes = await this.dishRepository
+  private async getWhatsOnYourMind(vegMode?: VegMode) {
+    const queryBuilder = this.dishRepository
       .createQueryBuilder("d")
-      .where("d.status = :status", { status: true })
+      .where("d.status = :status", { status: true });
+
+    // Filter to veg dishes if ALL mode is enabled
+    if (vegMode === VegMode.ALL) {
+      queryBuilder.andWhere(
+        "(d.food_type = :pureVeg OR d.food_type = :veg)",
+        {
+          pureVeg: StoreDietaryPreference.PURE_VEG,
+          veg: StoreDietaryPreference.VEG,
+        },
+      );
+      this.logger.log(
+        `🥬 Filtering "What's on your mind" dishes to veg only`,
+      );
+    }
+
+    const dishes = await queryBuilder
       .select([
         "d.id",
         "d.name",
@@ -452,7 +492,7 @@ export class BuyerService {
       id: dish.id,
       name: dish.name,
       description: dish.description,
-      food_type: dish.food_type,
+      food_type: (dish.food_type as StoreDietaryPreference) || undefined,
       icon: dish.icon,
       sequence: dish.sequence,
       status: dish.status,
@@ -619,7 +659,7 @@ export class BuyerService {
             },
             distance: Math.round(distance * 100) / 100,
             rating: ratingData.rating,
-            food_type: item.s_food_type || undefined,
+            food_type: (item.s_food_type as StoreDietaryPreference) || undefined,
             cuisine_tags: item.s_tags ? item.s_tags.join(", ") : undefined,
           };
         }),
@@ -1232,7 +1272,7 @@ export class BuyerService {
             },
             is_available: (item.q_available_count || 0) > 0,
             is_favorite: favoriteItemIds.has(item.i_id),
-            food_type: item.s_food_type || undefined,
+            food_type: (item.s_food_type as StoreDietaryPreference) || undefined,
             cuisine_tags: item.s_tags ? item.s_tags.join(", ") : undefined,
           };
         }),
@@ -1433,7 +1473,7 @@ export class BuyerService {
         logo_url: restaurant.logo_url,
         fssai_license: restaurant.fssai_license_no,
         gst_number: restaurant.gst_number,
-        food_type: restaurant.food_type || "",
+        food_type: (restaurant.food_type as StoreDietaryPreference) || undefined,
         cuisine_tags: restaurant.tags ? restaurant.tags.join(", ") : "",
         locations:
           restaurant.locations?.map((location) => ({
@@ -1797,7 +1837,7 @@ export class BuyerService {
       const menuData = {
         restaurant_id: restaurant.id,
         restaurant_name: restaurant.name,
-        food_type: restaurant.food_type || "",
+        food_type: (restaurant.food_type as StoreDietaryPreference) || undefined,
         cuisine_tags: restaurant.tags ? restaurant.tags.join(", ") : "",
         categories,
         total_items: totalItems,
@@ -2351,7 +2391,7 @@ export class BuyerService {
             description: restaurant.s_description,
             logo_url: restaurant.s_logo_url,
             fssai_license: restaurant.s_fssai_license_no,
-            food_type: restaurant.s_food_type || "",
+            food_type: (restaurant.s_food_type as StoreDietaryPreference) || undefined,
             cuisine_tags: restaurant.s_tags ? restaurant.s_tags.join(", ") : "",
             location: {
               lat: restaurant.sl_gps_lat,
@@ -2870,7 +2910,7 @@ export class BuyerService {
             icon: restaurant.s_logo_url,
             image: restaurant.s_logo_url,
             distance: restaurant.distance,
-            food_type: restaurant.s_food_type || "",
+            food_type: (restaurant.s_food_type as StoreDietaryPreference) || undefined,
             cuisine_tags: restaurant.s_tags ? restaurant.s_tags.join(", ") : "",
             location: {
               lat: restaurant.sl_gps_lat,

@@ -1,6 +1,10 @@
 import { BaseTransformer } from "./base-transformer";
 import { Store } from "../../store/entities/store.entity";
 import { Provider } from "../../ondc-search/dto/ondc-search.dto";
+import {
+  normalizeStoreDietaryPreference,
+  StoreDietaryPreference,
+} from "../../shared/enums/store-dietary-preference.enum";
 
 /**
  * Store data transformer with validation and sanitization
@@ -39,8 +43,23 @@ export class StoreTransformer extends BaseTransformer {
       // Extract GST number from tags
       store.gst_number = this.extractGstNumber(provider.tags || []);
 
-      // Extract food type from descriptor
-      store.food_type = this.sanitizeFoodType(provider.descriptor.food_type);
+      // Extract and normalize food type from descriptor
+      const normalizedFoodType = normalizeStoreDietaryPreference(
+        provider.descriptor.food_type,
+      );
+      if (normalizedFoodType) {
+        store.food_type = normalizedFoodType;
+        this.logger.log(
+          `Normalized store food_type for ${store.reference_id}: ${provider.descriptor.food_type} -> ${normalizedFoodType}`,
+        );
+      } else if (provider.descriptor.food_type) {
+        this.logWarning(
+          `Invalid food_type value for store ${store.reference_id}: ${provider.descriptor.food_type}. Expected: pure-veg, veg, non-veg, egg, or veg-and-non-veg`,
+        );
+        store.food_type = undefined;
+      } else {
+        store.food_type = undefined;
+      }
 
       // Extract and process tags from descriptor
       store.tags = this.processStoreTags(provider.descriptor.tags || []);
@@ -167,36 +186,6 @@ export class StoreTransformer extends BaseTransformer {
     return "";
   }
 
-  /**
-   * Sanitize and validate food type
-   */
-  private sanitizeFoodType(foodType: string | undefined): string {
-    if (!foodType || typeof foodType !== "string") {
-      return "";
-    }
-
-    // Common food types
-    const validFoodTypes = [
-      "Veg",
-      "Non Veg",
-      "Vegan",
-      "Vegetarian",
-      "Non-Vegetarian",
-    ];
-    const normalized = foodType.trim();
-
-    // Check if it matches any valid food type (case insensitive)
-    const matched = validFoodTypes.find(
-      (type) => type.toLowerCase() === normalized.toLowerCase(),
-    );
-
-    if (matched) {
-      return matched;
-    }
-
-    // If not in predefined list, sanitize and return
-    return this.sanitizeString(foodType, 50);
-  }
 
   /**
    * Process store tags from descriptor

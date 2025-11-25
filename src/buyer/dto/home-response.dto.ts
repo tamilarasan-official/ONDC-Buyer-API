@@ -1,4 +1,6 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { IsOptional, IsEnum } from "class-validator";
+import { StoreDietaryPreference } from "../../shared/enums/store-dietary-preference.enum";
 
 export class RestaurantTimingDto {
   @ApiProperty({
@@ -118,11 +120,15 @@ export class NearbyRestaurantDto {
   logo_url: string;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
     required: false,
   })
-  food_type?: string;
+  @IsOptional()
+  @IsEnum(StoreDietaryPreference)
+  food_type?: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Cuisine tags",
@@ -317,11 +323,15 @@ export class TrendingItemDto {
   rating: number;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
     required: false,
   })
-  food_type?: string;
+  @IsOptional()
+  @IsEnum(StoreDietaryPreference)
+  food_type?: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Cuisine tags",
@@ -352,10 +362,13 @@ export class WhatsOnYourMindDto {
   description: string;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Non Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "non-veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
   })
-  food_type: string;
+  @IsEnum(StoreDietaryPreference)
+  food_type: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Dish icon URL",

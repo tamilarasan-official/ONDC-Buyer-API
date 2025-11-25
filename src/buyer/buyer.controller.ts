@@ -28,6 +28,7 @@ import { BuyerService } from "./buyer.service";
 import { JwtAuthGuard } from "../authentication/jwt-auth.guard";
 import { HomeResponseDto } from "./dto/home-response.dto";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
+import { VegMode } from "../shared/enums/veg-mode.enum";
 import {
   SearchRequestDto,
   SearchSuggestionsRequestDto,
@@ -122,9 +123,12 @@ export class BuyerController {
   @ApiQuery({
     name: "veg_mode",
     required: false,
-    type: Boolean,
-    description: "Filter for vegetarian-only restaurants and items",
-    example: false,
+    type: String,
+    description:
+      "Vegetarian filter mode: 'all' (show all restaurants with only veg products) or 'pure' (show only pure-veg restaurants). If not provided or false, shows all restaurants.",
+    enum: VegMode,
+    enumName: "VegMode",
+    example: "all",
   })
   @ApiQuery({
     name: "page",
@@ -195,7 +199,9 @@ export class BuyerController {
     const userId = req?.user?.id;
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
-    const isVegMode = vegMode === "true";
+    // Parse veg_mode: accept enum values or "false" for disabled
+    const vegModeValue =
+      vegMode && vegMode !== "false" ? (vegMode as VegMode) : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
 
@@ -203,7 +209,7 @@ export class BuyerController {
       userId,
       lat,
       lng,
-      isVegMode,
+      vegModeValue,
       pageNum,
       limitNum,
     );

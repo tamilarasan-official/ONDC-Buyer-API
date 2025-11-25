@@ -1,5 +1,7 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { IsOptional, IsEnum } from "class-validator";
 import { RestaurantTimingDto } from "./home-response.dto";
+import { StoreDietaryPreference } from "../../shared/enums/store-dietary-preference.enum";
 
 export class SearchRestaurantDto {
   @ApiProperty({
@@ -331,11 +333,15 @@ export class SearchItemDto {
   is_favorite: boolean;
 
   @ApiProperty({
-    description: "Food type",
-    example: "Veg",
+    description: "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: "veg",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
     required: false,
   })
-  food_type?: string;
+  @IsOptional()
+  @IsEnum(StoreDietaryPreference)
+  food_type?: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Cuisine tags",
