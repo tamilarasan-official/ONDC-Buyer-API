@@ -450,4 +450,105 @@ export class ItemTransformer extends BaseTransformer {
       .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
       .join(" ");
   }
+
+  /**
+   * Transform item timing from ONDC tags
+   * Returns array of timings to support multiple time windows
+   */
+  transformTimings(itemData: ONDCItem): Array<{
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+  }> {
+    if (!Array.isArray(itemData.tags)) {
+      return [];
+    }
+
+    // Find all timing tags (item can have multiple timing windows)
+    const timingTags = itemData.tags.filter((tag) => tag.code === "timing");
+
+    if (timingTags.length === 0) {
+      return [];
+    }
+
+    const timings: Array<{
+      day_from: number;
+      day_to: number;
+      time_from: string;
+      time_to: string;
+    }> = [];
+
+    // Process each timing tag
+    for (const timingTag of timingTags) {
+      if (!Array.isArray(timingTag.list)) {
+        continue;
+      }
+
+      // Initialize with defaults
+      const timing = {
+        day_from: 1,
+        day_to: 7,
+        time_from: "0000",
+        time_to: "2359",
+      };
+
+      // Parse timing values from tag list
+      timingTag.list.forEach((item: any) => {
+        // Handle standard structure: { code: "time_from", value: "0700" }
+        if (item.code) {
+          switch (item.code) {
+            case "day_from":
+              timing.day_from = this.parseInteger(item.value, 1);
+              if (timing.day_from < 1 || timing.day_from > 7) {
+                timing.day_from = 1;
+              }
+              break;
+            case "day_to":
+              timing.day_to = this.parseInteger(item.value, 7);
+              if (timing.day_to < 1 || timing.day_to > 7) {
+                timing.day_to = 7;
+              }
+              break;
+            case "time_from":
+              timing.time_from = this.parseOndcTime(item.value, "0000");
+              break;
+            case "time_to":
+              timing.time_to = this.parseOndcTime(item.value, "2359");
+              break;
+          }
+        } else {
+          // Handle alternative structure: { time_from: "0700" } (direct property)
+          // This handles cases where time_from/time_to are direct properties without code/value
+          if (item.time_from) {
+            timing.time_from = this.parseOndcTime(
+              item.time_from,
+              "0000",
+            );
+          }
+          if (item.time_to) {
+            timing.time_to = this.parseOndcTime(item.time_to, "2359");
+          }
+        }
+      });
+
+      timings.push(timing);
+    }
+
+    return timings;
+  }
+
+  /**
+   * Transform item timing from ONDC tags (backward compatibility - returns first timing)
+   * @deprecated Use transformTimings() to get all timings
+   */
+  transformTiming(itemData: ONDCItem): {
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+  } | null {
+    const timings = this.transformTimings(itemData);
+    return timings.length > 0 ? timings[0] : null;
+  }
 }

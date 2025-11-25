@@ -459,6 +459,15 @@ export class CatalogIngestionService {
     store: Store,
     queryRunner: any,
   ): Promise<void> {
+    // Check if there are any timing tags - if so, delete all existing timings first
+    const hasTimingTags = tags.some((tag) => tag.code === "timing");
+    if (hasTimingTags) {
+      await queryRunner.manager.delete(StoreTimings, { store: { id: store.id } });
+      this.logger.log(
+        `Deleted all existing timings for store ${store.reference_id} before processing new timings`,
+      );
+    }
+
     for (const tag of tags) {
       switch (tag.code) {
         case "timing":
@@ -479,24 +488,163 @@ export class CatalogIngestionService {
 
   /**
    * Process store timings from tags
+   * Note: All previous timings are deleted in processStoreTags before this method is called.
+   * This method only creates new timings from the parsed data.
    */
   private async processStoreTimings(
     timingList: any[],
     store: Store,
     queryRunner: any,
   ): Promise<void> {
-    // Delete existing timings for this store to replace with new ones
-    await queryRunner.manager.delete(StoreTimings, { store: { id: store.id } });
+    if (!Array.isArray(timingList) || timingList.length === 0) {
+      this.logger.warn(
+        `No timing data provided for store ${store.reference_id}`,
+      );
+      return;
+    }
 
+    // Parse timing data from the list
+    const timing = this.parseStoreTiming(timingList);
+
+    if (!timing) {
+      this.logger.warn(
+        `Failed to parse timing data for store ${store.reference_id}`,
+      );
+      return;
+    }
+
+    // Create new timing (all previous timings were already deleted in processStoreTags)
     const storeTiming = new StoreTimings();
     storeTiming.store = store;
-    storeTiming.type = "Order";
-    storeTiming.day_from = 1;
-    storeTiming.day_to = 7;
-    storeTiming.time_from = "0900";
-    storeTiming.time_to = "2100";
+    storeTiming.type = timing.type;
+    storeTiming.day_from = timing.day_from;
+    storeTiming.day_to = timing.day_to;
+    storeTiming.time_from = timing.time_from;
+    storeTiming.time_to = timing.time_to;
+
+    // Location is optional - set if provided
+    if (timing.locationId) {
+      const location = await queryRunner.manager.findOne(StoreLocation, {
+        where: { reference_id: timing.locationId, store: { id: store.id } },
+      });
+      if (location) {
+        storeTiming.location = location;
+      }
+    }
 
     await queryRunner.manager.save(StoreTimings, storeTiming);
+    this.logger.log(
+      `Added timing for store ${store.reference_id} (type: ${timing.type}): ${timing.day_from}-${timing.day_to} ${timing.time_from}-${timing.time_to}`,
+    );
+  }
+
+  /**
+   * Parse store timing from ONDC tag list
+   */
+  private parseStoreTiming(timingList: any[]): {
+    type: string;
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+    locationId?: string;
+  } | null {
+    if (!Array.isArray(timingList) || timingList.length === 0) {
+      return null;
+    }
+
+    // Initialize with defaults
+    const timing = {
+      type: "Order", // Default type
+      day_from: 1,
+      day_to: 7,
+      time_from: "0000",
+      time_to: "2359",
+      locationId: undefined as string | undefined,
+    };
+
+    // Parse timing values from tag list
+    timingList.forEach((item) => {
+      if (!item.code || !item.value) {
+        return;
+      }
+
+      switch (item.code) {
+        case "type":
+          // Map ONDC type values to our type values
+          const typeValue = String(item.value).trim();
+          if (typeValue === "All" || typeValue === "Delivery") {
+            timing.type = "Delivery";
+          } else if (typeValue === "Order") {
+            timing.type = "Order";
+          } else if (typeValue === "Self-Pickup" || typeValue === "Pickup") {
+            timing.type = "Self-Pickup";
+          } else {
+            timing.type = typeValue; // Use as-is if not recognized
+          }
+          break;
+        case "location":
+          timing.locationId = String(item.value).trim();
+          break;
+        case "day_from":
+          timing.day_from = this.parseInteger(item.value, 1);
+          if (timing.day_from < 1 || timing.day_from > 7) {
+            timing.day_from = 1;
+          }
+          break;
+        case "day_to":
+          timing.day_to = this.parseInteger(item.value, 7);
+          if (timing.day_to < 1 || timing.day_to > 7) {
+            timing.day_to = 7;
+          }
+          break;
+        case "time_from":
+          timing.time_from = this.parseOndcTime(item.value, "0000");
+          break;
+        case "time_to":
+          timing.time_to = this.parseOndcTime(item.value, "2359");
+          break;
+      }
+    });
+
+    return timing;
+  }
+
+  /**
+   * Parse integer helper (similar to BaseTransformer)
+   */
+  private parseInteger(
+    value: string | number | undefined,
+    fallback: number = 0,
+  ): number {
+    if (value === undefined || value === null || value === "") {
+      return fallback;
+    }
+
+    const parsed = typeof value === "string" ? parseInt(value, 10) : value;
+    return isNaN(parsed) ? fallback : parsed;
+  }
+
+  /**
+   * Parse ONDC time format (HHMM) helper (similar to BaseTransformer)
+   */
+  private parseOndcTime(
+    time: string | undefined,
+    fallback: string = "0000",
+  ): string {
+    if (!time || typeof time !== "string") {
+      return fallback;
+    }
+
+    const timeRegex = /^([0-1]?[0-9]|2[0-3])[0-5][0-9]$/;
+    const sanitized = time.replace(/[^\d]/g, "").padStart(4, "0");
+
+    if (timeRegex.test(sanitized)) {
+      return sanitized;
+    }
+
+    this.logger.warn(`Invalid time format: ${time}, using fallback: ${fallback}`);
+    return fallback;
   }
 
   /**
@@ -736,7 +884,7 @@ export class CatalogIngestionService {
       await this.processItemCategories(itemData, savedItem, store, queryRunner);
 
       // Process item timing information
-      await this.processItemTimings(itemData, savedItem, queryRunner);
+      await this.processItemTimings(itemData, savedItem, store, queryRunner);
 
       // Process item location and fulfillment relationships
       await this.processItemLocationFulfillment(
@@ -1396,26 +1544,86 @@ export class CatalogIngestionService {
 
   /**
    * Process item timing information
+   * Supports multiple timing windows per item
    */
   private async processItemTimings(
     itemData: ONDCItem,
     item: Item,
+    store: Store,
     queryRunner: any,
   ): Promise<void> {
     // Delete existing timings for this item
     await queryRunner.manager.delete(ItemTimings, { item: { id: item.id } });
 
-    if (itemData.time?.timestamp) {
-      const itemTiming = new ItemTimings();
-      itemTiming.item = item;
-      itemTiming.day_from = 1; // Default to all days
-      itemTiming.day_to = 7;
-      itemTiming.time_from = "0600"; // Default availability hours
-      itemTiming.time_to = "2200";
+    // Parse all timings from tags (supports multiple timing windows)
+    const timings = this.itemTransformer.transformTimings(itemData);
 
-      await queryRunner.manager.save(ItemTimings, itemTiming);
-      this.logger.log(`Added timing for item ${item.reference_id}`);
+    if (timings && timings.length > 0) {
+      // Create ItemTimings record for each timing window
+      for (const timing of timings) {
+        const itemTiming = new ItemTimings();
+        itemTiming.item = item;
+        itemTiming.day_from = timing.day_from;
+        itemTiming.day_to = timing.day_to;
+        itemTiming.time_from = timing.time_from;
+        itemTiming.time_to = timing.time_to;
+
+        await queryRunner.manager.save(ItemTimings, itemTiming);
+        this.logger.log(
+          `Added timing for item ${item.reference_id}: ${timing.day_from}-${timing.day_to} ${timing.time_from}-${timing.time_to}`,
+        );
+      }
+    } else if (itemData.time?.timestamp) {
+      // Fallback: Use store timings if item timing not available
+      const storeTimings = await this.getStoreTimingsForItem(
+        store.id,
+        queryRunner,
+      );
+
+      if (storeTimings && storeTimings.length > 0) {
+        // Use the first available store timing (prefer "Delivery", then "Order")
+        const storeTiming = storeTimings[0];
+        const itemTiming = new ItemTimings();
+        itemTiming.item = item;
+        itemTiming.day_from = storeTiming.day_from;
+        itemTiming.day_to = storeTiming.day_to;
+        itemTiming.time_from = storeTiming.time_from;
+        itemTiming.time_to = storeTiming.time_to;
+
+        await queryRunner.manager.save(ItemTimings, itemTiming);
+        this.logger.log(
+          `Added store timing for item ${item.reference_id} (type: ${storeTiming.type}): ${storeTiming.day_from}-${storeTiming.day_to} ${storeTiming.time_from}-${storeTiming.time_to}`,
+        );
+      } else {
+        this.logger.warn(
+          `No timing available for item ${item.reference_id} and store ${store.id} has no timings`,
+        );
+      }
     }
+  }
+
+  /**
+   * Get store timings for an item (prefer Delivery, then Order)
+   */
+  private async getStoreTimingsForItem(
+    storeId: number,
+    queryRunner: any,
+  ): Promise<StoreTimings[] | null> {
+    // First try to get Delivery timings
+    let storeTimings = await queryRunner.manager.find(StoreTimings, {
+      where: { store: { id: storeId }, type: "Delivery" },
+      order: { day_from: "ASC" },
+    });
+
+    // If no Delivery timings, try Order timings
+    if (!storeTimings || storeTimings.length === 0) {
+      storeTimings = await queryRunner.manager.find(StoreTimings, {
+        where: { store: { id: storeId }, type: "Order" },
+        order: { day_from: "ASC" },
+      });
+    }
+
+    return storeTimings && storeTimings.length > 0 ? storeTimings : null;
   }
 
   /**
