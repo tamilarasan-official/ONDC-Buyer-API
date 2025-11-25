@@ -7,8 +7,13 @@ import {
   Max,
   IsObject,
   ValidateNested,
+  IsEnum,
 } from "class-validator";
 import { Type } from "class-transformer";
+import {
+  DietaryPreference,
+  DIETARY_PREFERENCE_VALUES,
+} from "../../shared/enums/dietary-preference.enum";
 
 export class SearchRequestDto {
   @ApiProperty({
@@ -124,14 +129,15 @@ export class SearchRequestDto {
   sort_order?: "asc" | "desc";
 
   @ApiProperty({
-    description: "Dietary preference: veg, non-veg, eggterian",
+    description: "Dietary preference: veg, non-veg, egg",
     example: "veg",
     required: false,
-    enum: ["veg", "non-veg", "eggterian"],
+    enum: DietaryPreference,
+    enumName: "DietaryPreference",
   })
   @IsOptional()
-  @IsString()
-  dietary_preference?: "veg" | "non-veg" | "eggterian";
+  @IsEnum(DietaryPreference)
+  dietary_preference?: DietaryPreference;
 
   @ApiProperty({
     description: "Minimum price filter",
@@ -211,14 +217,15 @@ export class LocationDto {
 
 export class SearchFiltersDto {
   @ApiProperty({
-    description: "Dietary preference filter",
+    description: "Dietary preference filter: veg, non-veg, egg",
     example: "veg",
-    enum: ["veg", "non-veg", "eggterian"],
+    enum: DietaryPreference,
+    enumName: "DietaryPreference",
     required: false,
   })
   @IsOptional()
-  @IsString()
-  dietary_preference?: "veg" | "non-veg" | "eggterian";
+  @IsEnum(DietaryPreference)
+  dietary_preference?: DietaryPreference;
 
   @ApiProperty({
     description: "Minimum price filter",

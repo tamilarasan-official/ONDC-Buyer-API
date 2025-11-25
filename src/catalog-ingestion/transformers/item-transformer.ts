@@ -2,6 +2,10 @@ import { BaseTransformer } from "./base-transformer";
 import { Item } from "../../item/entities/item.entity";
 import { Store } from "../../store/entities/store.entity";
 import { Item as ONDCItem } from "../../ondc-search/dto/ondc-search.dto";
+import {
+  DietaryPreference,
+  normalizeDietaryPreference,
+} from "../../shared/enums/dietary-preference.enum";
 
 /**
  * Item data transformer with validation and sanitization
@@ -235,16 +239,27 @@ export class ItemTransformer extends BaseTransformer {
       display_order?: number;
     }> = [];
 
-    // Priority 1: Extract food_type from additional_information
+    // Priority 1: Extract food_type from additional_information and normalize to enum
     if (itemData.additional_information?.food_type) {
       const foodType = itemData.additional_information.food_type;
-      attributes.push({
-        attribute_code: "veg_nonveg",
-        attribute_name: "Food Type",
-        attribute_value: this.sanitizeString(foodType, 255),
-        attribute_group: "dietary",
-        display_order: 1,
-      });
+      const normalizedPreference = normalizeDietaryPreference(foodType);
+
+      if (normalizedPreference) {
+        attributes.push({
+          attribute_code: "veg_nonveg",
+          attribute_name: "Food Type",
+          attribute_value: normalizedPreference,
+          attribute_group: "dietary",
+          display_order: 1,
+        });
+        this.logger.log(
+          `Normalized dietary preference for item ${itemData.id}: ${foodType} -> ${normalizedPreference}`,
+        );
+      } else {
+        this.logWarning(
+          `Invalid dietary preference value for item ${itemData.id}: ${foodType}. Expected: veg, non-veg, or egg`,
+        );
+      }
     }
 
     // Priority 2: Fall back to veg_nonveg from tags if food_type not available
@@ -258,13 +273,22 @@ export class ItemTransformer extends BaseTransformer {
       if (vegNonVegTag && Array.isArray(vegNonVegTag.list)) {
         const vegValue = vegNonVegTag.list.find((item) => item.code === "veg");
         if (vegValue && vegValue.value) {
-          attributes.push({
-            attribute_code: "veg_nonveg",
-            attribute_name: "Food Type",
-            attribute_value: this.sanitizeString(vegValue.value, 255),
-            attribute_group: "dietary",
-            display_order: 1,
-          });
+          const normalizedPreference = normalizeDietaryPreference(
+            vegValue.value,
+          );
+
+          if (normalizedPreference) {
+            attributes.push({
+              attribute_code: "veg_nonveg",
+              attribute_name: "Food Type",
+              attribute_value: normalizedPreference,
+              attribute_group: "dietary",
+              display_order: 1,
+            });
+            this.logger.log(
+              `Normalized dietary preference from tags for item ${itemData.id}: ${vegValue.value} -> ${normalizedPreference}`,
+            );
+          }
         }
       }
     }

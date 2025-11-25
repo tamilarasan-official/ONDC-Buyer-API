@@ -34,6 +34,7 @@ import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-rest
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
+import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 
 @Injectable()
 export class BuyerService {
@@ -3069,7 +3070,9 @@ export class BuyerService {
           const dietaryAttr = item.attributes?.find(
             (attr) => attr.attribute_code === "veg_nonveg",
           );
-          const dietaryPref = dietaryAttr?.attribute_value || "non-veg";
+          const dietaryPref =
+            (dietaryAttr?.attribute_value as DietaryPreference) ||
+            DietaryPreference.NON_VEG;
 
           // Get base price
           const basePrice = item.prices?.[0]?.base_price || 0;

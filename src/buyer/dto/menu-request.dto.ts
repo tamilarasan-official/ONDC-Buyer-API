@@ -1,6 +1,17 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsOptional, IsString, IsNumber, Min, Max } from "class-validator";
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  Min,
+  Max,
+  IsEnum,
+} from "class-validator";
 import { Type } from "class-transformer";
+import {
+  DietaryPreference,
+  DIETARY_PREFERENCE_VALUES,
+} from "../../shared/enums/dietary-preference.enum";
 
 export class MenuRequestDto {
   @ApiProperty({
@@ -70,14 +81,15 @@ export class MenuRequestDto {
   max_price?: number;
 
   @ApiProperty({
-    description: "Filter by dietary preferences (veg, non-veg, vegan)",
+    description: "Filter by dietary preferences: veg, non-veg, egg",
     example: "veg",
     required: false,
-    enum: ["veg", "non-veg", "vegan"],
+    enum: DietaryPreference,
+    enumName: "DietaryPreference",
   })
   @IsOptional()
-  @IsString()
-  dietary_preference?: "veg" | "non-veg" | "vegan";
+  @IsEnum(DietaryPreference)
+  dietary_preference?: DietaryPreference;
 
   @ApiProperty({
     description: "Include customization groups and options",

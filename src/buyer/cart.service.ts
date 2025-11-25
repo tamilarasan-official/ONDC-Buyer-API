@@ -25,6 +25,7 @@ import {
 import { BuyerService } from "./buyer.service";
 import { LocationService } from "../shared/services/location.service";
 import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
+import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 
 @Injectable()
 export class CartService {
@@ -895,7 +896,9 @@ export class CartService {
         const dietaryAttr = item.item.attributes?.find(
           (attr) => attr.attribute_code === "veg_nonveg",
         );
-        const dietaryPref = dietaryAttr?.attribute_value || "non-veg";
+        const dietaryPref =
+          (dietaryAttr?.attribute_value as DietaryPreference) ||
+          DietaryPreference.NON_VEG;
 
         // Check if item has customizations available (using BuyerService method to avoid duplication)
         const hasCustomizations =

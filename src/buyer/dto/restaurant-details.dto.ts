@@ -1,4 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
+import { DietaryPreference } from "../../shared/enums/dietary-preference.enum";
 
 export class RestaurantTimingDto {
   @ApiProperty({
@@ -327,11 +328,12 @@ export class RestaurantItemDto {
   is_recommended: boolean;
 
   @ApiProperty({
-    description: "Dietary preference",
+    description: "Dietary preference: veg, non-veg, egg",
     example: "veg",
-    enum: ["veg", "non-veg", "eggterian"],
+    enum: DietaryPreference,
+    enumName: "DietaryPreference",
   })
-  dietary_preference: string;
+  dietary_preference: DietaryPreference;
 
   @ApiProperty({
     description: "Food type",
@@ -582,7 +584,7 @@ export class RestaurantDetailsDto {
   })
   applied_filters?: {
     search?: string;
-    dietary_preference?: string;
+    dietary_preference?: DietaryPreference;
   };
 
   @ApiProperty({

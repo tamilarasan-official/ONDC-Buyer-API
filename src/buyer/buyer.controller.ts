@@ -27,6 +27,7 @@ import {
 import { BuyerService } from "./buyer.service";
 import { JwtAuthGuard } from "../authentication/jwt-auth.guard";
 import { HomeResponseDto } from "./dto/home-response.dto";
+import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import {
   SearchRequestDto,
   SearchSuggestionsRequestDto,
@@ -406,8 +407,9 @@ export class BuyerController {
     name: "dietary_preference",
     required: false,
     type: String,
-    description: "Dietary preference filter",
-    enum: ["veg", "non-veg", "eggterian"],
+    description: "Dietary preference filter: veg, non-veg, egg",
+    enum: DietaryPreference,
+    enumName: "DietaryPreference",
     example: "veg",
   })
   @ApiQuery({
