@@ -47,6 +47,7 @@ import {
   ApplyOfferDto,
   UpdateTipDto,
 } from "./dto/cart-request.dto";
+import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import {
   CartResponseDto,
   AddToCartResponseDto,
@@ -927,6 +928,90 @@ export class BuyerController {
   async updateTip(@Req() req: any, @Body() updateTipDto: UpdateTipDto) {
     const userId = req.user.id;
     return this.cartService.updateTip(userId, updateTipDto.tip_amount);
+  }
+
+  @Post("cart/apply-coupon")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth("JWT-auth")
+  @ApiOperation({
+    summary: "Apply coupon to cart",
+    description:
+      "Apply a coupon code to the user's active cart. Validates the coupon and reserves it automatically.",
+  })
+  @ApiBody({
+    type: ApplyCouponDto,
+    description: "Coupon code to apply",
+    examples: {
+      summerCoupon: {
+        summary: "Apply summer coupon",
+        value: {
+          coupon_code: "SUMMER2025",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Coupon applied successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Coupon applied successfully" },
+        data: {
+          type: "object",
+          properties: {
+            coupon_code: { type: "string", example: "SUMMER2025" },
+            discount_amount: { type: "number", example: 100.0 },
+            delivery_waived: { type: "boolean", example: false },
+            reservation_token: { type: "string", example: "550e8400-e29b-41d4-a716-446655440000" },
+            cart_summary: { type: "object" },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid coupon code or validation failed",
+  })
+  async applyCoupon(@Req() req: any, @Body() applyCouponDto: ApplyCouponDto) {
+    const userId = req.user.id;
+    return this.cartService.applyCoupon(userId, applyCouponDto);
+  }
+
+  @Delete("cart/remove-coupon")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth("JWT-auth")
+  @ApiOperation({
+    summary: "Remove coupon from cart",
+    description:
+      "Remove the applied coupon from the user's active cart and rollback the reservation.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Coupon removed successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Coupon removed successfully" },
+        data: {
+          type: "object",
+          properties: {
+            cart_summary: { type: "object" },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "No coupon applied to cart",
+  })
+  async removeCoupon(@Req() req: any) {
+    const userId = req.user.id;
+    return this.cartService.removeCoupon(userId);
   }
 
   @Post("orders")

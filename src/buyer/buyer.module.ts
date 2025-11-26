@@ -17,6 +17,7 @@ import { InvoiceService } from "./invoice.service";
 import { InvoiceController } from "./invoice.controller";
 import { SharedNotificationModule } from "../shared/notification.module";
 import { StoreModule } from "../store/store.module";
+import { CouponModule } from "../coupon/coupon.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -55,6 +56,7 @@ import { Banner } from "../banner/entities/banner.entity";
 @Module({
   imports: [
     StoreModule,
+    CouponModule,
     TypeOrmModule.forFeature([
       Store,
       StoreLocation,

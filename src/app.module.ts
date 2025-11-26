@@ -24,6 +24,7 @@ import { BuyerModule } from "./buyer/buyer.module";
 import { OtpModule } from "./otp/otp.module";
 import { FavoritesModule } from "./favorites/favorites.module";
 import { BannerModule } from "./banner/banner.module";
+import { CouponModule } from "./coupon/coupon.module";
 import "dotenv/config";
 
 @Module({
@@ -92,6 +93,7 @@ import "dotenv/config";
     OtpModule,
     FavoritesModule,
     BannerModule,
+    CouponModule,
   ],
   controllers: [AppController],
   providers: [AppService],

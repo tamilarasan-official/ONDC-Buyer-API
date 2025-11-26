@@ -43,6 +43,15 @@ export class Cart {
   @Column({ type: "boolean", default: true })
   is_active: boolean;
 
+  @Column({ type: "varchar", length: 64, nullable: true })
+  coupon_code?: string;
+
+  @Column({ type: "uuid", nullable: true })
+  coupon_reservation_token?: string;
+
+  @Column({ type: "bigint", nullable: true })
+  coupon_id?: number;
+
   @CreateDateColumn()
   created_at: Date;
 

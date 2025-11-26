@@ -26,6 +26,8 @@ import { BuyerService } from "./buyer.service";
 import { LocationService } from "../shared/services/location.service";
 import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
+import { CouponService } from "../coupon/services/coupon.service";
+import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 
 @Injectable()
 export class CartService {
@@ -55,6 +57,7 @@ export class CartService {
     private readonly buyerService: BuyerService,
     private readonly locationService: LocationService,
     private readonly deliveryPricingService: DeliveryPricingService,
+    private readonly couponService: CouponService,
   ) {}
 
   /**
@@ -1054,6 +1057,185 @@ export class CartService {
     } catch (error) {
       this.logger.error(
         `❌ Error validating customizations: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Apply coupon to cart
+   */
+  async applyCoupon(userId: number, applyCouponDto: ApplyCouponDto) {
+    try {
+      this.logger.log(
+        `🎟️ Applying coupon ${applyCouponDto.coupon_code} to cart for user ${userId}`,
+      );
+
+      // Get user's active cart
+      const cart = await this.cartRepository
+        .createQueryBuilder("c")
+        .leftJoinAndSelect("c.store", "s")
+        .leftJoin("c.user", "u")
+        .where("u.id = :userId", { userId })
+        .andWhere("c.is_active = :isActive", { isActive: true })
+        .getOne();
+
+      if (!cart) {
+        throw new NotFoundException("Active cart not found");
+      }
+
+      // Get user location for pincode
+      const userLocation = await this.locationService.getUserLocation(userId);
+      const pincode = userLocation?.address?.pincode;
+      if (!pincode) {
+        throw new BadRequestException(
+          "User location (pincode) is required to apply coupon",
+        );
+      }
+
+      // Calculate current cart total
+      const cartItems = await this.cartItemRepository.find({
+        where: { cart: { id: cart.id } },
+        relations: ["item"],
+      });
+
+      const subtotal = cartItems.reduce(
+        (sum, item) => sum + Number(item.total_price),
+        0,
+      );
+
+      // Validate and reserve coupon
+      const validation = await this.couponService.validateCoupon({
+        code: applyCouponDto.coupon_code,
+        user_id: userId,
+        cart_total: subtotal,
+        pincode: pincode,
+        store_id: cart.store.id,
+        reserve: true, // Reserve immediately
+      });
+
+      if (!validation.valid) {
+        throw new BadRequestException(
+          validation.message || "Invalid coupon code",
+        );
+      }
+
+      // Update cart with coupon details
+      cart.coupon_code = applyCouponDto.coupon_code;
+      cart.coupon_reservation_token = validation.reservation_token;
+      cart.discount_amount = validation.discount_amount || 0;
+
+      // If delivery is waived, set delivery fee to 0
+      if (validation.delivery_waived) {
+        cart.delivery_fee = 0;
+      }
+
+      await this.cartRepository.save(cart);
+
+      // Recalculate cart totals
+      await this.updateCartTotals(cart.id);
+
+      // Get updated cart summary
+      const updatedCart = await this.cartRepository.findOne({
+        where: { id: cart.id },
+        relations: ["store", "cart_items", "cart_items.item"],
+      });
+
+      const cartSummary = await this.calculateCartSummary(updatedCart!);
+
+      this.logger.log(
+        `✅ Coupon applied successfully. Discount: ₹${validation.discount_amount}`,
+      );
+
+      return {
+        success: true,
+        message: "Coupon applied successfully",
+        data: {
+          coupon_code: applyCouponDto.coupon_code,
+          discount_amount: validation.discount_amount || 0,
+          delivery_waived: validation.delivery_waived || false,
+          reservation_token: validation.reservation_token,
+          cart_summary: cartSummary,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `❌ Error applying coupon: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Remove coupon from cart
+   */
+  async removeCoupon(userId: number) {
+    try {
+      this.logger.log(`🗑️ Removing coupon from cart for user ${userId}`);
+
+      const cart = await this.cartRepository
+        .createQueryBuilder("c")
+        .leftJoin("c.user", "u")
+        .where("u.id = :userId", { userId })
+        .andWhere("c.is_active = :isActive", { isActive: true })
+        .getOne();
+
+      if (!cart) {
+        throw new NotFoundException("Active cart not found");
+      }
+
+      if (!cart.coupon_code) {
+        throw new BadRequestException("No coupon applied to cart");
+      }
+
+      // Rollback reservation if exists
+      if (cart.coupon_reservation_token) {
+        try {
+          await this.couponService.rollbackCoupon({
+            reservation_token: cart.coupon_reservation_token,
+            reason: "Removed by user",
+          });
+        } catch (error) {
+          this.logger.warn(
+            `Failed to rollback coupon reservation: ${error.message}`,
+          );
+          // Continue with removal even if rollback fails
+        }
+      }
+
+      // Remove coupon from cart
+      cart.coupon_code = undefined;
+      cart.coupon_reservation_token = undefined;
+      cart.coupon_id = undefined;
+      cart.discount_amount = 0;
+
+      await this.cartRepository.save(cart);
+
+      // Recalculate cart totals (delivery fee will be recalculated)
+      await this.updateCartTotals(cart.id);
+
+      // Get updated cart summary
+      const updatedCart = await this.cartRepository.findOne({
+        where: { id: cart.id },
+        relations: ["store", "cart_items", "cart_items.item"],
+      });
+
+      const cartSummary = await this.calculateCartSummary(updatedCart!);
+
+      this.logger.log(`✅ Coupon removed successfully`);
+
+      return {
+        success: true,
+        message: "Coupon removed successfully",
+        data: {
+          cart_summary: cartSummary,
+        },
+      };
+    } catch (error) {
+      this.logger.error(
+        `❌ Error removing coupon: ${error.message}`,
         error.stack,
       );
       throw error;
