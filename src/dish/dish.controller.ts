@@ -26,6 +26,7 @@ import { CreateDishDto } from "./dto/create-dish.dto";
 import { UpdateDishDto } from "./dto/update-dish.dto";
 import { ReorderDishesDto, MoveDishDto } from "./dto/reorder-dishes.dto";
 import { PaginationDto } from "src/shared/dto/pagination.dto";
+import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 
 @ApiTags("Dish Management")
 @Controller("dish")
@@ -46,7 +47,19 @@ export class DishController {
       properties: {
         name: { type: "string", example: "Pizza" },
         description: { type: "string", example: "Delicious Italian pizza" },
-        food_type: { type: "string", example: "Non Veg" },
+        food_type: {
+          type: "string",
+          example: StoreDietaryPreference.NON_VEG,
+          enum: [
+            StoreDietaryPreference.PURE_VEG,
+            StoreDietaryPreference.VEG,
+            StoreDietaryPreference.NON_VEG,
+            StoreDietaryPreference.EGG,
+            StoreDietaryPreference.VEG_AND_NON_VEG,
+          ],
+          description:
+            "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+        },
         status: {
           type: "string",
           example: "true",
@@ -75,7 +88,17 @@ export class DishController {
             id: { type: "number", example: 1 },
             name: { type: "string", example: "Pizza" },
             description: { type: "string", example: "Delicious Italian pizza" },
-            food_type: { type: "string", example: "Non Veg" },
+            food_type: {
+              type: "string",
+              example: StoreDietaryPreference.NON_VEG,
+              enum: [
+                StoreDietaryPreference.PURE_VEG,
+                StoreDietaryPreference.VEG,
+                StoreDietaryPreference.NON_VEG,
+                StoreDietaryPreference.EGG,
+                StoreDietaryPreference.VEG_AND_NON_VEG,
+              ],
+            },
             icon: {
               type: "string",
               example: "https://bucket.com/dishes/Pizza.jpg",
@@ -178,10 +201,11 @@ export class DishController {
   })
   @ApiQuery({
     name: "food_type",
-    description: "Filter dishes by food type",
-    example: "Non Veg",
+    description: "Filter dishes by food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: StoreDietaryPreference.NON_VEG,
     required: false,
-    type: "string",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
   })
   @ApiQuery({
     name: "status",
@@ -224,7 +248,17 @@ export class DishController {
                 type: "string",
                 example: "Delicious Italian pizza",
               },
-              food_type: { type: "string", example: "Non Veg" },
+              food_type: {
+              type: "string",
+              example: StoreDietaryPreference.NON_VEG,
+              enum: [
+                StoreDietaryPreference.PURE_VEG,
+                StoreDietaryPreference.VEG,
+                StoreDietaryPreference.NON_VEG,
+                StoreDietaryPreference.EGG,
+                StoreDietaryPreference.VEG_AND_NON_VEG,
+              ],
+            },
               icon: {
                 type: "string",
                 example: "https://bucket.com/dishes/Pizza.jpg",
@@ -286,7 +320,17 @@ export class DishController {
             id: { type: "number", example: 1 },
             name: { type: "string", example: "Pizza" },
             description: { type: "string", example: "Delicious Italian pizza" },
-            food_type: { type: "string", example: "Non Veg" },
+            food_type: {
+              type: "string",
+              example: StoreDietaryPreference.NON_VEG,
+              enum: [
+                StoreDietaryPreference.PURE_VEG,
+                StoreDietaryPreference.VEG,
+                StoreDietaryPreference.NON_VEG,
+                StoreDietaryPreference.EGG,
+                StoreDietaryPreference.VEG_AND_NON_VEG,
+              ],
+            },
             icon: {
               type: "string",
               example: "https://bucket.com/dishes/Pizza.jpg",
@@ -339,7 +383,19 @@ export class DishController {
           type: "string",
           example: "Updated delicious Italian pizza",
         },
-        food_type: { type: "string", example: "Non Veg" },
+        food_type: {
+          type: "string",
+          example: StoreDietaryPreference.NON_VEG,
+          enum: [
+            StoreDietaryPreference.PURE_VEG,
+            StoreDietaryPreference.VEG,
+            StoreDietaryPreference.NON_VEG,
+            StoreDietaryPreference.EGG,
+            StoreDietaryPreference.VEG_AND_NON_VEG,
+          ],
+          description:
+            "Food type: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+        },
         status: {
           type: "string",
           example: "true",
@@ -371,7 +427,17 @@ export class DishController {
               type: "string",
               example: "Updated delicious Italian pizza",
             },
-            food_type: { type: "string", example: "Non Veg" },
+            food_type: {
+              type: "string",
+              example: StoreDietaryPreference.NON_VEG,
+              enum: [
+                StoreDietaryPreference.PURE_VEG,
+                StoreDietaryPreference.VEG,
+                StoreDietaryPreference.NON_VEG,
+                StoreDietaryPreference.EGG,
+                StoreDietaryPreference.VEG_AND_NON_VEG,
+              ],
+            },
             icon: {
               type: "string",
               example: "https://bucket.com/dishes/UpdatedPizza.jpg",
@@ -614,10 +680,11 @@ export class DishController {
   })
   @ApiQuery({
     name: "food_type",
-    description: "Food type to normalize sequences for (optional)",
-    example: "Veg",
+    description: "Food type to normalize sequences for: pure-veg, veg, non-veg, egg, veg-and-non-veg (optional)",
+    example: StoreDietaryPreference.VEG,
     required: false,
-    type: "string",
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
   })
   @ApiResponse({
     status: 200,

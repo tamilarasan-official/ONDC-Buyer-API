@@ -1196,23 +1196,24 @@ export class BuyerService {
         });
       }
 
-      queryBuilder = queryBuilder.select([
-        "i.id",
-        "i.name",
-        "i.short_desc",
-        "i.images",
-        "s.id",
-        "s.name",
-        "s.logo_url",
-        "s.food_type",
-        "s.tags",
-        "p.base_price",
-        "p.currency",
-        "c.id",
-        "c.name",
-        "q.available_count",
-        `(${distanceSubquery}) as distance`,
-      ]);
+      queryBuilder = queryBuilder
+        .select([
+          "i.id",
+          "i.name",
+          "i.short_desc",
+          "i.images",
+          "s.id",
+          "s.name",
+          "s.logo_url",
+          "s.food_type",
+          "s.tags",
+          "p.base_price",
+          "p.currency",
+          "c.id",
+          "c.name",
+          "q.available_count",
+        ])
+        .addSelect(`(${distanceSubquery})`, "distance");
 
       // Apply sorting
       if (sortBy === "distance") {
@@ -2305,7 +2306,11 @@ export class BuyerService {
       const restaurants = await this.storeRepository
         .createQueryBuilder("s")
         .leftJoin("s.locations", "sl")
-        .leftJoin("s.restaurant_reviews", "rr")
+        .leftJoin(
+          RestaurantReview,
+          "rr",
+          "rr.storeId = s.id",
+        )
         .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
           deliveryType: "Delivery",
         })

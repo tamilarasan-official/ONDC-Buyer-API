@@ -1,12 +1,13 @@
 import {
   IsBoolean,
-  IsIn,
+  IsEnum,
   IsNotEmpty,
   IsOptional,
   IsString,
 } from "class-validator";
 import { Transform } from "class-transformer";
 import { ApiProperty } from "@nestjs/swagger";
+import { StoreDietaryPreference } from "../../shared/enums/store-dietary-preference.enum";
 
 export class CreateDishDto {
   @ApiProperty({
@@ -28,14 +29,15 @@ export class CreateDishDto {
   description?: string;
 
   @ApiProperty({
-    description: "Food type of the dish",
-    example: "Italian",
+    description: "Food type of the dish: pure-veg, veg, non-veg, egg, veg-and-non-veg",
+    example: StoreDietaryPreference.NON_VEG,
     required: true,
+    enum: StoreDietaryPreference,
+    enumName: "StoreDietaryPreference",
   })
-  @IsString()
+  @IsEnum(StoreDietaryPreference)
   @IsNotEmpty()
-  @IsIn(["pure-veg", "veg", "non-veg", "egg", "veg-and-non-veg"])
-  food_type: string;
+  food_type: StoreDietaryPreference;
 
   @ApiProperty({
     description: "Status of the dish (active/inactive)",
