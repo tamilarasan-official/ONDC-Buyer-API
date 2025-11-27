@@ -51,6 +51,16 @@ export class UserController {
             email: { type: "string", example: "john@example.com" },
             phone_number: { type: "number", example: 9876543210 },
             status: { type: "boolean", example: true },
+            support_number: {
+              type: "string",
+              example: "+91-9876543210",
+              description: "Customer support phone number",
+            },
+            support_email: {
+              type: "string",
+              example: "support@tazty.in",
+              description: "Customer support email address",
+            },
             created_at: { type: "string", example: "2025-01-15T10:30:00Z" },
             updated_at: { type: "string", example: "2025-01-15T10:30:00Z" },
           },

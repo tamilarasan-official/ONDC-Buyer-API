@@ -14,6 +14,7 @@ import { UserAddress } from "./entities/user-address.entity";
 import { NotificationService } from "../buyer/notification.service";
 import { OtpService } from "../otp/otp.service";
 import { OtpPurpose } from "../otp/entities/otp-verification.entity";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class UserService {
@@ -29,6 +30,7 @@ export class UserService {
 
     private readonly notificationService: NotificationService,
     private readonly otpService: OtpService,
+    private readonly configService: ConfigService,
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
@@ -134,7 +136,26 @@ export class UserService {
 
       profile.phone_number = Number(profile.phone_number);
 
-      return profile;
+      // Get support contact information from ConfigService
+      const supportNumber = this.configService.get<string>("SUPPORT_PHONE");
+      const supportEmail = this.configService.get<string>("SUPPORT_EMAIL");
+
+      // Convert to plain object and add support contact information
+      // Explicitly map all fields to ensure proper serialization
+      const profileData: any = {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        phone_number: profile.phone_number,
+        status: profile.status,
+        created_at: profile.created_at,
+        updated_at: profile.updated_at,
+        addresses: profile.addresses || [],
+        support_number: supportNumber || null,
+        support_email: supportEmail || null,
+      };
+
+      return profileData;
     } catch (error) {
       throw new BadRequestException("Failed to retrieve user profile", error);
     }
