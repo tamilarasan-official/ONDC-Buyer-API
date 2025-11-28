@@ -190,14 +190,14 @@ export class CartSummaryDto {
   max_tip_amount?: number;
 
   @ApiProperty({
-    description: "Platform fee amount (applied only if INCLUDE_PLATFORM_FEE is true)",
+    description: "Platform fee amount (always shown for display). If include_platform_fee is false, show this amount with strikethrough and use 0 in total calculation.",
     example: 50.0,
     type: "number",
   })
   platform_fee: number;
 
   @ApiProperty({
-    description: "Whether platform fee is enabled in the system",
+    description: "Whether platform fee is included in final_amount calculation. If false, platform_fee is shown but not added to total (show with strikethrough in UI).",
     example: true,
     type: "boolean",
   })

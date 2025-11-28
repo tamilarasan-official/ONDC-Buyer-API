@@ -904,12 +904,12 @@ export class BuyerController {
                 platform_fee: {
                   type: "number",
                   example: 50.0,
-                  description: "Platform fee amount (applied only if INCLUDE_PLATFORM_FEE is true)",
+                  description: "Platform fee amount (always shown for display). If include_platform_fee is false, show this amount with strikethrough and use 0 in total calculation.",
                 },
                 include_platform_fee: {
                   type: "boolean",
                   example: true,
-                  description: "Whether platform fee is enabled in the system",
+                  description: "Whether platform fee is included in final_amount calculation. If false, platform_fee is shown but not added to total (show with strikethrough in UI).",
                 },
                 final_amount: { type: "number", example: 630.0 },
               },

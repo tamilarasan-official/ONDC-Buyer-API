@@ -631,7 +631,10 @@ export class CartService {
       const tipAmount = Number(cart.tip_amount || 0);
       
       const platformFeeConfig = this.getPlatformFee();
-      const platformFee = platformFeeConfig.amount;
+      // Only include platform fee in calculation if enabled
+      const platformFeeForCalculation = platformFeeConfig.isEnabled
+        ? platformFeeConfig.amount
+        : 0;
       
       cart.discount_amount = discountAmount;
       cart.final_amount =
@@ -639,7 +642,7 @@ export class CartService {
         deliveryFee +
         taxAmount +
         tipAmount +
-        platformFee -
+        platformFeeForCalculation -
         discountAmount;
       await this.cartRepository.save(cart);
 
@@ -712,14 +715,17 @@ export class CartService {
       const tipAmountValue = Number(cart.tip_amount || 0);
       
       const platformFeeConfig = this.getPlatformFee();
-      const platformFee = platformFeeConfig.amount;
+      // Only include platform fee in calculation if enabled
+      const platformFeeForCalculation = platformFeeConfig.isEnabled
+        ? platformFeeConfig.amount
+        : 0;
       
       const finalAmount =
         subtotal +
         deliveryFee +
         taxAmount +
         tipAmountValue +
-        platformFee -
+        platformFeeForCalculation -
         discountAmount;
 
       cart.final_amount = Number(finalAmount.toFixed(2));
@@ -896,7 +902,10 @@ export class CartService {
 
     // Get platform fee configuration
     const platformFeeConfig = this.getPlatformFee();
-    const platformFee = platformFeeConfig.amount;
+    // Only include platform fee in calculation if enabled
+    const platformFeeForCalculation = platformFeeConfig.isEnabled
+      ? platformFeeConfig.amount
+      : 0;
 
     const finalAmount = Number(
       (
@@ -904,7 +913,7 @@ export class CartService {
         deliveryFee +
         taxAmount +
         tipAmount +
-        platformFee -
+        platformFeeForCalculation -
         discountAmount
       ).toFixed(2),
     );
@@ -913,7 +922,8 @@ export class CartService {
     this.logger.log(`deliveryFee: ${Number(deliveryFee)}`);
     this.logger.log(`taxAmount: ${Number(taxAmount)}`);
     this.logger.log(`tipAmount: ${Number(tipAmount)}`);
-    this.logger.log(`platformFee: ${platformFee}`);
+    this.logger.log(`platformFee (display): ${platformFeeConfig.amount}`);
+    this.logger.log(`platformFee (included in total): ${platformFeeForCalculation}`);
     this.logger.log(`discountAmount: ${Number(discountAmount)}`);
     this.logger.log(`finalAmount: ${Number(finalAmount)}`);
 
@@ -929,6 +939,8 @@ export class CartService {
 
   /**
    * Get platform fee configuration
+   * Always returns the platform fee amount for display purposes
+   * isEnabled indicates whether to include it in final_amount calculation
    */
   private getPlatformFee(): {
     amount: number;
@@ -937,13 +949,12 @@ export class CartService {
     const includeFee =
       this.configService.get<string>("INCLUDE_PLATFORM_FEE") === "true";
     const platformFeeStr = this.configService.get<string>("PLATFORM_FEE") || "0";
-    const platformFeeAmount = includeFee
-      ? Math.max(0, parseFloat(platformFeeStr) || 0)
-      : 0;
+    // Always return the platform fee amount (for display), regardless of includeFee
+    const platformFeeAmount = Math.max(0, parseFloat(platformFeeStr) || 0);
 
     return {
       amount: Number(platformFeeAmount.toFixed(2)),
-      isEnabled: includeFee,
+      isEnabled: includeFee, // This determines if it's included in final_amount
     };
   }
 
@@ -960,10 +971,23 @@ export class CartService {
     const taxAmount = Number(cart.tax_amount || 0);
     const discountAmount = Number(cart.discount_amount || 0);
     const tipAmount = Number(cart.tip_amount || 0);
-    const finalAmount = Number(cart.final_amount || 0);
 
     // Get platform fee configuration
     const platformFeeConfig = this.getPlatformFee();
+    
+    // Recalculate final_amount based on current values and platform fee setting
+    // Only include platform fee in calculation if enabled
+    const platformFeeForCalculation = platformFeeConfig.isEnabled
+      ? platformFeeConfig.amount
+      : 0;
+    
+    const finalAmount =
+      subtotal +
+      deliveryFee +
+      taxAmount +
+      tipAmount +
+      platformFeeForCalculation -
+      discountAmount;
 
     return {
       subtotal: Number(subtotal.toFixed(2)),
