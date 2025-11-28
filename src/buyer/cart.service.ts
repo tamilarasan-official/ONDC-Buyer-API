@@ -624,14 +624,20 @@ export class CartService {
       const discountAmount = Math.min(subtotal * 0.1, 100); // 10% discount, max 100
 
       // Update cart with discount (preserve tip)
+      // Ensure all values are numbers with defaults to prevent NaN
+      const cartSubtotal = Number(cart.total_amount || subtotal);
+      const deliveryFee = Number(cart.delivery_fee || 0);
+      const taxAmount = Number(cart.tax_amount || 0);
       const tipAmount = Number(cart.tip_amount || 0);
+      
       const platformFeeConfig = this.getPlatformFee();
       const platformFee = platformFeeConfig.amount;
+      
       cart.discount_amount = discountAmount;
       cart.final_amount =
-        cart.total_amount +
-        cart.delivery_fee +
-        cart.tax_amount +
+        cartSubtotal +
+        deliveryFee +
+        taxAmount +
         tipAmount +
         platformFee -
         discountAmount;
@@ -698,15 +704,23 @@ export class CartService {
       cart.tip_amount = Number(tipAmount.toFixed(2));
 
       // Recalculate final amount including tip
+      // Ensure all values are numbers with defaults to prevent NaN
+      const subtotal = Number(cart.total_amount || 0);
+      const deliveryFee = Number(cart.delivery_fee || 0);
+      const taxAmount = Number(cart.tax_amount || 0);
+      const discountAmount = Number(cart.discount_amount || 0);
+      const tipAmountValue = Number(cart.tip_amount || 0);
+      
       const platformFeeConfig = this.getPlatformFee();
       const platformFee = platformFeeConfig.amount;
+      
       const finalAmount =
-        cart.total_amount +
-        cart.delivery_fee +
-        cart.tax_amount +
-        cart.tip_amount +
+        subtotal +
+        deliveryFee +
+        taxAmount +
+        tipAmountValue +
         platformFee -
-        cart.discount_amount;
+        discountAmount;
 
       cart.final_amount = Number(finalAmount.toFixed(2));
       await this.cartRepository.save(cart);
