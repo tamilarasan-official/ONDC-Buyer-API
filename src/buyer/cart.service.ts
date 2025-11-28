@@ -755,6 +755,47 @@ export class CartService {
   }
 
   /**
+   * Recalculate cart totals for a user (public method for external use)
+   * Used when user's default address changes
+   */
+  async recalculateCartForUser(userId: number): Promise<void> {
+    try {
+      this.logger.log(
+        `🔄 Recalculating cart for user ${userId} due to address change`,
+      );
+
+      // Find user's active cart
+      const cart = await this.cartRepository.findOne({
+        where: {
+          user: { id: userId },
+          is_active: true,
+        },
+      });
+
+      if (!cart) {
+        this.logger.log(
+          `ℹ️ No active cart found for user ${userId}, skipping cart update`,
+        );
+        return;
+      }
+
+      // Recalculate cart totals (delivery fee will be recalculated based on new address)
+      await this.updateCartTotals(cart.id);
+
+      this.logger.log(
+        `✅ Cart ${cart.id} updated successfully after address change`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to update cart for user ${userId} after address change: ${error.message}`,
+        error.stack,
+      );
+      // Don't throw error - address update should succeed even if cart update fails
+      // Cart will be updated on next cart operation (add item, get cart, etc.)
+    }
+  }
+
+  /**
    * Update cart totals
    */
   private async updateCartTotals(cartId: number): Promise<void> {

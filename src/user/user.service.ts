@@ -2,7 +2,11 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  Inject,
+  forwardRef,
+  Optional,
   NotFoundException,
+  Logger,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { User } from "./entities/user.entity";
@@ -15,9 +19,12 @@ import { NotificationService } from "../buyer/notification.service";
 import { OtpService } from "../otp/otp.service";
 import { OtpPurpose } from "../otp/entities/otp-verification.entity";
 import { ConfigService } from "@nestjs/config";
+import { CartService } from "../buyer/cart.service";
 
 @Injectable()
 export class UserService {
+  private readonly logger = new Logger(UserService.name);
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -31,6 +38,10 @@ export class UserService {
     private readonly notificationService: NotificationService,
     private readonly otpService: OtpService,
     private readonly configService: ConfigService,
+
+    @Optional()
+    @Inject(forwardRef(() => CartService))
+    private readonly cartService?: CartService,
   ) {}
 
   async generateOtp(generateOtpDto: GenerateOtpDto) {
@@ -229,6 +240,11 @@ export class UserService {
       });
       await this.userAddressRepository.save(address);
 
+      // Update cart if needed (new address set as default)
+      if (this.shouldUpdateCart(user.id, createAddressDto, true)) {
+        await this.updateCartForAddressChange(user.id);
+      }
+
       return address;
     } catch (error) {
       if (error instanceof NotFoundException) {
@@ -296,6 +312,9 @@ export class UserService {
         throw new NotFoundException("Address not found");
       }
 
+      // Store original address data for comparison
+      const originalAddress = { ...address };
+
       // If setting this address as default, unset all other addresses first
       if (updateAddressDto.is_default === true) {
         for (const addr of profile.addresses) {
@@ -310,12 +329,87 @@ export class UserService {
       const updatedAddress = Object.assign(address, updateAddressDto);
       await this.userAddressRepository.save(updatedAddress);
 
+      // Update cart if needed
+      if (this.shouldUpdateCart(user.id, updateAddressDto, false, originalAddress)) {
+        await this.updateCartForAddressChange(user.id);
+      }
+
       return updatedAddress;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
       }
       throw new BadRequestException("Failed to update address", error);
+    }
+  }
+
+  /**
+   * Check if cart needs to be updated based on address changes
+   * @param userId - User ID
+   * @param addressData - New/updated address data
+   * @param isNewAddress - Whether this is a new address or update
+   * @param existingAddress - Existing address (for updates)
+   * @returns boolean - Whether cart should be updated
+   */
+  private shouldUpdateCart(
+    userId: number,
+    addressData: any,
+    isNewAddress: boolean,
+    existingAddress?: UserAddress,
+  ): boolean {
+    // Case 1: New address created as default
+    if (isNewAddress && addressData.is_default === true) {
+      return true;
+    }
+
+    // Case 2: Existing address set as default
+    if (!isNewAddress && addressData.is_default === true) {
+      return true;
+    }
+
+    // Case 3: Default address coordinates/pincode updated
+    if (!isNewAddress && existingAddress?.is_default === true) {
+      const locationChanged =
+        (addressData.latitude !== undefined &&
+          addressData.latitude !== existingAddress.latitude) ||
+        (addressData.longitude !== undefined &&
+          addressData.longitude !== existingAddress.longitude) ||
+        (addressData.pincode !== undefined &&
+          addressData.pincode !== existingAddress.pincode);
+
+      return locationChanged;
+    }
+
+    return false;
+  }
+
+  /**
+   * Update cart when user's default address changes
+   * @param userId - User ID
+   */
+  private async updateCartForAddressChange(userId: number): Promise<void> {
+    // Skip cart update if CartService is not available (e.g., in AuthenticationModule context)
+    if (!this.cartService) {
+      this.logger.warn(
+        `⚠️ CartService not available, skipping cart update for user ${userId}`,
+      );
+      return;
+    }
+
+    try {
+      this.logger.log(
+        `🔄 Updating cart for user ${userId} due to address change`,
+      );
+
+      // Use CartService's public method to recalculate cart
+      await this.cartService.recalculateCartForUser(userId);
+    } catch (error) {
+      this.logger.error(
+        `❌ Failed to update cart for user ${userId} after address change: ${error.message}`,
+        error.stack,
+      );
+      // Don't throw error - address update should succeed even if cart update fails
+      // Cart will be updated on next cart operation (add item, get cart, etc.)
     }
   }
 

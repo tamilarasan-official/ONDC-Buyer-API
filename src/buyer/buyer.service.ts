@@ -626,8 +626,8 @@ export class BuyerService {
           "s.tags",
           "p.base_price",
           "p.currency",
-          `(${distanceSubquery}) as distance`,
         ])
+        .addSelect(`(${distanceSubquery})`, "distance")
         .orderBy("distance", "ASC")
         .addOrderBy("i.is_recommended", "DESC")
         .limit(20);
