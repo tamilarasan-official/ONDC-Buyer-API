@@ -899,6 +899,17 @@ export class BuyerController {
                 max_tip_amount: {
                   type: "number",
                   example: 100.0,
+                },
+                platform_fee: {
+                  type: "number",
+                  example: 50.0,
+                  description: "Platform fee amount (applied only if INCLUDE_PLATFORM_FEE is true)",
+                },
+                include_platform_fee: {
+                  type: "boolean",
+                  example: true,
+                  description: "Whether platform fee is enabled in the system",
+                },
                   description: "Maximum tip amount (constant: ₹100.00)",
                 },
                 final_amount: { type: "number", example: 630.0 },

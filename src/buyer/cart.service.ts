@@ -28,6 +28,7 @@ import { DeliveryPricingService } from "../shared/services/delivery-pricing.serv
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { CouponService } from "../coupon/services/coupon.service";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
+import { ConfigService } from "@nestjs/config";
 
 @Injectable()
 export class CartService {
@@ -58,6 +59,7 @@ export class CartService {
     private readonly locationService: LocationService,
     private readonly deliveryPricingService: DeliveryPricingService,
     private readonly couponService: CouponService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -81,6 +83,9 @@ export class CartService {
         .getOne();
 
       if (!cart) {
+        // Get platform fee configuration for empty cart
+        const platformFeeConfig = this.getPlatformFee();
+        
         return {
           success: true,
           message: "Cart is empty",
@@ -96,7 +101,9 @@ export class CartService {
               tax_amount: 0,
               discount_amount: 0,
               tip_amount: 0,
-              max_tip_amount: null,
+              max_tip_amount: this.MAX_TIP_AMOUNT,
+              platform_fee: platformFeeConfig.amount,
+              include_platform_fee: platformFeeConfig.isEnabled,
               final_amount: 0,
             },
             total_items: 0,
@@ -618,12 +625,15 @@ export class CartService {
 
       // Update cart with discount (preserve tip)
       const tipAmount = Number(cart.tip_amount || 0);
+      const platformFeeConfig = this.getPlatformFee();
+      const platformFee = platformFeeConfig.amount;
       cart.discount_amount = discountAmount;
       cart.final_amount =
         cart.total_amount +
         cart.delivery_fee +
         cart.tax_amount +
-        tipAmount -
+        tipAmount +
+        platformFee -
         discountAmount;
       await this.cartRepository.save(cart);
 
@@ -688,11 +698,14 @@ export class CartService {
       cart.tip_amount = Number(tipAmount.toFixed(2));
 
       // Recalculate final amount including tip
+      const platformFeeConfig = this.getPlatformFee();
+      const platformFee = platformFeeConfig.amount;
       const finalAmount =
         cart.total_amount +
         cart.delivery_fee +
         cart.tax_amount +
-        cart.tip_amount -
+        cart.tip_amount +
+        platformFee -
         cart.discount_amount;
 
       cart.final_amount = Number(finalAmount.toFixed(2));
@@ -826,16 +839,26 @@ export class CartService {
     const tipAmount = Number(currentCart?.tip_amount || 0);
     const discountAmount = Number(currentCart?.discount_amount || 0);
 
+    // Get platform fee configuration
+    const platformFeeConfig = this.getPlatformFee();
+    const platformFee = platformFeeConfig.amount;
+
     const finalAmount = Number(
-      (subtotal + deliveryFee + taxAmount + tipAmount - discountAmount).toFixed(
-        2,
-      ),
+      (
+        subtotal +
+        deliveryFee +
+        taxAmount +
+        tipAmount +
+        platformFee -
+        discountAmount
+      ).toFixed(2),
     );
 
     this.logger.log(`subtotal: ${Number(subtotal)}`);
     this.logger.log(`deliveryFee: ${Number(deliveryFee)}`);
     this.logger.log(`taxAmount: ${Number(taxAmount)}`);
     this.logger.log(`tipAmount: ${Number(tipAmount)}`);
+    this.logger.log(`platformFee: ${platformFee}`);
     this.logger.log(`discountAmount: ${Number(discountAmount)}`);
     this.logger.log(`finalAmount: ${Number(finalAmount)}`);
 
@@ -847,6 +870,26 @@ export class CartService {
     });
 
     this.logger.log(`cart updated`);
+  }
+
+  /**
+   * Get platform fee configuration
+   */
+  private getPlatformFee(): {
+    amount: number;
+    isEnabled: boolean;
+  } {
+    const includeFee =
+      this.configService.get<string>("INCLUDE_PLATFORM_FEE") === "true";
+    const platformFeeStr = this.configService.get<string>("PLATFORM_FEE") || "0";
+    const platformFeeAmount = includeFee
+      ? Math.max(0, parseFloat(platformFeeStr) || 0)
+      : 0;
+
+    return {
+      amount: Number(platformFeeAmount.toFixed(2)),
+      isEnabled: includeFee,
+    };
   }
 
   /**
@@ -864,6 +907,9 @@ export class CartService {
     const tipAmount = Number(cart.tip_amount || 0);
     const finalAmount = Number(cart.final_amount || 0);
 
+    // Get platform fee configuration
+    const platformFeeConfig = this.getPlatformFee();
+
     return {
       subtotal: Number(subtotal.toFixed(2)),
       delivery_fee: Number(deliveryFee.toFixed(2)),
@@ -871,6 +917,8 @@ export class CartService {
       discount_amount: Number(discountAmount.toFixed(2)),
       tip_amount: Number(tipAmount.toFixed(2)),
       max_tip_amount: this.MAX_TIP_AMOUNT,
+      platform_fee: platformFeeConfig.amount,
+      include_platform_fee: platformFeeConfig.isEnabled,
       final_amount: Number(finalAmount.toFixed(2)),
       applied_offer:
         discountAmount > 0

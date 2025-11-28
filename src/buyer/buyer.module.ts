@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { HttpModule } from "@nestjs/axios";
+import { ConfigModule } from "@nestjs/config";
 import { BuyerController } from "./buyer.controller";
 import { BuyerService } from "./buyer.service";
 import { CartService } from "./cart.service";
@@ -55,6 +56,7 @@ import { Banner } from "../banner/entities/banner.entity";
 
 @Module({
   imports: [
+    ConfigModule,
     StoreModule,
     CouponModule,
     TypeOrmModule.forFeature([

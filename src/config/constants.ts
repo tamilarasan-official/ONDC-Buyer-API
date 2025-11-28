@@ -10,5 +10,6 @@ export const APP_CONSTANTS = {
     EMAIL: process.env.SUPPORT_EMAIL,
   },
   PLATFORM_FEE: process.env.PLATFORM_FEE,
+  INCLUDE_PLATFORM_FEE: process.env.INCLUDE_PLATFORM_FEE,
 };
 
