@@ -741,6 +741,7 @@ export class BuyerService {
         max_price,
         page = 1,
         limit = 20,
+        veg_mode,
       } = searchParams;
 
       // Get user location - prioritize lat/lng from request
@@ -814,6 +815,7 @@ export class BuyerService {
           min_price,
           max_price,
           favoriteStoreIds,
+          veg_mode,
         );
       }
 
@@ -912,6 +914,7 @@ export class BuyerService {
     minPrice?: number,
     maxPrice?: number,
     favoriteStoreIds: Set<number> = new Set(),
+    veg_mode?:string
   ) {
     try {
       const distanceQuery = this.locationService.buildDistanceQuery(

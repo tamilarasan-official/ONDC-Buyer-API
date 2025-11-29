@@ -14,6 +14,7 @@ import {
   DietaryPreference,
   DIETARY_PREFERENCE_VALUES,
 } from "../../shared/enums/dietary-preference.enum";
+import { VegMode } from "src/shared/enums/veg-mode.enum";
 
 export class SearchRequestDto {
   @ApiProperty({
@@ -127,6 +128,20 @@ export class SearchRequestDto {
   @IsOptional()
   @IsString()
   sort_order?: "asc" | "desc";
+
+  @ApiProperty({
+    name: "veg_mode",
+    required: false,
+    type: String,
+    description:
+      "Vegetarian filter mode: 'all' (show all restaurants with only veg products) or 'pure' (show only pure-veg restaurants). If not provided or false, shows all restaurants.",
+    enum: VegMode,
+    enumName: "VegMode",
+    example: "all",
+  })
+  @IsOptional()
+  @IsEnum(VegMode)
+  veg_mode?: VegMode;
 
   @ApiProperty({
     description: "Dietary preference: veg, non-veg, egg",

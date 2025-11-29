@@ -48,6 +48,8 @@ import {
   UpdateTipDto,
 } from "./dto/cart-request.dto";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
+import { RemoveCouponDto } from "./dto/apply-coupon.dto";
+import { TestNotificationDto } from "./dto/test-notification.dto";
 import {
   CartResponseDto,
   AddToCartResponseDto,
@@ -1645,15 +1647,60 @@ export class BuyerController {
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Test push notification (for development)",
-    description: "Send a test push notification to the authenticated user",
+    description:
+      "Send a test push notification to the authenticated user's registered devices. Useful for testing FCM integration and device token registration.",
+  })
+  @ApiBody({
+    type: TestNotificationDto,
+    description: "Test notification payload",
+    required: false,
+    examples: {
+      default: {
+        summary: "Default message",
+        value: {
+          message: "This is a test push notification",
+        },
+      },
+      custom: {
+        summary: "Custom message",
+        value: {
+          message: "Hello! Testing push notifications.",
+        },
+      },
+      empty: {
+        summary: "No body (uses default message)",
+        value: {},
+      },
+    },
   })
   @ApiResponse({
     status: 200,
     description: "Test notification sent successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: {
+          type: "boolean",
+          example: true,
+        },
+        message: {
+          type: "string",
+          example: "Test notification sent successfully",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 401,
+    description: "User not authenticated",
+  })
+  @ApiResponse({
+    status: 500,
+    description: "Failed to send test notification",
   })
   async testPushNotification(
     @Req() req: any,
-    @Body() body: { message?: string },
+    @Body() body: TestNotificationDto = {},
   ) {
     const userId = req.user?.id;
     if (!userId) {
@@ -1664,7 +1711,7 @@ export class BuyerController {
       await this.notificationService.createNotification({
         user_id: userId,
         title: "Test Notification",
-        message: body.message || "This is a test push notification",
+        message: body?.message || "This is a test push notification",
         type: "system",
         data: { test: true },
       });
