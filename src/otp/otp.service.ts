@@ -33,6 +33,8 @@ export class OtpService {
     try {
       const { phone_number, purpose = OtpPurpose.REGISTRATION } = sendOtpDto;
 
+      const environment = this.configService.get<string>("NODE_ENV");
+
       // Clean phone number
       const cleanPhoneNumber = this.cleanPhoneNumber(phone_number);
 
@@ -64,7 +66,7 @@ export class OtpService {
       await this.checkRateLimit(purpose, cleanPhoneNumber);
 
       // Generate 4-digit OTP
-      const otp = this.generate4DigitOtp();
+      const otp = environment === "staging" ? "1234" : this.generate4DigitOtp();
 
       // Calculate expiry time (1 minute from now)
       const expiresAt = new Date(Date.now() + 1 * 60 * 1000);
@@ -75,6 +77,15 @@ export class OtpService {
       // Store OTP in database
       await this.storeOtp(cleanPhoneNumber, otp, purpose, expiresAt);
 
+      if (environment === "staging") {
+        return {
+          success: true,
+          message: "OTP sent successfully",
+          phone_number: phone_number,
+          expires_in_minutes: 1,
+          timestamp: new Date(),
+        };
+      }
       // Send SMS via Airtel
       const smsResponse = await this.airtelSmsProvider.sendSms(
         cleanPhoneNumber,
@@ -93,8 +104,6 @@ export class OtpService {
           expires_in_minutes: 1,
           messageRequestId: smsResponse.messageRequestId,
           timestamp: new Date(),
-          // Include OTP only in development mode
-          ...(process.env.NODE_ENV === "development" && { otp: otp }),
         };
 
         return response;
