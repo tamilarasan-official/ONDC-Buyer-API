@@ -72,11 +72,12 @@ export class CartService {
       const cart = await this.cartRepository
         .createQueryBuilder("c")
         .leftJoinAndSelect("c.store", "s")
+        .leftJoinAndSelect("s.locations", "sl")
         .leftJoinAndSelect("c.cart_items", "ci")
         .leftJoinAndSelect("ci.item", "i")
         .leftJoinAndSelect("i.attributes", "ia")
         .leftJoinAndSelect("i.quantities", "iq")
-        .leftJoin("c.user", "u")
+        .leftJoinAndSelect("c.user", "u")
         .where("u.id = :userId", { userId })
         .andWhere("c.is_active = :isActive", { isActive: true })
         .orderBy("ci.created_at", "ASC")
@@ -1012,24 +1013,34 @@ export class CartService {
     let estimatedDeliveryTime: string | null = null;
     if (cart.cart_items && cart.cart_items.length > 0 && cart.store && cart.user) {
       try {
-        // Get cart with full relations if not already loaded
-        const cartWithRelations = await this.cartRepository.findOne({
-          where: { id: cart.id },
-          relations: ["store", "store.locations", "user"],
-        });
+        // Use already loaded relations if available, otherwise fetch them
+        const storeLocations = cart.store.locations || [];
+        let storeLocation = storeLocations.length > 0 ? storeLocations[0] : null;
 
-        if (
-          cartWithRelations?.store?.locations &&
-          cartWithRelations.store.locations.length > 0 &&
-          cartWithRelations.user
-        ) {
-          const storeLocation = cartWithRelations.store.locations[0];
+        // If store locations not loaded, fetch them
+        if (!storeLocation) {
+          const cartWithRelations = await this.cartRepository.findOne({
+            where: { id: cart.id },
+            relations: ["store", "store.locations", "user"],
+          });
+
+          if (
+            cartWithRelations?.store?.locations &&
+            cartWithRelations.store.locations.length > 0 &&
+            cartWithRelations.user
+          ) {
+            storeLocation = cartWithRelations.store.locations[0];
+            cart.user = cartWithRelations.user; // Update cart.user if needed
+          }
+        }
+
+        if (storeLocation && cart.user) {
           const pickupLat = Number(storeLocation.gps_lat);
           const pickupLng = Number(storeLocation.gps_lng);
 
           // Get current user location (will return updated default address if address was changed)
           const userLocation = await this.locationService.getUserLocation(
-            cartWithRelations.user.id,
+            cart.user.id,
           );
 
           const deliveryInfo = await this.deliveryPricingService.getDeliveryCharge(
@@ -1040,6 +1051,10 @@ export class CartService {
           );
 
           estimatedDeliveryTime = deliveryInfo.estimated_delivery_time;
+
+          this.logger.log(
+            `⏱️ Estimated delivery time fetched for cart ${cart.id}: ${estimatedDeliveryTime || "N/A"}`,
+          );
         }
       } catch (error) {
         this.logger.warn(
