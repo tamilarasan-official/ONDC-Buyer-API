@@ -28,25 +28,25 @@ export class DeliveryPricingService {
   }
 
   /**
-   * Get delivery charge from Delivery Pricing API
+   * Get delivery charge and estimated delivery time from Delivery Pricing API
    * @param pickupLat Pickup latitude (store location)
    * @param pickupLng Pickup longitude (store location)
    * @param dropoffLat Dropoff latitude (user location)
    * @param dropoffLng Dropoff longitude (user location)
-   * @returns Delivery charge in INR, or 0 if API call fails
+   * @returns Object with delivery charge and estimated_delivery_time, or { charge: 0, estimated_delivery_time: null } if API call fails
    */
   async getDeliveryCharge(
     pickupLat: number,
     pickupLng: number,
     dropoffLat: number,
     dropoffLng: number,
-  ): Promise<number> {
+  ): Promise<{ charge: number; estimated_delivery_time: string | null }> {
     try {
       if (!this.apiToken) {
         this.logger.warn(
-          "Delivery Pricing API token not configured. Returning 0.",
+          "Delivery Pricing API token not configured. Returning default values.",
         );
-        return 0;
+        return { charge: 0, estimated_delivery_time: null };
       }
 
       this.logger.log(
@@ -81,20 +81,24 @@ export class DeliveryPricingService {
 
       if (!response.data) {
         this.logger.warn("TAZTY Delivery Pricing API returned no data");
-        return 0;
+        return { charge: 0, estimated_delivery_time: null };
       }
 
-      // Extract response data matching API structure: { distance, charge, currency, policy_type }
+      // Extract response data matching API structure: { distance, charge, currency, policy_type, estimated_delivery_time }
       const charge = Number(response.data.charge ?? 0);
       const distance = Number(response.data.distance ?? 0);
       const currency = response.data.currency || "INR";
       const policyType = response.data.policy_type;
+      const estimatedDeliveryTime = response.data.estimated_delivery_time || null;
 
       this.logger.log(
-        `✅ Delivery charge fetched: ₹${charge} (distance: ${distance}km, currency: ${currency}, policy: ${policyType})`,
+        `✅ Delivery charge fetched: ₹${charge} (distance: ${distance}km, currency: ${currency}, policy: ${policyType}, estimated_time: ${estimatedDeliveryTime || "N/A"})`,
       );
 
-      return charge;
+      return {
+        charge,
+        estimated_delivery_time: estimatedDeliveryTime,
+      };
     } catch (error) {
       this.logger.error(
         `❌ Failed to fetch delivery charge: ${error.message}`,
@@ -110,8 +114,8 @@ export class DeliveryPricingService {
         );
       }
 
-      // Always return 0 on error (fallback strategy)
-      return 0;
+      // Always return default values on error (fallback strategy)
+      return { charge: 0, estimated_delivery_time: null };
     }
   }
 }

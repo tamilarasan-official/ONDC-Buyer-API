@@ -105,6 +105,7 @@ export class CartService {
               platform_fee: platformFeeConfig.amount,
               include_platform_fee: platformFeeConfig.isEnabled,
               final_amount: 0,
+              estimated_delivery_time: null,
             },
             total_items: 0,
             is_active: false,
@@ -292,6 +293,7 @@ export class CartService {
             tip_amount: 0,
             max_tip_amount: null,
             final_amount: 0,
+            estimated_delivery_time: null,
           };
 
       return {
@@ -442,6 +444,7 @@ export class CartService {
             tip_amount: 0,
             max_tip_amount: null,
             final_amount: 0,
+            estimated_delivery_time: null,
           };
 
       return {
@@ -514,6 +517,7 @@ export class CartService {
             tip_amount: 0,
             max_tip_amount: null,
             final_amount: 0,
+            estimated_delivery_time: null,
           };
 
       return {
@@ -777,6 +781,15 @@ export class CartService {
   /**
    * Recalculate cart totals for a user (public method for external use)
    * Used when user's default address changes
+   * 
+   * This method:
+   * 1. Recalculates delivery fee based on new user location
+   * 2. Updates cart totals (subtotal, tax, final_amount)
+   * 
+   * Note: estimated_delivery_time is not stored in the database but is calculated
+   * dynamically in calculateCartSummary() based on current user location. When the cart
+   * is fetched after address change, it will automatically reflect the new estimated
+   * delivery time since getUserLocation() returns the updated default address.
    */
   async recalculateCartForUser(userId: number): Promise<void> {
     try {
@@ -800,6 +813,7 @@ export class CartService {
       }
 
       // Recalculate cart totals (delivery fee will be recalculated based on new address)
+      // estimated_delivery_time will be updated dynamically when cart summary is requested
       await this.updateCartTotals(cart.id);
 
       this.logger.log(
@@ -855,12 +869,14 @@ export class CartService {
           );
 
           // Call delivery pricing API
-          deliveryFee = await this.deliveryPricingService.getDeliveryCharge(
+          const deliveryInfo = await this.deliveryPricingService.getDeliveryCharge(
             pickupLat,
             pickupLng,
             Number(userLocation.lat),
             Number(userLocation.lng),
           );
+
+          deliveryFee = deliveryInfo.charge;
 
           this.logger.log(
             `📦 Delivery fee calculated: ₹${deliveryFee} for cart ${cartId}`,
@@ -989,6 +1005,50 @@ export class CartService {
       platformFeeForCalculation -
       discountAmount;
 
+    // Fetch estimated delivery time if cart has items
+    // NOTE: This is fetched dynamically on every cart summary request to ensure it reflects
+    // the latest user location. When user's address changes, getUserLocation() will return
+    // the updated default address, ensuring estimated_delivery_time is always accurate.
+    let estimatedDeliveryTime: string | null = null;
+    if (cart.cart_items && cart.cart_items.length > 0 && cart.store && cart.user) {
+      try {
+        // Get cart with full relations if not already loaded
+        const cartWithRelations = await this.cartRepository.findOne({
+          where: { id: cart.id },
+          relations: ["store", "store.locations", "user"],
+        });
+
+        if (
+          cartWithRelations?.store?.locations &&
+          cartWithRelations.store.locations.length > 0 &&
+          cartWithRelations.user
+        ) {
+          const storeLocation = cartWithRelations.store.locations[0];
+          const pickupLat = Number(storeLocation.gps_lat);
+          const pickupLng = Number(storeLocation.gps_lng);
+
+          // Get current user location (will return updated default address if address was changed)
+          const userLocation = await this.locationService.getUserLocation(
+            cartWithRelations.user.id,
+          );
+
+          const deliveryInfo = await this.deliveryPricingService.getDeliveryCharge(
+            pickupLat,
+            pickupLng,
+            Number(userLocation.lat),
+            Number(userLocation.lng),
+          );
+
+          estimatedDeliveryTime = deliveryInfo.estimated_delivery_time;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Failed to fetch estimated delivery time for cart summary: ${error.message}`,
+        );
+        // Continue without estimated delivery time
+      }
+    }
+
     return {
       subtotal: Number(subtotal.toFixed(2)),
       delivery_fee: Number(deliveryFee.toFixed(2)),
@@ -999,6 +1059,7 @@ export class CartService {
       platform_fee: platformFeeConfig.amount,
       include_platform_fee: platformFeeConfig.isEnabled,
       final_amount: Number(finalAmount.toFixed(2)),
+      estimated_delivery_time: estimatedDeliveryTime,
       applied_offer:
         discountAmount > 0
           ? {

@@ -211,6 +211,13 @@ export class CartSummaryDto {
   final_amount: number;
 
   @ApiProperty({
+    description: "Estimated delivery time",
+    example: "11-17 minutes",
+    required: false,
+  })
+  estimated_delivery_time?: string | null;
+
+  @ApiProperty({
     description: "Applied offer details",
     example: {
       id: 1,
