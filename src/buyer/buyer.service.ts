@@ -1823,6 +1823,262 @@ export class BuyerService {
   }
 
   /**
+   * Helper method to check if current day/time falls within timing range
+   * Uses display format for days (1=Sunday, 7=Saturday)
+   * @param dayFrom - Starting day in display format (1-7, where 1=Sunday, 7=Saturday)
+   * @param dayTo - Ending day in display format (1-7, where 1=Sunday, 7=Saturday)
+   * @param timeFrom - Start time in HHMM format
+   * @param timeTo - End time in HHMM format
+   * @param currentDay - Current day in display format (1=Sunday, 7=Saturday)
+   * @param currentTime - Current time in HHMM format
+   * @returns boolean indicating if item is available now
+   */
+  private checkTimingAvailability(
+    dayFrom: number,
+    dayTo: number,
+    timeFrom: string,
+    timeTo: string,
+    currentDay: number,
+    currentTime: number,
+  ): boolean {
+    // Check if current day is within range
+    const isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
+
+    if (!isDayInRange) {
+      return false;
+    }
+
+    // Check if current time is within range
+    const openTime = parseInt(timeFrom);
+    const closeTime = parseInt(timeTo);
+
+    if (closeTime < openTime) {
+      // Overnight hours (e.g., 2200 to 0200)
+      return currentTime >= openTime || currentTime <= closeTime;
+    } else {
+      // Normal hours (e.g., 0900 to 2200)
+      return currentTime >= openTime && currentTime <= closeTime;
+    }
+  }
+
+  /**
+   * Normalize item timings by splitting wrapped ranges into readable ranges
+   * Ensures day_from < day_to in display format (1=Sunday, 7=Saturday)
+   * @param itemTimings - Array of ItemTimings entities (in database format)
+   * @returns Array of normalized timing entries (in display format)
+   */
+  private normalizeItemTimings(
+    itemTimings: Array<{
+      day_from: number;
+      day_to: number;
+      time_from: string;
+      time_to: string;
+    }>,
+  ): Array<{
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+    is_available_now: boolean;
+  }> {
+    const normalizedTimings: Array<{
+      day_from: number;
+      day_to: number;
+      time_from: string;
+      time_to: string;
+      is_available_now: boolean;
+    }> = [];
+
+    // Use IST timezone for current day and time calculation
+    const now = TimezoneUtil.getCurrentISTTime();
+    const jsDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
+    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+
+    for (const timing of itemTimings) {
+      // Convert database format to display format
+      const dayFromDisplay = this.convertDbDayToDisplayDay(timing.day_from);
+      const dayToDisplay = this.convertDbDayToDisplayDay(timing.day_to);
+
+      if (dayFromDisplay <= dayToDisplay) {
+        // Normal range - no splitting needed (e.g., 1-7, 2-5)
+        const isAvailableNow = this.checkTimingAvailability(
+          dayFromDisplay,
+          dayToDisplay,
+          timing.time_from,
+          timing.time_to,
+          currentDayDisplay,
+          currentTime,
+        );
+
+        normalizedTimings.push({
+          day_from: dayFromDisplay,
+          day_to: dayToDisplay,
+          time_from: timing.time_from,
+          time_to: timing.time_to,
+          is_available_now: isAvailableNow,
+        });
+      } else {
+        // Wrapped range - split into two ranges
+        // Example: day_from=3 (Tuesday), day_to=2 (Monday) becomes:
+        //   Range 1: 3-7 (Tuesday to Saturday)
+        //   Range 2: 1-2 (Sunday to Monday)
+
+        // First range: from day_from to Saturday (7)
+        const isAvailableNow1 = this.checkTimingAvailability(
+          dayFromDisplay,
+          7, // Saturday
+          timing.time_from,
+          timing.time_to,
+          currentDayDisplay,
+          currentTime,
+        );
+
+        normalizedTimings.push({
+          day_from: dayFromDisplay,
+          day_to: 7, // Saturday
+          time_from: timing.time_from,
+          time_to: timing.time_to,
+          is_available_now: isAvailableNow1,
+        });
+
+        // Second range: from Sunday (1) to day_to
+        if (dayToDisplay >= 1) {
+          const isAvailableNow2 = this.checkTimingAvailability(
+            1, // Sunday
+            dayToDisplay,
+            timing.time_from,
+            timing.time_to,
+            currentDayDisplay,
+            currentTime,
+          );
+
+          normalizedTimings.push({
+            day_from: 1, // Sunday
+            day_to: dayToDisplay,
+            time_from: timing.time_from,
+            time_to: timing.time_to,
+            is_available_now: isAvailableNow2,
+          });
+        }
+      }
+    }
+
+    // Sort by time_from, then day_from, then day_to for consistent ordering
+    // This groups timings with same time window together for merging
+    const sortedTimings = normalizedTimings.sort((a, b) => {
+      const timeDiff = parseInt(a.time_from) - parseInt(b.time_from);
+      if (timeDiff !== 0) {
+        return timeDiff;
+      }
+      const timeToDiff = parseInt(a.time_to) - parseInt(b.time_to);
+      if (timeToDiff !== 0) {
+        return timeToDiff;
+      }
+      if (a.day_from !== b.day_from) {
+        return a.day_from - b.day_from;
+      }
+      return a.day_to - b.day_to;
+    });
+
+    // Merge consecutive/adjacent ranges with the same time window
+    return this.mergeAdjacentRanges(sortedTimings, currentDayDisplay, currentTime);
+  }
+
+  /**
+   * Merge adjacent/consecutive ranges with the same time window
+   * Example: (1-1, 2-7) with same time becomes (1-7)
+   */
+  private mergeAdjacentRanges(
+    timings: Array<{
+      day_from: number;
+      day_to: number;
+      time_from: string;
+      time_to: string;
+      is_available_now: boolean;
+    }>,
+    currentDay: number,
+    currentTime: number,
+  ): Array<{
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+    is_available_now: boolean;
+  }> {
+    if (timings.length === 0) {
+      return [];
+    }
+
+    const merged: Array<{
+      day_from: number;
+      day_to: number;
+      time_from: string;
+      time_to: string;
+      is_available_now: boolean;
+    }> = [];
+
+    for (const timing of timings) {
+      const lastMerged = merged[merged.length - 1];
+
+      // Check if we can merge with the last entry
+      if (
+        lastMerged &&
+        lastMerged.time_from === timing.time_from &&
+        lastMerged.time_to === timing.time_to
+      ) {
+        // Check if ranges are adjacent, consecutive, or can be combined
+        const isAdjacent =
+          // Case 1: Consecutive (e.g., 1-1 and 2-7, or 2-6 and 7-7)
+          lastMerged.day_to + 1 === timing.day_from ||
+          // Case 2: Wraps around (e.g., 2-7 and 1-1, or 7-7 and 1-1)
+          (lastMerged.day_to === 7 && timing.day_from === 1) ||
+          // Case 3: Overlapping or touching (e.g., 2-5 and 3-7)
+          (timing.day_from <= lastMerged.day_to + 1);
+
+        if (isAdjacent) {
+          // Merge: extend the range
+          const newDayFrom = Math.min(lastMerged.day_from, timing.day_from);
+          const newDayTo = Math.max(lastMerged.day_to, timing.day_to);
+
+          // Recalculate availability for merged range
+          const isAvailableNow = this.checkTimingAvailability(
+            newDayFrom,
+            newDayTo,
+            lastMerged.time_from,
+            lastMerged.time_to,
+            currentDay,
+            currentTime,
+          );
+
+          merged[merged.length - 1] = {
+            day_from: newDayFrom,
+            day_to: newDayTo,
+            time_from: lastMerged.time_from,
+            time_to: lastMerged.time_to,
+            is_available_now: isAvailableNow,
+          };
+          continue;
+        }
+      }
+
+      // Cannot merge - add as new entry
+      merged.push({ ...timing });
+    }
+
+    // Final sort by day_from, then day_to, then time_from
+    return merged.sort((a, b) => {
+      if (a.day_from !== b.day_from) {
+        return a.day_from - b.day_from;
+      }
+      if (a.day_to !== b.day_to) {
+        return a.day_to - b.day_to;
+      }
+      return parseInt(a.time_from) - parseInt(b.time_from);
+    });
+  }
+
+  /**
    * Get restaurant menu
    */
   async getRestaurantMenu(
@@ -3124,6 +3380,42 @@ export class BuyerService {
         .addOrderBy("i.name", "ASC")
         .getMany();
 
+      // Collect all item IDs first to batch load timings
+      const allItemIds: number[] = [];
+      for (const category of categories) {
+        if (category.item_categories && category.item_categories.length > 0) {
+          for (const itemCategory of category.item_categories) {
+            const item = itemCategory.item;
+            if (item && item.type === "item" && item.parent_item === null) {
+              allItemIds.push(item.id);
+            }
+          }
+        }
+      }
+
+      // Batch load all item timings in a single query to ensure all timings are loaded
+      const allItemTimingsMap = new Map<number, any[]>();
+      if (allItemIds.length > 0) {
+        const itemsWithTimings = await this.itemRepository
+          .createQueryBuilder("i")
+          .leftJoinAndSelect("i.timings", "t")
+          .where("i.id IN (:...itemIds)", { itemIds: allItemIds })
+          .getMany();
+
+        // Create a map of item ID to timings array (ensures all timings are captured)
+        for (const item of itemsWithTimings) {
+          // Store all timings for this item - TypeORM should load all via leftJoinAndSelect
+          const timings = item.timings || [];
+          allItemTimingsMap.set(item.id, timings);
+          
+          if (timings.length > 0) {
+            this.logger.debug(
+              `Loaded ${timings.length} timing(s) for item ${item.id}`,
+            );
+          }
+        }
+      }
+
       // Process categories and items
       const processedCategories: any[] = [];
 
@@ -3165,20 +3457,13 @@ export class BuyerService {
           const customizations = await this.getCustomizationGroups(item.id);
           const hasCustomizations = customizations.length > 0;
 
-          // Process item timings (convert database format to display format)
-          const itemTimings =
-            item.timings?.map((timing) => ({
-              day_from: this.convertDbDayToDisplayDay(timing.day_from), // Convert to display format: 1=Sunday, 7=Saturday
-              day_to: this.convertDbDayToDisplayDay(timing.day_to), // Convert to display format: 1=Sunday, 7=Saturday
-              time_from: timing.time_from,
-              time_to: timing.time_to,
-              is_available_now: this.isItemAvailableNow(
-                timing.day_from, // Use database format for availability check
-                timing.day_to, // Use database format for availability check
-                timing.time_from,
-                timing.time_to,
-              ),
-            })) || [];
+          // Get all item timings from the batch-loaded map (ensures all timings are loaded)
+          const allItemTimings = allItemTimingsMap.get(item.id) || [];
+
+          // Process item timings - normalize wrapped ranges to readable format
+          const itemTimings = allItemTimings.length > 0
+            ? this.normalizeItemTimings(allItemTimings)
+            : [];
 
           items.push({
             id: item.id,

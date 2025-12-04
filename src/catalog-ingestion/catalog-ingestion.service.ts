@@ -1559,20 +1559,36 @@ export class CatalogIngestionService {
     const timings = this.itemTransformer.transformTimings(itemData);
 
     if (timings && timings.length > 0) {
-      // Create ItemTimings record for each timing window
-      for (const timing of timings) {
-        const itemTiming = new ItemTimings();
-        itemTiming.item = item;
-        itemTiming.day_from = timing.day_from;
-        itemTiming.day_to = timing.day_to;
-        itemTiming.time_from = timing.time_from;
-        itemTiming.time_to = timing.time_to;
+      this.logger.log(
+        `Processing ${timings.length} timing(s) for item ${item.reference_id}`,
+      );
 
-        await queryRunner.manager.save(ItemTimings, itemTiming);
-        this.logger.log(
-          `Added timing for item ${item.reference_id}: ${timing.day_from}-${timing.day_to} ${timing.time_from}-${timing.time_to}`,
-        );
+      // Create ItemTimings records for each timing window
+      // Batch insert all timings at once to ensure all records are saved
+      // Using plain objects to avoid TypeORM entity tracking issues
+      const timingRecords = timings.map((timing) => ({
+        item: { id: item.id }, // Use relation reference
+        day_from: timing.day_from,
+        day_to: timing.day_to,
+        time_from: timing.time_from,
+        time_to: timing.time_to,
+      }));
+
+      if (timingRecords.length > 0) {
+        // Batch insert all timings at once - this ensures all records are inserted
+        await queryRunner.manager.insert(ItemTimings, timingRecords);
+        
+        // Log each timing that was inserted
+        timings.forEach((timing, index) => {
+          this.logger.log(
+            `Added timing ${index + 1}/${timings.length} for item ${item.reference_id}: day_from=${timing.day_from}, day_to=${timing.day_to}, time_from=${timing.time_from}, time_to=${timing.time_to}`,
+          );
+        });
       }
+
+      this.logger.log(
+        `Successfully saved ${timings.length} timing(s) for item ${item.reference_id}`,
+      );
     } else if (itemData.time?.timestamp) {
       // Fallback: Use store timings if item timing not available
       const storeTimings = await this.getStoreTimingsForItem(

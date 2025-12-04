@@ -42,7 +42,7 @@ export class ItemTimingDto {
 
   @ApiProperty({
     description:
-      "Ending day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday. Can be same as day_from for single day, or wrap around (e.g., 6-2 for Sat-Mon)",
+      "Ending day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday. Always greater than or equal to day_from (wrapped ranges are automatically split into readable ranges).",
     example: 7,
     type: "number",
   })
