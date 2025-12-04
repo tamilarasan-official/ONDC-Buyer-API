@@ -5,7 +5,7 @@ import { StoreDietaryPreference } from "../../shared/enums/store-dietary-prefere
 
 export class RestaurantTimingDto {
   @ApiProperty({
-    description: "Day of week (1-7, Monday to Sunday)",
+    description: "Day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday",
     example: 1,
     type: "number",
   })
@@ -34,7 +34,7 @@ export class RestaurantTimingDto {
 export class ItemTimingDto {
   @ApiProperty({
     description:
-      "Starting day of week (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)",
+      "Starting day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday",
     example: 1,
     type: "number",
   })
@@ -42,8 +42,8 @@ export class ItemTimingDto {
 
   @ApiProperty({
     description:
-      "Ending day of week (1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday). Can be same as day_from for single day, or wrap around (e.g., 5-1 for Fri-Mon)",
-    example: 5,
+      "Ending day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday. Can be same as day_from for single day, or wrap around (e.g., 6-2 for Sat-Mon)",
+    example: 7,
     type: "number",
   })
   day_to: number;
@@ -377,13 +377,13 @@ export class RestaurantItemDto {
 
   @ApiProperty({
     description:
-      "Item availability timings - defines when this item is available for order. Each timing object represents a time window with day range and time range. Example: breakfast items available Mon-Fri 6AM-11AM, or all-day items available Mon-Sun 24 hours. Empty array means no specific timing restrictions.",
+      "Item availability timings - defines when this item is available for order. Each timing object represents a time window with day range and time range. Example: breakfast items available Mon-Fri 6AM-11AM (day_from=2, day_to=6), or all-day items available Sun-Sat 24 hours (day_from=1, day_to=7). Empty array means no specific timing restrictions. Day format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday.",
     type: [ItemTimingDto],
     required: false,
     example: [
       {
-        day_from: 1,
-        day_to: 5,
+        day_from: 2,
+        day_to: 6,
         time_from: "0600",
         time_to: "1100",
         is_available_now: true,

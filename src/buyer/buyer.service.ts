@@ -1657,11 +1657,43 @@ export class BuyerService {
   }
 
   /**
+   * Convert database day format to display format
+   * Database: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
+   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
+   */
+  private convertDbDayToDisplayDay(dbDay: number): number {
+    // Database 7 (Sunday) → Display 1 (Sunday)
+    // Database 1-6 (Mon-Sat) → Display 2-7 (Mon-Sat)
+    return dbDay === 7 ? 1 : dbDay + 1;
+  }
+
+  /**
+   * Convert display day format to database format
+   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
+   * Database: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
+   */
+  private convertDisplayDayToDbDay(displayDay: number): number {
+    // Display 1 (Sunday) → Database 7 (Sunday)
+    // Display 2-7 (Mon-Sat) → Database 1-6 (Mon-Sat)
+    return displayDay === 1 ? 7 : displayDay - 1;
+  }
+
+  /**
+   * Convert JavaScript getDay() to display format
+   * JS: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
+   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
+   */
+  private convertJsDayToDisplayDay(jsDay: number): number {
+    return jsDay === 0 ? 1 : jsDay + 1;
+  }
+
+  /**
    * Expand timing ranges into individual day entries
    * Transforms timings with day_from-day_to ranges into separate entries for each day
-   * @param timings - Array of timing objects with day_from, day_to, time_from, time_to
+   * Days are converted to display format: 1=Sunday, 2=Monday, ..., 7=Saturday
+   * @param timings - Array of timing objects with day_from, day_to, time_from, time_to (in database format)
    * @param hasActiveCloseTiming - Whether the store has an active close timing (pre-computed to avoid N+1 queries)
-   * @returns Array of expanded timing entries, one per day
+   * @returns Array of expanded timing entries, one per day (in display format)
    */
   private expandTimingsToDays(
     timings: StoreTimings[],
@@ -1681,44 +1713,46 @@ export class BuyerService {
 
     // Use IST timezone for current day and time calculation
     const now = TimezoneUtil.getCurrentISTTime();
-    // Convert JavaScript's getDay() to database format (1=Monday, 7=Sunday)
+    // Convert JavaScript's getDay() to display format (1=Sunday, 7=Saturday)
     // JS getDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-    // Database format: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat, 7=Sun
+    // Display format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
     const jsDay = now.getDay();
-    const currentDay = jsDay === 0 ? 7 : jsDay; // Sunday=7, Monday=1, ..., Saturday=6
+    const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
     const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
 
     for (const timing of timings) {
-      // Database format is already 1=Monday, 7=Sunday, so no conversion needed
-      const dayFrom = timing.day_from;
-      const dayTo = timing.day_to;
+      // Database format: 1=Monday, 7=Sunday
+      const dayFromDb = timing.day_from;
+      const dayToDb = timing.day_to;
 
-      // Generate days in the range
-      const days: number[] = [];
+      // Generate days in the range (in database format)
+      const daysDb: number[] = [];
 
-      if (dayFrom <= dayTo) {
-        // Normal range (e.g., Sunday to Thursday: 1-5)
-        for (let day = dayFrom; day <= dayTo; day++) {
-          days.push(day);
+      if (dayFromDb <= dayToDb) {
+        // Normal range (e.g., Monday to Friday: 1-5)
+        for (let day = dayFromDb; day <= dayToDb; day++) {
+          daysDb.push(day);
         }
       } else {
-        // Wrapped range (e.g., Friday to Sunday: 6-1)
-        // Handle as two separate ranges: from dayFrom to 7, and from 1 to dayTo
-        for (let day = dayFrom; day <= 7; day++) {
-          days.push(day);
+        // Wrapped range (e.g., Friday to Monday: 5-1)
+        // Handle as two separate ranges: from dayFromDb to 7, and from 1 to dayToDb
+        for (let day = dayFromDb; day <= 7; day++) {
+          daysDb.push(day);
         }
-        for (let day = 1; day <= dayTo; day++) {
-          days.push(day);
+        for (let day = 1; day <= dayToDb; day++) {
+          daysDb.push(day);
         }
       }
 
-      // Create an entry for each day
-      for (const day of days) {
+      // Create an entry for each day, converting to display format
+      for (const dayDb of daysDb) {
+        const dayDisplay = this.convertDbDayToDisplayDay(dayDb); // Convert to display format (1=Sun, 7=Sat)
+
         // Calculate is_open: true only if this day is today AND current time is within operating hours AND no active close timing
         let isOpen = false;
 
-        // Only check if this day entry is today
-        if (day === currentDay && !hasActiveCloseTiming) {
+        // Check if this day entry is today (compare in display format)
+        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming) {
           // Check if current time is within operating hours for this timing entry
           const openTime = parseInt(timing.time_from);
           const closeTime = parseInt(timing.time_to);
@@ -1733,7 +1767,7 @@ export class BuyerService {
         }
 
         expandedTimings.push({
-          day,
+          day: dayDisplay, // Return in display format: 1=Sunday, 7=Saturday
           open_time: timing.time_from,
           close_time: timing.time_to,
           is_open: isOpen,
@@ -1741,14 +1775,15 @@ export class BuyerService {
       }
     }
 
-    // Sort by day (1-7) for consistent ordering
+    // Sort by day (1-7) for consistent ordering: Sunday (1) to Saturday (7)
     return expandedTimings.sort((a, b) => a.day - b.day);
   }
 
   /**
    * Check if an item is currently available based on its timing window
-   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
-   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
+   * Note: Uses database format internally (1=Monday, 7=Sunday)
+   * @param dayFrom - Starting day in database format (1-7, where 1=Monday, 7=Sunday)
+   * @param dayTo - Ending day in database format (1-7, where 1=Monday, 7=Sunday)
    * @param timeFrom - Start time in HHMM format
    * @param timeTo - End time in HHMM format
    * @returns boolean indicating if item is available now
@@ -1759,7 +1794,7 @@ export class BuyerService {
     timeFrom: string,
     timeTo: string,
   ): boolean {
-    // Use IST timezone
+    // Use IST timezone (returns database format: 1=Monday, 7=Sunday)
     const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
 
     // Check if current day is within the day range
@@ -3130,16 +3165,16 @@ export class BuyerService {
           const customizations = await this.getCustomizationGroups(item.id);
           const hasCustomizations = customizations.length > 0;
 
-          // Process item timings
+          // Process item timings (convert database format to display format)
           const itemTimings =
             item.timings?.map((timing) => ({
-              day_from: timing.day_from,
-              day_to: timing.day_to,
+              day_from: this.convertDbDayToDisplayDay(timing.day_from), // Convert to display format: 1=Sunday, 7=Saturday
+              day_to: this.convertDbDayToDisplayDay(timing.day_to), // Convert to display format: 1=Sunday, 7=Saturday
               time_from: timing.time_from,
               time_to: timing.time_to,
               is_available_now: this.isItemAvailableNow(
-                timing.day_from,
-                timing.day_to,
+                timing.day_from, // Use database format for availability check
+                timing.day_to, // Use database format for availability check
                 timing.time_from,
                 timing.time_to,
               ),

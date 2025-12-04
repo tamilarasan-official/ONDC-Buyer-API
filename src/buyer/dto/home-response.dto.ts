@@ -4,7 +4,7 @@ import { StoreDietaryPreference } from "../../shared/enums/store-dietary-prefere
 
 export class RestaurantTimingDto {
   @ApiProperty({
-    description: "Day of week (1-7, Monday to Sunday)",
+    description: "Day of week in display format: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday",
     example: 1,
     type: "number",
   })

@@ -29,10 +29,10 @@ export class StoreTimings {
   type: string; // "Order", "Delivery", "Self-Pickup"
 
   @Column({ type: "int", nullable: false })
-  day_from: number; // 1-7 (Monday to Sunday)
+  day_from: number; // 1-7 (Database format: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)
 
   @Column({ type: "int", nullable: false })
-  day_to: number; // 1-7 (Monday to Sunday)
+  day_to: number; // 1-7 (Database format: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday)
 
   @Column({ type: "varchar", length: 4, nullable: false })
   time_from: string; // "HHMM" format like "0900"
