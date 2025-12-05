@@ -128,9 +128,20 @@ export class FCMService {
       };
     } catch (error) {
       this.logger.error(
-        `Failed to send FCM notification to token ${token}:`,
-        error,
+        `❌ Failed to send FCM notification to token ${token.substring(0, 30)}...`,
       );
+      this.logger.error(`Error Code: ${error.code || "N/A"}`);
+      this.logger.error(`Error Message: ${error.message}`);
+      
+      // Log detailed error information
+      if (error.errorInfo) {
+        this.logger.error(`Error Info Code: ${error.errorInfo.code}`);
+        this.logger.error(`Error Info Message: ${error.errorInfo.message}`);
+      }
+      
+      // Log the full error for debugging
+      this.logger.debug(`Full error object:`, JSON.stringify(error, null, 2));
+      
       return {
         success: false,
         error: error.message,
@@ -198,13 +209,38 @@ export class FCMService {
         `FCM multicast notification sent: ${response.successCount} success, ${response.failureCount} failures`,
       );
 
+      // Log detailed results for failures
+      if (response.failureCount > 0) {
+        this.logger.warn(
+          `⚠️  FCM multicast had ${response.failureCount} failure(s)`,
+        );
+        response.responses.forEach((resp, index) => {
+          if (!resp.success && resp.error) {
+            this.logger.error(
+              `Token ${index + 1}/${tokens.length} failed: ${tokens[index].substring(0, 30)}...`,
+            );
+            this.logger.error(`  Error Code: ${resp.error.code}`);
+            this.logger.error(`  Error Message: ${resp.error.message}`);
+          }
+        });
+      }
+
       return {
         successCount: response.successCount,
         failureCount: response.failureCount,
         results,
       };
     } catch (error) {
-      this.logger.error("Failed to send FCM multicast notification:", error);
+      this.logger.error(
+        "❌ Failed to send FCM multicast notification:",
+        error.message,
+      );
+      this.logger.error(`Error Code: ${error.code || "N/A"}`);
+      
+      if (error.errorInfo) {
+        this.logger.error(`Error Info: ${JSON.stringify(error.errorInfo)}`);
+      }
+      
       throw error;
     }
   }

@@ -670,14 +670,27 @@ export class NotificationService {
         return;
       }
 
+      // FCM requires all data values to be strings
+      // Convert notification.data to string values
+      const notificationData: { [key: string]: string } = {
+        notification_id: notification.id.toString(),
+        type: notification.type,
+      };
+
+      // Convert all data fields to strings
+      if (notification.data && typeof notification.data === "object") {
+        Object.keys(notification.data).forEach((key) => {
+          const value = notification.data[key];
+          // Convert all values to strings for FCM compatibility
+          notificationData[key] =
+            value !== null && value !== undefined ? String(value) : "";
+        });
+      }
+
       const payload: FCMNotificationPayload = {
         title: notification.title,
         body: notification.message,
-        data: {
-          notification_id: notification.id.toString(),
-          type: notification.type,
-          ...notification.data,
-        },
+        data: notificationData,
       };
 
       const options: FCMNotificationOptions = {
