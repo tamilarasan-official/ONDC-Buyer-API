@@ -335,24 +335,29 @@ export class FCMService {
    */
   async validateToken(token: string): Promise<boolean> {
     try {
+      // REJECT Expo tokens explicitly
+      if (token.startsWith("ExponentPushToken[")) {
+        this.logger.error(
+          `❌ EXPO TOKEN DETECTED: ${token.substring(0, 30)}... - This system uses FCM, not Expo Push Notifications!`,
+        );
+        this.logger.error(
+          `🔧 ACTION REQUIRED: Update mobile app to use @react-native-firebase/messaging instead of expo-notifications`,
+        );
+        this.logger.error(
+          `📖 See: FCM_TOKEN_MIGRATION_GUIDE.md for implementation steps`,
+        );
+        return false;
+      }
+
       // Skip validation if FCM is not initialized (dev mode)
       if (!this.app) {
         this.logger.warn(
-          `FCM not initialized - skipping token validation for: ${token.substring(0, 20)}...`,
+          `⚠️  FCM not initialized - skipping token validation for: ${token.substring(0, 20)}...`,
+        );
+        this.logger.warn(
+          `💡 Set FCM_* environment variables to enable full validation`,
         );
         return true;
-      }
-
-      // Basic format validation for Expo tokens
-      if (token.startsWith("ExponentPushToken[")) {
-        // Expo tokens are valid if they match the format
-        const isValid = /^ExponentPushToken\[[a-zA-Z0-9_-]+\]$/.test(token);
-        if (isValid) {
-          this.logger.log(
-            `Valid Expo token format: ${token.substring(0, 30)}...`,
-          );
-          return true;
-        }
       }
 
       // For FCM tokens, perform dry-run validation (doesn't actually send)
@@ -366,18 +371,30 @@ export class FCMService {
       // Use validateOnly to check token without sending actual message
       await admin.messaging().send(message, true); // true = dryRun mode
       this.logger.log(
-        `Token validated successfully: ${token.substring(0, 30)}...`,
+        `✅ FCM token validated successfully: ${token.substring(0, 30)}...`,
       );
       return true;
     } catch (error) {
       this.logger.warn(
-        `Token validation failed for ${token.substring(0, 30)}...: ${error.message}`,
+        `⚠️  Token validation failed for ${token.substring(0, 30)}...: ${error.message}`,
       );
-      // In development/staging, be lenient and accept tokens anyway
+      
+      // Check for common FCM errors
+      if (error.code === "messaging/invalid-registration-token") {
+        this.logger.error(`❌ Invalid FCM token format or expired token`);
+        return false;
+      }
+      
+      if (error.code === "messaging/registration-token-not-registered") {
+        this.logger.error(`❌ FCM token not registered with Firebase`);
+        return false;
+      }
+
+      // In development/staging, be lenient and accept tokens anyway (except Expo)
       const env = this.configService.get<string>("NODE_ENV");
       if (env === "development" || env === "staging") {
         this.logger.log(
-          `Accepting token despite validation failure (${env} mode)`,
+          `⚠️  Accepting token despite validation failure (${env} mode)`,
         );
         return true;
       }

@@ -488,8 +488,42 @@ export class NotificationService {
     appVersion?: string,
   ): Promise<void> {
     try {
+      // CRITICAL: Check if token is Expo token (not supported with FCM)
+      if (deviceToken.startsWith("ExponentPushToken[")) {
+        this.logger.error(
+          `❌ REJECTED: User ${userId} attempted to register Expo token`,
+        );
+        this.logger.error(
+          `Token: ${deviceToken.substring(0, 30)}...`,
+        );
+        this.logger.error(
+          `💡 This backend uses Firebase Cloud Messaging (FCM), not Expo Push Service`,
+        );
+        this.logger.error(
+          `📖 Mobile app must use @react-native-firebase/messaging - See FCM_TOKEN_MIGRATION_GUIDE.md`,
+        );
+        throw new Error(
+          "Expo push tokens are not supported. This system uses Firebase Cloud Messaging (FCM). Please update your mobile app to use @react-native-firebase/messaging. Contact support for migration guide.",
+        );
+      }
+
       this.logger.log(
-        `🔍 Checking existing token for user ${userId} | Device ID: ${deviceId || "N/A"}`,
+        `🔍 Validating FCM token for user ${userId} | Device ID: ${deviceId || "N/A"}`,
+      );
+
+      // Validate token with FCM service
+      const isValid = await this.fcmService.validateToken(deviceToken);
+      if (!isValid) {
+        this.logger.error(
+          `❌ FCM token validation failed for user ${userId} | Token: ${deviceToken.substring(0, 30)}...`,
+        );
+        throw new Error(
+          "Invalid FCM token format or expired token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
+        );
+      }
+
+      this.logger.log(
+        `✅ FCM token validated | Checking existing registration for user ${userId}`,
       );
 
       // Check if token already exists
