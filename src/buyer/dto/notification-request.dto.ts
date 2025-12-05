@@ -100,6 +100,24 @@ export class RegisterDeviceTokenDto {
   })
   @IsEnum(["android", "ios", "web"])
   platform: "android" | "ios" | "web";
+
+  @ApiProperty({
+    description: "Unique device identifier (Android: ANDROID_ID, iOS: identifierForVendor)",
+    example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  device_id?: string;
+
+  @ApiProperty({
+    description: "Application version (e.g., 1.2.3)",
+    example: "1.2.3",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  app_version?: string;
 }
 
 export class UnregisterDeviceTokenDto {

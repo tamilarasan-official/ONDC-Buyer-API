@@ -478,14 +478,20 @@ export class NotificationService {
   }
 
   /**
-   * Register device token for push notifications
+   * Register device token for push notifications with device metadata
    */
   async registerDeviceToken(
     userId: number,
     deviceToken: string,
     platform: string,
+    deviceId?: string,
+    appVersion?: string,
   ): Promise<void> {
     try {
+      this.logger.log(
+        `🔍 Checking existing token for user ${userId} | Device ID: ${deviceId || "N/A"}`,
+      );
+
       // Check if token already exists
       const existingToken = await this.userDeviceTokenRepository.findOne({
         where: {
@@ -495,31 +501,59 @@ export class NotificationService {
       });
 
       if (existingToken) {
-        // Update existing token
+        // Update existing token with new metadata
+        const previousDeviceId = existingToken.device_id;
+        const previousAppVersion = existingToken.app_version;
+
         existingToken.is_active = true;
         existingToken.platform = platform;
+        existingToken.device_id = deviceId || existingToken.device_id;
+        existingToken.app_version = appVersion || existingToken.app_version;
         existingToken.updated_at = new Date();
+
         await this.userDeviceTokenRepository.save(existingToken);
+
+        // Log what changed
+        const changes: string[] = [];
+        if (deviceId && deviceId !== previousDeviceId) {
+          changes.push(`Device ID: ${previousDeviceId || "none"} → ${deviceId}`);
+        }
+        if (appVersion && appVersion !== previousAppVersion) {
+          changes.push(`App Version: ${previousAppVersion || "none"} → ${appVersion}`);
+        }
+
         this.logger.log(
-          `Device token updated for user ${userId}: ${deviceToken}`,
+          `✅ Device token UPDATED for user ${userId} | Platform: ${platform} | Device ID: ${existingToken.device_id || "not set"} | App Version: ${existingToken.app_version || "not set"}${changes.length > 0 ? " | Changes: " + changes.join(", ") : ""}`,
         );
       } else {
-        // Create new token
+        // Create new token with all metadata
         const newToken = this.userDeviceTokenRepository.create({
           userId: userId,
           user: { id: userId },
           token: deviceToken,
           platform,
+          device_id: deviceId,
+          app_version: appVersion,
           is_active: true,
         });
+
         await this.userDeviceTokenRepository.save(newToken);
+
         this.logger.log(
-          `Device token registered for user ${userId}: ${deviceToken}`,
+          `✅ Device token REGISTERED (new) for user ${userId} | Platform: ${platform} | Device ID: ${deviceId || "not provided"} | App Version: ${appVersion || "not provided"}`,
         );
       }
+
+      // Log statistics
+      const userTokenCount = await this.userDeviceTokenRepository.count({
+        where: { userId: userId, is_active: true },
+      });
+      this.logger.log(
+        `📊 User ${userId} now has ${userTokenCount} active device(s)`,
+      );
     } catch (error) {
       this.logger.error(
-        `Failed to register device token: ${error.message}`,
+        `❌ Failed to register device token for user ${userId}: ${error.message}`,
         error.stack,
       );
       throw new Error("Failed to register device token");

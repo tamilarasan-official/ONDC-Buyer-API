@@ -50,6 +50,7 @@ import {
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { RemoveCouponDto } from "./dto/apply-coupon.dto";
 import { TestNotificationDto } from "./dto/test-notification.dto";
+import { RegisterDeviceTokenDto } from "./dto/notification-request.dto";
 import {
   CartResponseDto,
   AddToCartResponseDto,
@@ -1522,11 +1523,11 @@ export class BuyerController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
-    summary: "Register device token",
-    description: "Register device token for push notifications",
+    summary: "Register device token for push notifications",
+    description: "Register or update device token with device information for push notifications. Accepts device_id and app_version for better device tracking and analytics.",
   })
   @ApiBody({
-    description: "Device token registration payload",
+    description: "Device token registration payload with optional device metadata",
     schema: {
       type: "object",
       required: ["device_token", "platform"],
@@ -1539,7 +1540,18 @@ export class BuyerController {
         platform: {
           type: "string",
           example: "android",
-          description: "Origin platform of the device token (e.g., android, ios, web)",
+          enum: ["android", "ios", "web"],
+          description: "Origin platform of the device token",
+        },
+        device_id: {
+          type: "string",
+          example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF",
+          description: "Unique device identifier (Android: ANDROID_ID, iOS: identifierForVendor) - Optional but recommended",
+        },
+        app_version: {
+          type: "string",
+          example: "1.2.3",
+          description: "Application version (e.g., 1.2.3) - Optional but recommended for version tracking",
         },
       },
     },
@@ -1547,24 +1559,67 @@ export class BuyerController {
   @ApiResponse({
     status: 201,
     description: "Device token registered successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Device token registered successfully" },
+        data: {
+          type: "object",
+          properties: {
+            device_token: { type: "string", example: "fcm_token_..." },
+            platform: { type: "string", example: "android" },
+            device_id: { type: "string", example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF" },
+            app_version: { type: "string", example: "1.2.3" },
+            registered_at: { type: "string", example: "2025-12-05T10:30:00Z" },
+          },
+        },
+      },
+    },
   })
-  async registerDeviceToken(@Req() req: any, @Body() tokenData: any) {
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Invalid token or platform",
+  })
+  @ApiResponse({
+    status: 401,
+    description: "Unauthorized - User not authenticated",
+  })
+  async registerDeviceToken(@Req() req: any, @Body() tokenData: RegisterDeviceTokenDto) {
     const userId = req.user?.id;
     if (!userId) {
       throw new UnauthorizedException("User not authenticated");
     }
 
     try {
+      this.logger.log(
+        `📱 Registering device token for user ${userId} | Platform: ${tokenData.platform} | Device ID: ${tokenData.device_id || "not provided"} | App Version: ${tokenData.app_version || "not provided"}`,
+      );
+
       // Validate basic token format
       if (
         !tokenData.device_token ||
         typeof tokenData.device_token !== "string"
       ) {
+        this.logger.warn(`❌ Invalid device token format for user ${userId}`);
         throw new BadRequestException("Device token is required");
       }
 
       if (!tokenData.platform || typeof tokenData.platform !== "string") {
+        this.logger.warn(`❌ Invalid platform for user ${userId}`);
         throw new BadRequestException("Platform is required");
+      }
+
+      // Log if optional fields are missing
+      if (!tokenData.device_id) {
+        this.logger.warn(
+          `⚠️  Device ID not provided for user ${userId} - device tracking will be limited`,
+        );
+      }
+      if (!tokenData.app_version) {
+        this.logger.warn(
+          `⚠️  App version not provided for user ${userId} - version tracking will be limited`,
+        );
       }
 
       // Validate token with FCM (lenient in dev/staging)
@@ -1574,20 +1629,22 @@ export class BuyerController {
 
       if (!isValid) {
         this.logger.warn(
-          `Token validation failed but continuing for user ${userId}`,
+          `⚠️  Token validation failed but continuing for user ${userId}`,
         );
         // Don't throw error - validation is lenient in dev/staging
       }
 
-      // Register token in database
+      // Register token in database with all metadata
       await this.notificationService.registerDeviceToken(
         userId,
         tokenData.device_token,
         tokenData.platform,
+        tokenData.device_id,
+        tokenData.app_version,
       );
 
       this.logger.log(
-        `Device token registered for user ${userId}, platform: ${tokenData.platform}`,
+        `✅ Device token registered successfully for user ${userId} | Platform: ${tokenData.platform} | Device: ${tokenData.device_id ? "tracked" : "untracked"} | Version: ${tokenData.app_version || "unknown"}`,
       );
 
       return {
@@ -1596,6 +1653,8 @@ export class BuyerController {
         data: {
           device_token: tokenData.device_token.substring(0, 50) + "...",
           platform: tokenData.platform,
+          device_id: tokenData.device_id || null,
+          app_version: tokenData.app_version || null,
           registered_at: new Date().toISOString(),
         },
       };
@@ -2168,18 +2227,55 @@ export class BuyerController {
   @ApiOperation({
     summary: "Seller status update webhook",
     description:
-      "Webhook endpoint to receive order status updates from sellers. This endpoint validates status transitions and updates order tracking.",
+      "Webhook endpoint to receive order status updates from sellers. Supports rich agent tracking data including GPS location, timestamps, and status history. This endpoint validates status transitions and updates order tracking with complete metadata.",
   })
   @ApiBody({
     type: SellerStatusUpdateDto,
-    description: "Seller status update payload",
+    description: "Seller status update payload with optional agent tracking data",
     examples: {
       billed: {
-        summary: "Order billed",
+        summary: "Order billed (basic)",
         value: {
           order_number: "ORD-20250102-001",
           status: "billed",
+          preparation_time: "PT10M",
+          estimated_delivery_time: "2025-01-02T15:30:00Z",
           message: "Order confirmed and billed by seller",
+        },
+      },
+      agentAssigned: {
+        summary: "Agent assigned (with full tracking data)",
+        value: {
+          order_number: "ORD-20250102-001",
+          status: "agent-assigned",
+          estimated_delivery_time: "2025-01-02T15:30:00Z",
+          message: "A delivery partner has been assigned to your order",
+          agent_details: {
+            name: "Prem Kumar",
+            phone: "9360838199",
+            timestamps: {
+              picked_at: null,
+              accepted_at: "2025-01-02T10:15:00.000000Z",
+              assigned_at: "2025-01-02T10:15:00.000000Z",
+              delivered_at: null,
+            },
+            status_history: [
+              {
+                status: "pending",
+                timestamp: "2025-01-02T10:14:00.000000Z",
+              },
+              {
+                status: "assigned",
+                timestamp: "2025-01-02T10:15:00.000000Z",
+              },
+            ],
+            current_location: {
+              lat: 9.9352505,
+              lng: 78.1333933,
+              accuracy: 13.78,
+              updated_at: "2025-01-02T10:15:30.000000Z",
+            },
+          },
         },
       },
       packed: {
@@ -2188,6 +2284,39 @@ export class BuyerController {
           order_number: "ORD-20250102-001",
           status: "packed",
           message: "Order packed and ready for pickup",
+          agent_details: {
+            name: "John Doe",
+            phone: "+91-9876543210",
+            vehicle_number: "KA-01-AB-1234",
+            eta: "15 minutes",
+          },
+        },
+      },
+      outForDelivery: {
+        summary: "Out for delivery (with live tracking)",
+        value: {
+          order_number: "ORD-20250102-001",
+          status: "out-of-delivery",
+          estimated_delivery_time: "2025-01-02T15:45:00Z",
+          message: "Your order is on the way",
+          agent_details: {
+            name: "Prem Kumar",
+            phone: "9360838199",
+            vehicle_number: "TN-01-XY-5678",
+            eta: "10 minutes",
+            current_location: {
+              lat: 9.9412345,
+              lng: 78.1398765,
+              accuracy: 8.5,
+              updated_at: "2025-01-02T15:35:00.000000Z",
+            },
+            timestamps: {
+              picked_at: "2025-01-02T15:20:00.000000Z",
+              accepted_at: "2025-01-02T10:15:00.000000Z",
+              assigned_at: "2025-01-02T10:15:00.000000Z",
+              delivered_at: null,
+            },
+          },
         },
       },
       delivered: {
@@ -2196,7 +2325,17 @@ export class BuyerController {
           order_number: "ORD-20250102-001",
           status: "delivered",
           message: "Order delivered successfully",
-          agent_details: "Agent: John Doe, Phone: +91-9876543210",
+          agent_details: {
+            name: "Prem Kumar",
+            phone: "9360838199",
+            vehicle_number: "TN-01-XY-5678",
+            timestamps: {
+              picked_at: "2025-01-02T15:20:00.000000Z",
+              accepted_at: "2025-01-02T10:15:00.000000Z",
+              assigned_at: "2025-01-02T10:15:00.000000Z",
+              delivered_at: "2025-01-02T15:45:30.000000Z",
+            },
+          },
         },
       },
     },

@@ -177,4 +177,14 @@ export class SellerStatusUpdateDto {
   @IsOptional()
   @IsString()
   estimated_delivery_time?: string;
+
+  @ApiProperty({
+    description: "Order preparation time in ISO8601 duration format (e.g., PT10M for 10 minutes, PT1H30M for 1.5 hours)",
+    example: "PT10M",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  preparation_time?: string;
 }
