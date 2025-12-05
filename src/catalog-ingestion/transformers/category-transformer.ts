@@ -15,6 +15,23 @@ export class CategoryTransformer extends BaseTransformer {
     store: Store,
     existingCategory?: Category,
   ): Category {
+    // Validate input
+    if (!categoryData) {
+      throw new Error("Category data is required");
+    }
+
+    if (!categoryData.id) {
+      throw new Error("Category ID is required");
+    }
+
+    if (!categoryData.descriptor) {
+      throw new Error(`Category descriptor is required for category ${categoryData.id}`);
+    }
+
+    if (!categoryData.descriptor.name) {
+      throw new Error(`Category name is required for category ${categoryData.id}`);
+    }
+
     const category = existingCategory || new Category();
 
     try {
@@ -28,11 +45,18 @@ export class CategoryTransformer extends BaseTransformer {
       );
       category.icon = this.sanitizeUrl(categoryData.descriptor.images?.[0], "");
 
-      // Parse parent category ID
+      // Parse parent category ID - only set if valid
       if (categoryData.parent_category_id) {
-        category.parent_category_id = this.parseInteger(
-          categoryData.parent_category_id,
-        );
+        const parentId = this.parseInteger(categoryData.parent_category_id);
+        // Only set if it's a valid positive integer
+        if (parentId > 0) {
+          category.parent_category_id = parentId;
+        } else {
+          // Invalid parent_category_id, set to null
+          category.parent_category_id = null;
+        }
+      } else {
+        category.parent_category_id = null;
       }
 
       // Extract category type and configuration from tags
@@ -46,7 +70,8 @@ export class CategoryTransformer extends BaseTransformer {
 
       return category;
     } catch (error) {
-      this.logError(`Failed to transform category ${categoryData.id}`, error);
+      const categoryId = categoryData?.id || "unknown";
+      this.logError(`Failed to transform category ${categoryId}`, error);
       throw new Error(`Category transformation failed: ${error.message}`);
     }
   }
@@ -104,7 +129,7 @@ export class CategoryTransformer extends BaseTransformer {
     time_from: string;
     time_to: string;
   } | null {
-    if (!Array.isArray(categoryData.tags)) {
+    if (!categoryData || !Array.isArray(categoryData.tags)) {
       return null;
     }
 
@@ -156,7 +181,7 @@ export class CategoryTransformer extends BaseTransformer {
     sequence: number;
     is_mandatory: boolean;
   } | null {
-    if (!Array.isArray(categoryData.tags)) {
+    if (!categoryData || !Array.isArray(categoryData.tags)) {
       return null;
     }
 
@@ -236,12 +261,13 @@ export class CategoryTransformer extends BaseTransformer {
 
     if (
       category.parent_category_id !== undefined &&
+      category.parent_category_id !== null &&
       category.parent_category_id <= 0
     ) {
       errors.push("Parent category ID must be a positive integer");
     }
 
-    if (category.display_rank !== undefined && category.display_rank <= 0) {
+    if (category.display_rank !== undefined && category.display_rank !== null && category.display_rank <= 0) {
       errors.push("Display rank must be a positive integer");
     }
 

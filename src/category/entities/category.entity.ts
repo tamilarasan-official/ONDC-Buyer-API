@@ -39,13 +39,13 @@ export class Category {
   reference_id: string; // ONDC category ID like "5", "CG1"
 
   @Column({ type: "int", nullable: true })
-  parent_category_id: number; // For hierarchical categories
+  parent_category_id: number | null; // For hierarchical categories
 
   @Column({ type: "varchar", length: 50, nullable: false })
   type: string; // "custom_menu" or "custom_group"
 
   @Column({ type: "int", nullable: true })
-  display_rank: number; // Display order
+  display_rank: number | null; // Display order
 
   @Column({ type: "boolean", default: true })
   status: boolean;

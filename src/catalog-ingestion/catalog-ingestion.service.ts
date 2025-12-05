@@ -277,8 +277,22 @@ export class CatalogIngestionService {
 
       // Then process current categories and mark them as active
       for (const category of provider.categories) {
-        await this.upsertCategory(category, store, queryRunner);
-        stats.categories_upserted++;
+        // Skip null/undefined categories
+        if (!category) {
+          this.logger.warn("Skipping null/undefined category in provider categories");
+          continue;
+        }
+
+        try {
+          await this.upsertCategory(category, store, queryRunner);
+          stats.categories_upserted++;
+        } catch (error) {
+          this.logger.error(
+            `Failed to process category ${category?.id || "unknown"}: ${error.message}`,
+          );
+          // Continue processing other categories instead of failing entire provider
+          stats.categories_failed = (stats.categories_failed || 0) + 1;
+        }
       }
     } else {
       // If no categories in current data, mark all existing categories as inactive
@@ -734,6 +748,15 @@ export class CatalogIngestionService {
     store: Store,
     queryRunner: any,
   ): Promise<Category> {
+    // Validate categoryData before processing
+    if (!categoryData) {
+      throw new Error("Category data is required");
+    }
+
+    if (!categoryData.id) {
+      throw new Error("Category ID is required");
+    }
+
     let category = await queryRunner.manager.findOne(Category, {
       where: { reference_id: categoryData.id, store: { id: store.id } },
     });
@@ -757,6 +780,17 @@ export class CatalogIngestionService {
           validation.errors,
         );
         // Continue with transformation warnings rather than failing
+        // But fix invalid parent_category_id if present
+        if (
+          category.parent_category_id !== undefined &&
+          category.parent_category_id !== null &&
+          category.parent_category_id <= 0
+        ) {
+          this.logger.warn(
+            `Invalid parent_category_id (${category.parent_category_id}) for category ${categoryData.id}, setting to null`,
+          );
+          category.parent_category_id = null;
+        }
       }
 
       const savedCategory = await queryRunner.manager.save(Category, category);
@@ -775,8 +809,9 @@ export class CatalogIngestionService {
 
       return savedCategory;
     } catch (error) {
+      const categoryId = categoryData?.id || "unknown";
       this.logger.error(
-        `Failed to upsert category ${categoryData.id}: ${error.message}`,
+        `Failed to upsert category ${categoryId}: ${error.message}`,
         error.stack,
       );
       throw error;
