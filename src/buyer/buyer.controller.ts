@@ -1523,8 +1523,20 @@ export class BuyerController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
-    summary: "Register device token for push notifications",
-    description: "Register or update device token with device information for push notifications. Accepts device_id and app_version for better device tracking and analytics.",
+    summary: "Register FCM device token for push notifications",
+    description: `Register or update Firebase Cloud Messaging (FCM) device token with device information for push notifications. 
+    
+    **IMPORTANT**: 
+    - This endpoint only accepts FCM tokens from @react-native-firebase/messaging
+    - Expo push tokens (ExponentPushToken[...]) are NOT supported and will be rejected
+    - Use device_id and app_version for better device tracking and analytics
+    
+    **Token Requirements**:
+    - Android: FCM token from Firebase SDK (format: {id}:{long-token})
+    - iOS: FCM token via APNS (format: {id}:{long-token})
+    - Length: 140-200 characters
+    
+    **Migration**: If using Expo, see FCM_TOKEN_MIGRATION_GUIDE.md`,
   })
   @ApiBody({
     description: "Device token registration payload with optional device metadata",
@@ -1534,8 +1546,8 @@ export class BuyerController {
       properties: {
         device_token: {
           type: "string",
-          example: "fcm_token_123456789",
-          description: "FCM/APNS device token received from the client application",
+          example: "fGcB3ZnJ5K8pqR:APA91bHtxY_1234567890abcdefghijklmnop",
+          description: "Firebase Cloud Messaging (FCM) device token. Must be FCM format, NOT Expo token (ExponentPushToken[...] will be rejected)",
         },
         platform: {
           type: "string",
@@ -1546,12 +1558,32 @@ export class BuyerController {
         device_id: {
           type: "string",
           example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF",
-          description: "Unique device identifier (Android: ANDROID_ID, iOS: identifierForVendor) - Optional but recommended",
+          description: "Unique device identifier (Android: ANDROID_ID, iOS: identifierForVendor) - Optional but recommended for device tracking",
         },
         app_version: {
           type: "string",
           example: "1.2.3",
-          description: "Application version (e.g., 1.2.3) - Optional but recommended for version tracking",
+          description: "Application version (e.g., 1.2.3) - Optional but recommended for version-specific features and analytics",
+        },
+      },
+    },
+    examples: {
+      android_fcm: {
+        summary: "Android with FCM token (Correct)",
+        value: {
+          device_token: "fGcB3ZnJ5K8pqR:APA91bHtxY_1234567890abcdefghijklmnop",
+          platform: "android",
+          device_id: "android-abc123def456",
+          app_version: "1.2.3",
+        },
+      },
+      ios_fcm: {
+        summary: "iOS with FCM token (Correct)",
+        value: {
+          device_token: "dHw4RmK9LpXq:APA91bGsxZ_9876543210zyxwvutsrqponml",
+          platform: "ios",
+          device_id: "ios-def456ghi789",
+          app_version: "1.2.3",
         },
       },
     },
@@ -1567,7 +1599,7 @@ export class BuyerController {
         data: {
           type: "object",
           properties: {
-            device_token: { type: "string", example: "fcm_token_..." },
+            device_token: { type: "string", example: "fGcB3ZnJ5K8pqR:APA91bHtxY_..." },
             platform: { type: "string", example: "android" },
             device_id: { type: "string", example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF" },
             app_version: { type: "string", example: "1.2.3" },
@@ -1579,7 +1611,22 @@ export class BuyerController {
   })
   @ApiResponse({
     status: 400,
-    description: "Bad request - Invalid token or platform",
+    description: "Bad request - Invalid FCM token, Expo token detected, or invalid platform",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 400 },
+        message: {
+          type: "string",
+          examples: [
+            "Expo push tokens are not supported. This system uses Firebase Cloud Messaging (FCM). Please update your mobile app to use @react-native-firebase/messaging.",
+            "Invalid FCM token format or expired token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
+          ],
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
   })
   @ApiResponse({
     status: 401,
