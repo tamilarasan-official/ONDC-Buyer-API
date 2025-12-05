@@ -42,7 +42,7 @@ export class Category {
   parent_category_id: number | null; // For hierarchical categories
 
   @Column({ type: "varchar", length: 50, nullable: false })
-  type: string; // "custom_menu" or "custom_group"
+  type: string; // "custom_menu", "custom_group", or "variant_group"
 
   @Column({ type: "int", nullable: true })
   display_rank: number | null; // Display order

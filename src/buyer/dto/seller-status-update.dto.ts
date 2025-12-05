@@ -4,6 +4,9 @@ import {
   IsString,
   IsOptional,
   ValidateNested,
+  IsObject,
+  IsArray,
+  IsNumber,
 } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -55,6 +58,59 @@ export class AgentDetailsDto {
   @IsOptional()
   @IsString()
   photo_url?: string;
+
+  @ApiProperty({
+    description: "Agent delivery timestamps",
+    example: {
+      picked_at: null,
+      accepted_at: "2025-12-05T05:36:50.000000Z",
+      assigned_at: "2025-12-05T05:36:50.000000Z",
+      delivered_at: null,
+    },
+    required: false,
+  })
+  @IsOptional()
+  @IsObject()
+  timestamps?: {
+    picked_at?: string;
+    accepted_at?: string;
+    assigned_at?: string;
+    delivered_at?: string;
+  };
+
+  @ApiProperty({
+    description: "Agent status change history",
+    example: [
+      { status: "pending", timestamp: "2025-12-05T11:06:50.000000Z" },
+      { status: "assigned", timestamp: "2025-12-05T11:06:50.000000Z" },
+    ],
+    required: false,
+  })
+  @IsOptional()
+  @IsArray()
+  status_history?: Array<{
+    status: string;
+    timestamp: string;
+  }>;
+
+  @ApiProperty({
+    description: "Agent current GPS location",
+    example: {
+      lat: 9.9352505,
+      lng: 78.1333933,
+      accuracy: 13.78499984741211,
+      updated_at: "2025-11-24T12:17:06.562542Z",
+    },
+    required: false,
+  })
+  @IsOptional()
+  @IsObject()
+  current_location?: {
+    lat: number;
+    lng: number;
+    accuracy: number;
+    updated_at: string;
+  };
 }
 
 export class SellerStatusUpdateDto {

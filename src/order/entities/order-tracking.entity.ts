@@ -37,6 +37,10 @@ export class OrderTracking {
   @Column({ type: "varchar", length: 500, nullable: true })
   agent_photo_url: string;
 
+  // Store complete agent details including timestamps, location, and status history
+  @Column({ type: "jsonb", nullable: true })
+  agent_details_json: any;
+
   @Column({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   timestamp: Date;
 

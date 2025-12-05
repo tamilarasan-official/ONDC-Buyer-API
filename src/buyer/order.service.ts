@@ -843,6 +843,9 @@ export class OrderService {
       vehicle_number?: string;
       eta?: string;
       photo_url?: string;
+      timestamps?: any;
+      status_history?: any;
+      current_location?: any;
     },
   ) {
     const tracking = this.orderTrackingRepository.create({
@@ -854,6 +857,7 @@ export class OrderService {
       agent_vehicle_number: agentDetails?.vehicle_number,
       agent_eta: agentDetails?.eta,
       agent_photo_url: agentDetails?.photo_url,
+      agent_details_json: agentDetails || null, // Store complete agent details
       timestamp: new Date(),
     });
 

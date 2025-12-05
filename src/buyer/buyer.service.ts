@@ -2242,15 +2242,34 @@ export class BuyerService {
     favoriteItemIds: Set<number> = new Set(),
   ) {
     try {
+      // Check if this is a variant_group category
+      const category = await this.categoryRepository.findOne({
+        where: { id: categoryId },
+      });
+
+      if (category?.type === "variant_group") {
+        // For variant groups, return a single virtual item representing all variants
+        return await this.getVariantGroupAsMenuItem(
+          restaurantId,
+          categoryId,
+          category,
+          params,
+          favoriteItemIds,
+        );
+      }
+
+      // Regular menu items query (excluding variant items)
       let itemQuery = this.itemRepository
         .createQueryBuilder("i")
         .leftJoin("i.item_categories", "ic")
         .leftJoin("i.prices", "p")
         .leftJoin("i.quantities", "q")
         .leftJoin("i.attributes", "a")
+        .leftJoin("i.itemVariants", "iv")
         .where("i.storeId = :restaurantId", { restaurantId })
         .andWhere("ic.categoryId = :categoryId", { categoryId })
-        .andWhere("i.status = :status", { status: true });
+        .andWhere("i.status = :status", { status: true })
+        .andWhere("iv.id IS NULL"); // Exclude variant items from menu listing
 
       // Apply search filter
       if (params.search) {
@@ -2499,21 +2518,211 @@ export class BuyerService {
   /**
    * Get item variants
    */
+  /**
+   * Get variant group as a menu item (for categories of type variant_group)
+   */
+  private async getVariantGroupAsMenuItem(
+    restaurantId: number,
+    categoryId: number,
+    category: Category,
+    params: any,
+    favoriteItemIds: Set<number>,
+  ) {
+    try {
+      // Find the variant group entity by category reference_id
+      const variantGroup = await this.variantGroupsRepository.findOne({
+        where: {
+          reference_id: category.reference_id,
+          store: { id: restaurantId },
+        },
+      });
+
+      if (!variantGroup) {
+        this.logger.warn(
+          `Variant group not found for category ${category.reference_id}`,
+        );
+        return [];
+      }
+
+      // Get all variant items in this group
+      const variantItems = await this.itemVariantsRepository
+        .createQueryBuilder("iv")
+        .leftJoinAndSelect("iv.item", "i")
+        .leftJoinAndSelect("i.prices", "p")
+        .leftJoinAndSelect("i.quantities", "q")
+        .leftJoinAndSelect("i.attributes", "a")
+        .where("iv.variantGroupId = :variantGroupId", {
+          variantGroupId: variantGroup.id,
+        })
+        .andWhere("i.status = :status", { status: true })
+        .getMany();
+
+      if (variantItems.length === 0) {
+        return [];
+      }
+
+      // Use the first variant as the base item data
+      const firstVariant = variantItems[0].item;
+      const firstPrice = firstVariant.prices?.[0];
+      const firstQuantity = firstVariant.quantities?.[0];
+
+      // Calculate price range across all variants
+      const prices = variantItems
+        .map((v) => v.item.prices?.[0]?.base_price)
+        .filter((p) => p)
+        .map((p) => parseFloat(p.toString()));
+
+      const minPrice = prices.length > 0 ? Math.min(...prices) : 0;
+      const maxPrice = prices.length > 0 ? Math.max(...prices) : 0;
+
+      // Get dietary preference from first variant
+      const dietaryAttr = firstVariant.attributes?.find(
+        (attr) => attr.attribute_code === "veg_nonveg",
+      );
+
+      // Build variants array
+      const variants = variantItems.map((variantItem) => {
+        const price = variantItem.item.prices?.[0];
+        const quantity = variantItem.item.quantities?.[0];
+        const itemDietaryAttr = variantItem.item.attributes?.find(
+          (attr) => attr.attribute_code === "veg_nonveg",
+        );
+
+        return {
+          id: variantItem.item.id,
+          reference_id: variantItem.item.reference_id,
+          name: variantItem.item.name,
+          short_desc: variantItem.item.short_desc,
+          images: variantItem.item.images || [],
+          price: price?.base_price ? parseFloat(price.base_price.toString()) : 0,
+          currency: price?.currency || "INR",
+          is_available: quantity ? quantity.available_count > 0 : false,
+          available_count: quantity?.available_count || 0,
+          dietary_preference: itemDietaryAttr?.attribute_value || null,
+          is_default: variantItem.is_default,
+        };
+      });
+
+      // Create a single menu item representing all variants
+      const menuItem = {
+        id: firstVariant.id, // Use first variant's ID as representative
+        name: variantGroup.name, // Use variant group name
+        short_desc: variantGroup.description || firstVariant.short_desc,
+        long_desc: firstVariant.long_desc,
+        images: firstVariant.images || [],
+        price: {
+          base_price: minPrice,
+          currency: firstPrice?.currency || "INR",
+          maximum_price: maxPrice !== minPrice ? maxPrice : null,
+          minimum_price_range: minPrice,
+          maximum_price_range: maxPrice,
+        },
+        quantity: {
+          unit_type: firstQuantity?.unit_type || "unit",
+          unit_value: firstQuantity?.unit_value || 1,
+          available_count: Math.max(
+            ...variantItems.map(
+              (v) => v.item.quantities?.[0]?.available_count || 0,
+            ),
+          ),
+          maximum_count: firstQuantity?.maximum_count || 99,
+        },
+        attributes: [
+          {
+            attribute_code: "veg_nonveg",
+            attribute_name: "Dietary Preference",
+            attribute_value: dietaryAttr?.attribute_value || "veg",
+            attribute_group: "dietary",
+          },
+        ],
+        customizations: [],
+        variants: [
+          {
+            id: variantGroup.id,
+            reference_id: variantGroup.reference_id,
+            name: variantGroup.name,
+            description: variantGroup.description,
+            variants: variants,
+          },
+        ],
+        rating: 0,
+        is_available: variants.some((v) => v.is_available),
+        is_recommended: firstVariant.is_recommended || false,
+        tax_rate: firstVariant.tax_rate || null,
+        tax_type: firstVariant.tax_type || null,
+        hsn_code: firstVariant.hsn_code || null,
+        is_favorite: favoriteItemIds.has(firstVariant.id),
+      };
+
+      return [menuItem];
+    } catch (error) {
+      this.logger.error(
+        `❌ Error getting variant group as menu item: ${error.message}`,
+        error.stack,
+      );
+      return [];
+    }
+  }
+
   private async getItemVariants(itemId: number) {
     try {
-      const variants = await this.itemVariantsRepository
+      // Get all variant groups this item belongs to
+      const variantRecords = await this.itemVariantsRepository
         .createQueryBuilder("iv")
         .leftJoinAndSelect("iv.variant_group", "vg")
         .where("iv.itemId = :itemId", { itemId })
         .getMany();
 
-      // TODO: Get variant options for each group
-      return variants.map((variant) => ({
-        id: variant.variant_group.id,
-        name: variant.variant_group.name,
-        description: variant.variant_group.description,
-        variants: [], // TODO: Implement variant option fetching with prices
-      }));
+      // For each variant group, get all variant items
+      const variantGroups = await Promise.all(
+        variantRecords.map(async (record) => {
+          // Find all items in this variant group
+          const allVariantsInGroup = await this.itemVariantsRepository
+            .createQueryBuilder("iv")
+            .leftJoinAndSelect("iv.item", "i")
+            .leftJoinAndSelect("i.prices", "p")
+            .leftJoinAndSelect("i.quantities", "q")
+            .leftJoinAndSelect("i.attributes", "a")
+            .where("iv.variantGroupId = :variantGroupId", {
+              variantGroupId: record.variant_group.id,
+            })
+            .andWhere("i.status = :status", { status: true })
+            .getMany();
+
+          // Map variant items with their details
+          const variantOptions = allVariantsInGroup.map((variantItem) => {
+            const price = variantItem.item.prices?.[0];
+            const quantity = variantItem.item.quantities?.[0];
+            const dietaryAttr = variantItem.item.attributes?.find(
+              (attr) => attr.attribute_code === "veg_nonveg",
+            );
+
+            return {
+              id: variantItem.item.id,
+              reference_id: variantItem.item.reference_id,
+              name: variantItem.item.name,
+              short_desc: variantItem.item.short_desc,
+              images: variantItem.item.images || [],
+              price: price?.base_price ? parseFloat(price.base_price.toString()) : 0,
+              currency: price?.currency || "INR",
+              is_available: quantity ? quantity.available_count > 0 : false,
+              available_count: quantity?.available_count || 0,
+              dietary_preference: dietaryAttr?.attribute_value || null,
+              is_default: variantItem.is_default,
+            };
+          });
+
+          return {
+            id: record.variant_group.id,
+            reference_id: record.variant_group.reference_id,
+            name: record.variant_group.name,
+            description: record.variant_group.description,
+            variants: variantOptions,
+          };
+        }),
+      );
+
+      return variantGroups;
     } catch (error) {
       this.logger.error(
         `❌ Error getting item variants: ${error.message}`,

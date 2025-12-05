@@ -114,7 +114,7 @@ export class CategoryTransformer extends BaseTransformer {
       return "custom_menu";
     }
 
-    const validTypes = ["custom_menu", "custom_group"];
+    const validTypes = ["custom_menu", "custom_group", "variant_group"];
     const sanitized = type.toLowerCase().trim();
 
     return validTypes.includes(sanitized) ? sanitized : "custom_menu";
@@ -253,9 +253,9 @@ export class CategoryTransformer extends BaseTransformer {
       errors.push("Category name must be at least 2 characters");
     }
 
-    if (!["custom_menu", "custom_group"].includes(category.type)) {
+    if (!["custom_menu", "custom_group", "variant_group"].includes(category.type)) {
       errors.push(
-        'Category type must be either "custom_menu" or "custom_group"',
+        'Category type must be "custom_menu", "custom_group", or "variant_group"',
       );
     }
 
