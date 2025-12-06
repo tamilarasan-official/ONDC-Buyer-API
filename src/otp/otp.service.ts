@@ -66,7 +66,7 @@ export class OtpService {
       await this.checkRateLimit(purpose, cleanPhoneNumber);
 
       // Generate 4-digit OTP
-      const otp = environment === "staging" ? "1234" : this.generate4DigitOtp();
+      const otp = environment === "local" ? "1234" : this.generate4DigitOtp();
 
       // Calculate expiry time (1 minute from now)
       const expiresAt = new Date(Date.now() + 1 * 60 * 1000);
