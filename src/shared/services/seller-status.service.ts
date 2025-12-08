@@ -3,6 +3,7 @@ import {
   SellerStatus,
   SELLER_STATUS_FLOW,
   SELLER_STATUS_TERMINAL,
+  SELLER_STATUS_PARALLEL_GROUP,
 } from "../enums/seller-status.enum";
 
 @Injectable()
@@ -26,6 +27,22 @@ export class SellerStatusService {
       return true;
     }
 
+    // Check if both statuses are in the parallel group
+    // These can transition to each other in any order
+    const isCurrentParallel = SELLER_STATUS_PARALLEL_GROUP.includes(
+      currentStatus as SellerStatus,
+    );
+    const isNewParallel = SELLER_STATUS_PARALLEL_GROUP.includes(
+      newStatus as SellerStatus,
+    );
+
+    if (isCurrentParallel && isNewParallel) {
+      this.logger.log(
+        `✅ Allowing parallel status transition: ${currentStatus} → ${newStatus}`,
+      );
+      return true;
+    }
+
     // Check if new status follows the proper flow
     const currentIndex = SELLER_STATUS_FLOW.indexOf(
       currentStatus as SellerStatus,
@@ -40,8 +57,26 @@ export class SellerStatusService {
       );
     }
 
-    // New status must be after current status in the flow
-    return newIndex > currentIndex;
+    // Allow forward transitions (normal flow)
+    if (newIndex > currentIndex) {
+      return true;
+    }
+
+    // Allow backward transitions for skipped statuses
+    // This handles cases where seller reports statuses out of order
+    const isReasonableBackwardTransition = 
+      newIndex >= 0 && 
+      newIndex < currentIndex && 
+      (currentIndex - newIndex) <= 3; // Allow up to 3 steps backward (increased for parallel group)
+    
+    if (isReasonableBackwardTransition) {
+      this.logger.warn(
+        `⚠️ Allowing backward status transition: ${currentStatus} → ${newStatus} (seller reported out of order)`,
+      );
+      return true;
+    }
+
+    return false;
   }
 
   /**
@@ -61,9 +96,42 @@ export class SellerStatusService {
       return [...SELLER_STATUS_FLOW, SellerStatus.CANCELLED];
     }
 
-    // Return next statuses in flow + cancelled
-    const nextStatuses = SELLER_STATUS_FLOW.slice(currentIndex + 1);
-    return [...nextStatuses, SellerStatus.CANCELLED];
+    // If current status is in parallel group, include all parallel statuses
+    const isCurrentParallel = SELLER_STATUS_PARALLEL_GROUP.includes(
+      currentStatus as SellerStatus,
+    );
+    
+    const parallelStatuses: string[] = [];
+    if (isCurrentParallel) {
+      // Include other parallel statuses (excluding current)
+      parallelStatuses.push(
+        ...SELLER_STATUS_PARALLEL_GROUP.filter((s) => s !== currentStatus),
+      );
+    }
+
+    // Get forward statuses (normal flow)
+    const forwardStatuses = SELLER_STATUS_FLOW.slice(currentIndex + 1);
+    
+    // Get reasonable backward statuses (for out-of-order reporting)
+    const backwardStatuses: string[] = [];
+    for (let i = Math.max(0, currentIndex - 3); i < currentIndex; i++) {
+      const status = SELLER_STATUS_FLOW[i];
+      // Avoid duplicates with parallel statuses
+      if (!parallelStatuses.includes(status)) {
+        backwardStatuses.push(status);
+      }
+    }
+    
+    // Combine: backward + parallel + forward + cancelled
+    // Remove duplicates and current status
+    const allStatuses = [
+      ...backwardStatuses,
+      ...parallelStatuses,
+      ...forwardStatuses,
+      SellerStatus.CANCELLED,
+    ].filter((s, i, arr) => arr.indexOf(s) === i && s !== currentStatus);
+    
+    return allStatuses;
   }
 
   /**
@@ -81,6 +149,7 @@ export class SellerStatusService {
       [SellerStatus.BILLED]: "Order confirmed and billed by seller",
       [SellerStatus.PACKED]: "Order packed and ready for pickup",
       [SellerStatus.AGENT_ASSIGNED]: "Delivery agent assigned",
+      [SellerStatus.AGENT_ARRIVED_RESTAURANT]: "Delivery agent arrived at restaurant",
       [SellerStatus.PICKED]: "Order picked up by delivery agent",
       [SellerStatus.OUT_FOR_DELIVERY]: "Order out for delivery",
       [SellerStatus.DELIVERED]: "Order delivered successfully",
