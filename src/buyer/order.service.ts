@@ -998,7 +998,11 @@ export class OrderService {
           agent_vehicle_number: t.agent_vehicle_number,
           agent_eta: t.agent_eta,
           agent_photo_url: t.agent_photo_url,
+          tracking_url: t.tracking_url,
         })) || [],
+      tracking_url: order.tracking && order.tracking.length > 0 
+        ? order.tracking[order.tracking.length - 1].tracking_url 
+        : null,
       created_at: order.created_at.toISOString(),
       updated_at: order.updated_at.toISOString(),
       // Invoice information
