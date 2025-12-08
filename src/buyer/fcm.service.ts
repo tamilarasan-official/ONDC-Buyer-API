@@ -371,32 +371,17 @@ export class FCMService {
    */
   async validateToken(token: string): Promise<boolean> {
     try {
-      // REJECT Expo tokens explicitly
-      if (token.startsWith("ExponentPushToken[")) {
-        this.logger.error(
-          `❌ EXPO TOKEN DETECTED: ${token.substring(0, 30)}... - This system uses FCM, not Expo Push Notifications!`,
-        );
-        this.logger.error(
-          `🔧 ACTION REQUIRED: Update mobile app to use @react-native-firebase/messaging instead of expo-notifications`,
-        );
-        this.logger.error(
-          `📖 See: FCM_TOKEN_MIGRATION_GUIDE.md for implementation steps`,
-        );
-        return false;
-      }
+      this.logger.log(`🔐 Validating FCM token: ${token}`);
 
       // Skip validation if FCM is not initialized (dev mode)
       if (!this.app) {
         this.logger.warn(
-          `⚠️  FCM not initialized - skipping token validation for: ${token.substring(0, 20)}...`,
-        );
-        this.logger.warn(
-          `💡 Set FCM_* environment variables to enable full validation`,
+          `⚠️  FCM not initialized - skipping validation (set FCM_* env vars to enable)`,
         );
         return true;
       }
 
-      // For FCM tokens, perform dry-run validation (doesn't actually send)
+      // Perform dry-run validation with Firebase (doesn't actually send)
       const message: admin.messaging.Message = {
         token,
         data: { test: "true" },
@@ -404,36 +389,36 @@ export class FCMService {
         apns: { payload: { aps: { contentAvailable: true } } },
       };
 
-      // Use validateOnly to check token without sending actual message
       await admin.messaging().send(message, true); // true = dryRun mode
-      this.logger.log(
-        `✅ FCM token validated successfully: ${token.substring(0, 30)}...`,
-      );
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        `⚠️  Token validation failed for ${token.substring(0, 30)}...: ${error.message}`,
-      );
       
-      // Check for common FCM errors
+      this.logger.log(`✅ FCM token valid | Token: ${token}`);
+      return true;
+      
+    } catch (error) {
+      this.logger.error(`❌ FCM validation failed | Token: ${token}`);
+      this.logger.error(`Error Code: ${error.code || "N/A"}`);
+      this.logger.error(`Error Message: ${error.message}`);
+      
+      // Check for specific FCM errors
       if (error.code === "messaging/invalid-registration-token") {
-        this.logger.error(`❌ Invalid FCM token format or expired token`);
+        this.logger.error(`📌 Reason: Invalid or expired FCM token format`);
         return false;
       }
       
       if (error.code === "messaging/registration-token-not-registered") {
-        this.logger.error(`❌ FCM token not registered with Firebase`);
+        this.logger.error(`📌 Reason: Token not registered with Firebase project`);
         return false;
       }
 
-      // In development/staging, be lenient and accept tokens anyway (except Expo)
+      // In development/staging, be lenient
       const env = this.configService.get<string>("NODE_ENV");
       if (env === "development" || env === "staging") {
-        this.logger.log(
-          `⚠️  Accepting token despite validation failure (${env} mode)`,
+        this.logger.warn(
+          `⚠️  Accepting token despite failure (${env} mode) - notifications may not work`,
         );
         return true;
       }
+      
       return false;
     }
   }

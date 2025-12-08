@@ -69,7 +69,7 @@ export class NotificationService {
         await this.notificationRepository.save(notification);
 
       this.logger.log(
-        `Notification created for user ${createNotificationDto.user_id}: ${createNotificationDto.title}`,
+        `✅ NOTIFICATION CREATED | ID: ${savedNotification.id} | User: ${createNotificationDto.user_id} | Type: ${createNotificationDto.type} | Title: "${createNotificationDto.title}" | Message: "${createNotificationDto.message}" | Data: ${JSON.stringify(createNotificationDto.data || {})}`,
       );
 
       // TODO: Trigger push notification, email, SMS based on user preferences
@@ -272,7 +272,7 @@ export class NotificationService {
       additionalData,
     );
 
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title,
       message: notificationMessage,
@@ -283,6 +283,10 @@ export class NotificationService {
         ...additionalData,
       },
     });
+    
+    this.logger.log(`📦 ORDER NOTIFICATION | User: ${userId} | Order: ${orderId} | Status: ${status} | Title: "${title}" | Message: "${notificationMessage}" | Data: ${JSON.stringify(additionalData || {})}`);
+    
+    return notification;
   }
 
   /**
@@ -293,7 +297,7 @@ export class NotificationService {
     orderId: number,
     restaurantName: string,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title: "Rate Your Experience",
       message: `How was your order from ${restaurantName}? Share your feedback!`,
@@ -303,6 +307,10 @@ export class NotificationService {
         restaurant_name: restaurantName,
       },
     });
+    
+    this.logger.log(`⭐ REVIEW NOTIFICATION | User: ${userId} | Order: ${orderId} | Restaurant: "${restaurantName}" | Title: "Rate Your Experience" | Message: "How was your order from ${restaurantName}? Share your feedback!"`);
+    
+    return notification;
   }
 
   /**
@@ -313,17 +321,21 @@ export class NotificationService {
     phoneNumber: number,
     otp: string,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title: "OTP for Login",
-      message: `Your OTP is ${otp}. Valid for 5 minutes.`,
+      message: `Your OTP is ${otp}. Valid for 1 minute.`,
       type: "system",
       data: {
         phone_number: phoneNumber,
         otp: otp,
-        expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(), // 5 minutes
+        expires_at: new Date(Date.now() + 1 * 60 * 1000).toISOString(), // 1 minute
       },
     });
+    
+    this.logger.log(`🔐 OTP NOTIFICATION | User: ${userId} | Phone: ${phoneNumber} | OTP: ${otp} | Expires: 1 minute | Title: "OTP for Login" | Message: "Your OTP is ${otp}. Valid for 1 minute."`);
+    
+    return notification;
   }
 
   /**
@@ -335,7 +347,7 @@ export class NotificationService {
     amount: number,
     paymentMethod: string,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title: "Payment Successful",
       message: `Payment of ₹${amount} via ${paymentMethod} completed successfully`,
@@ -347,6 +359,10 @@ export class NotificationService {
         status: "paid",
       },
     });
+    
+    this.logger.log(`💰 PAYMENT SUCCESS NOTIFICATION | User: ${userId} | Order: ${orderId} | Amount: ₹${amount} | Method: ${paymentMethod} | Title: "Payment Successful" | Message: "Payment of ₹${amount} via ${paymentMethod} completed successfully"`);
+    
+    return notification;
   }
 
   /**
@@ -359,7 +375,7 @@ export class NotificationService {
     paymentMethod: string,
     reason?: string,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title: "Payment Failed",
       message: `Payment of ₹${amount} via ${paymentMethod} failed. ${reason || "Please try again."}`,
@@ -372,6 +388,10 @@ export class NotificationService {
         reason: reason,
       },
     });
+    
+    this.logger.log(`❌ PAYMENT FAILED NOTIFICATION | User: ${userId} | Order: ${orderId} | Amount: ₹${amount} | Method: ${paymentMethod} | Reason: ${reason || "Not specified"} | Title: "Payment Failed" | Message: "Payment of ₹${amount} via ${paymentMethod} failed. ${reason || "Please try again."}"`);
+    
+    return notification;
   }
 
   /**
@@ -383,13 +403,17 @@ export class NotificationService {
     message: string,
     offerData?: any,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title,
       message,
       type: "promotion",
       data: offerData || {},
     });
+    
+    this.logger.log(`🎁 PROMOTIONAL NOTIFICATION | User: ${userId} | Title: "${title}" | Message: "${message}" | Data: ${JSON.stringify(offerData || {})}`);
+    
+    return notification;
   }
 
   /**
@@ -400,13 +424,17 @@ export class NotificationService {
     message: string,
     maintenanceData?: any,
   ): Promise<Notification> {
-    return this.createNotification({
+    const notification = await this.createNotification({
       user_id: userId,
       title: "System Maintenance",
       message,
       type: "system",
       data: maintenanceData || {},
     });
+    
+    this.logger.log(`🔧 SYSTEM MAINTENANCE NOTIFICATION | User: ${userId} | Title: "System Maintenance" | Message: "${message}" | Data: ${JSON.stringify(maintenanceData || {})}`);
+    
+    return notification;
   }
 
   /**
@@ -488,45 +516,27 @@ export class NotificationService {
     appVersion?: string,
   ): Promise<void> {
     try {
-      // CRITICAL: Check if token is Expo token (not supported with FCM)
-      if (deviceToken.startsWith("ExponentPushToken[")) {
-        this.logger.error(
-          `❌ REJECTED: User ${userId} attempted to register Expo token`,
-        );
-        this.logger.error(
-          `Token: ${deviceToken.substring(0, 30)}...`,
-        );
-        this.logger.error(
-          `💡 This backend uses Firebase Cloud Messaging (FCM), not Expo Push Service`,
-        );
-        this.logger.error(
-          `📖 Mobile app must use @react-native-firebase/messaging - See FCM_TOKEN_MIGRATION_GUIDE.md`,
-        );
-        throw new Error(
-          "Expo push tokens are not supported. This system uses Firebase Cloud Messaging (FCM). Please update your mobile app to use @react-native-firebase/messaging. Contact support for migration guide.",
-        );
-      }
-
       this.logger.log(
-        `🔍 Validating FCM token for user ${userId} | Device ID: ${deviceId || "N/A"}`,
+        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${appVersion || "N/A"}`,
       );
 
       // Validate token with FCM service
+      this.logger.log(`🔐 Validating with Firebase...`);
       const isValid = await this.fcmService.validateToken(deviceToken);
+      
       if (!isValid) {
         this.logger.error(
-          `❌ FCM token validation failed for user ${userId} | Token: ${deviceToken.substring(0, 30)}...`,
+          `❌ FCM validation failed | User: ${userId} | Token: ${deviceToken}`,
         );
         throw new Error(
-          "Invalid FCM token format or expired token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
+          "Invalid FCM token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
         );
       }
 
-      this.logger.log(
-        `✅ FCM token validated | Checking existing registration for user ${userId}`,
-      );
+      this.logger.log(`✅ FCM validation passed | User: ${userId}`);
 
       // Check if token already exists
+      this.logger.log(`🔎 Checking for existing token...`);
       const existingToken = await this.userDeviceTokenRepository.findOne({
         where: {
           userId: userId,
@@ -535,9 +545,15 @@ export class NotificationService {
       });
 
       if (existingToken) {
-        // Update existing token with new metadata
-        const previousDeviceId = existingToken.device_id;
-        const previousAppVersion = existingToken.app_version;
+        // Update existing token
+        const changes: string[] = [];
+        
+        if (deviceId && deviceId !== existingToken.device_id) {
+          changes.push(`Device ID: ${existingToken.device_id || "null"} → ${deviceId}`);
+        }
+        if (appVersion && appVersion !== existingToken.app_version) {
+          changes.push(`Version: ${existingToken.app_version || "null"} → ${appVersion}`);
+        }
 
         existingToken.is_active = true;
         existingToken.platform = platform;
@@ -547,20 +563,11 @@ export class NotificationService {
 
         await this.userDeviceTokenRepository.save(existingToken);
 
-        // Log what changed
-        const changes: string[] = [];
-        if (deviceId && deviceId !== previousDeviceId) {
-          changes.push(`Device ID: ${previousDeviceId || "none"} → ${deviceId}`);
-        }
-        if (appVersion && appVersion !== previousAppVersion) {
-          changes.push(`App Version: ${previousAppVersion || "none"} → ${appVersion}`);
-        }
-
         this.logger.log(
-          `✅ Device token UPDATED for user ${userId} | Platform: ${platform} | Device ID: ${existingToken.device_id || "not set"} | App Version: ${existingToken.app_version || "not set"}${changes.length > 0 ? " | Changes: " + changes.join(", ") : ""}`,
+          `🔄 FCM token UPDATED | User: ${userId} | Changes: ${changes.length > 0 ? changes.join(", ") : "None"}`,
         );
       } else {
-        // Create new token with all metadata
+        // Create new token
         const newToken = this.userDeviceTokenRepository.create({
           userId: userId,
           user: { id: userId },
@@ -574,7 +581,7 @@ export class NotificationService {
         await this.userDeviceTokenRepository.save(newToken);
 
         this.logger.log(
-          `✅ Device token REGISTERED (new) for user ${userId} | Platform: ${platform} | Device ID: ${deviceId || "not provided"} | App Version: ${appVersion || "not provided"}`,
+          `✨ FCM token REGISTERED (new) | User: ${userId} | Platform: ${platform}`,
         );
       }
 
@@ -582,8 +589,9 @@ export class NotificationService {
       const userTokenCount = await this.userDeviceTokenRepository.count({
         where: { userId: userId, is_active: true },
       });
+      
       this.logger.log(
-        `📊 User ${userId} now has ${userTokenCount} active device(s)`,
+        `📊 Active devices for user ${userId}: ${userTokenCount}`,
       );
     } catch (error) {
       this.logger.error(
@@ -646,6 +654,8 @@ export class NotificationService {
     notification: Notification,
   ): Promise<void> {
     try {
+      this.logger.log(`📱 SENDING PUSH NOTIFICATION | Notification ID: ${notification.id} | User: ${notification.user?.id} | Type: ${notification.type} | Title: "${notification.title}" | Message: "${notification.message}"`);
+      
       // Get user's device tokens
       const user = await this.userRepository.findOne({
         where: { id: notification.user?.id },

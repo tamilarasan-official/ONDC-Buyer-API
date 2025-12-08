@@ -25,7 +25,7 @@ export class AuthenticationController {
   @ApiOperation({
     summary: "Generate OTP for phone number",
     description:
-      "Generate a one-time password (OTP) for the provided phone number. The OTP will be sent via SMS and is valid for 5 minutes.",
+      "Generate a one-time password (OTP) for the provided phone number. The OTP will be sent via SMS and is valid for 1 minute.",
   })
   @ApiBody({ type: GenerateOtpDto })
   @ApiResponse({

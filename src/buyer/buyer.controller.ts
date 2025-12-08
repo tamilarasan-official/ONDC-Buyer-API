@@ -1524,19 +1524,21 @@ export class BuyerController {
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Register FCM device token for push notifications",
-    description: `Register or update Firebase Cloud Messaging (FCM) device token with device information for push notifications. 
+    description: `Register or update Firebase Cloud Messaging (FCM) device token for push notifications.
     
-    **IMPORTANT**: 
-    - This endpoint only accepts FCM tokens from @react-native-firebase/messaging
-    - Expo push tokens (ExponentPushToken[...]) are NOT supported and will be rejected
-    - Use device_id and app_version for better device tracking and analytics
+    **Requirements**:
+    - FCM token from @react-native-firebase/messaging
+    - Token format: {id}:{long-token} (140-200 characters)
+    - Platform: android, ios, or web
     
-    **Token Requirements**:
-    - Android: FCM token from Firebase SDK (format: {id}:{long-token})
-    - iOS: FCM token via APNS (format: {id}:{long-token})
-    - Length: 140-200 characters
+    **Optional Metadata** (Recommended):
+    - device_id: Unique device identifier for multi-device tracking
+    - app_version: App version for version-specific features
     
-    **Migration**: If using Expo, see FCM_TOKEN_MIGRATION_GUIDE.md`,
+    **Token Format**:
+    - Android: FCM token from Firebase SDK
+    - iOS: FCM token via APNS integration
+    - Example: "fGcB3ZnJ5K8pqR:APA91bHtxY_..."`,
   })
   @ApiBody({
     description: "Device token registration payload with optional device metadata",
@@ -1547,7 +1549,7 @@ export class BuyerController {
         device_token: {
           type: "string",
           example: "fGcB3ZnJ5K8pqR:APA91bHtxY_1234567890abcdefghijklmnop",
-          description: "Firebase Cloud Messaging (FCM) device token. Must be FCM format, NOT Expo token (ExponentPushToken[...] will be rejected)",
+          description: "Firebase Cloud Messaging (FCM) device token from @react-native-firebase/messaging",
         },
         platform: {
           type: "string",
@@ -1611,7 +1613,7 @@ export class BuyerController {
   })
   @ApiResponse({
     status: 400,
-    description: "Bad request - Invalid FCM token, Expo token detected, or invalid platform",
+    description: "Bad request - Invalid FCM token or platform",
     schema: {
       type: "object",
       properties: {
@@ -1619,10 +1621,7 @@ export class BuyerController {
         statusCode: { type: "number", example: 400 },
         message: {
           type: "string",
-          examples: [
-            "Expo push tokens are not supported. This system uses Firebase Cloud Messaging (FCM). Please update your mobile app to use @react-native-firebase/messaging.",
-            "Invalid FCM token format or expired token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
-          ],
+          example: "Invalid FCM token. Please ensure your app is properly configured with Firebase Cloud Messaging.",
         },
         error: { type: "string", example: "Bad Request" },
       },
@@ -1669,19 +1668,9 @@ export class BuyerController {
         );
       }
 
-      // Validate token with FCM (lenient in dev/staging)
-      const isValid = await this.notificationService.fcm.validateToken(
-        tokenData.device_token,
-      );
-
-      if (!isValid) {
-        this.logger.warn(
-          `⚠️  Token validation failed but continuing for user ${userId}`,
-        );
-        // Don't throw error - validation is lenient in dev/staging
-      }
-
-      // Register token in database with all metadata
+      // Register FCM token in database
+      this.logger.log(`🔄 Registering FCM token in database...`);
+      
       await this.notificationService.registerDeviceToken(
         userId,
         tokenData.device_token,
@@ -1691,7 +1680,7 @@ export class BuyerController {
       );
 
       this.logger.log(
-        `✅ Device token registered successfully for user ${userId} | Platform: ${tokenData.platform} | Device: ${tokenData.device_id ? "tracked" : "untracked"} | Version: ${tokenData.app_version || "unknown"}`,
+        `✅ FCM token registered successfully | User: ${userId} | Platform: ${tokenData.platform} | Device: ${tokenData.device_id || "untracked"} | Version: ${tokenData.app_version || "unknown"}`,
       );
 
       return {

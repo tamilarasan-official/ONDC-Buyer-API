@@ -187,4 +187,14 @@ export class SellerStatusUpdateDto {
   @IsOptional()
   @IsString()
   preparation_time?: string;
+
+  @ApiProperty({
+    description: "Tracking URL from seller/logistics provider",
+    example: "https://tracking.example.com/track?order=123456",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  tracking_url?: string;
 }

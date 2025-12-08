@@ -41,6 +41,10 @@ export class OrderTracking {
   @Column({ type: "jsonb", nullable: true })
   agent_details_json: any;
 
+  // Tracking URL from seller/logistics provider
+  @Column({ type: "varchar", length: 500, nullable: true })
+  tracking_url?: string;
+
   @Column({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   timestamp: Date;
 

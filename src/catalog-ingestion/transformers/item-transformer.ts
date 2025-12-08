@@ -323,6 +323,24 @@ export class ItemTransformer extends BaseTransformer {
           }
         });
       });
+
+      // Extract variant attributes from "attribute" tag (for variant items)
+      const attributeTag = itemData.tags.find((tag) => tag.code === "attribute");
+      if (attributeTag && Array.isArray(attributeTag.list)) {
+        attributeTag.list.forEach((attr, index) => {
+          if (attr.code && attr.value) {
+            const attributeName = this.formatAttributeName(attr.code);
+            
+            attributes.push({
+              attribute_code: this.sanitizeString(attr.code, 100),
+              attribute_name: attributeName,
+              attribute_value: this.sanitizeString(attr.value, 255),
+              attribute_group: "variant",
+              display_order: 100 + index,
+            });
+          }
+        });
+      }
     }
 
     return attributes;

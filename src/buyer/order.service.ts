@@ -847,6 +847,7 @@ export class OrderService {
       status_history?: any;
       current_location?: any;
     },
+    trackingUrl?: string,
   ) {
     const tracking = this.orderTrackingRepository.create({
       order: { id: orderId },
@@ -858,6 +859,7 @@ export class OrderService {
       agent_eta: agentDetails?.eta,
       agent_photo_url: agentDetails?.photo_url,
       agent_details_json: agentDetails || null, // Store complete agent details
+      tracking_url: trackingUrl || undefined,
       timestamp: new Date(),
     });
 
@@ -1147,6 +1149,7 @@ export class OrderService {
         sellerStatusUpdateDto.status,
         fullMessage,
         agentDetails,
+        sellerStatusUpdateDto.tracking_url,
       );
 
       // Send notification to user

@@ -90,22 +90,4 @@ export class MenuRequestDto {
   @IsOptional()
   @IsEnum(DietaryPreference)
   dietary_preference?: DietaryPreference;
-
-  @ApiProperty({
-    description: "Include customization groups and options",
-    example: true,
-    required: false,
-    type: "boolean",
-  })
-  @IsOptional()
-  include_customizations?: boolean;
-
-  @ApiProperty({
-    description: "Include variant groups and options",
-    example: true,
-    required: false,
-    type: "boolean",
-  })
-  @IsOptional()
-  include_variants?: boolean;
 }
