@@ -7,6 +7,8 @@ import { User } from "../user/entities/user.entity";
 import { Store } from "../store/entities/store.entity";
 import { Item } from "../item/entities/item.entity";
 import { Order } from "../order/entities/order.entity";
+import { firstValueFrom } from "rxjs";
+import { HttpService } from "@nestjs/axios";
 
 export interface UpdateReviewDto {
   rating?: number;
@@ -54,7 +56,8 @@ export class ReviewService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
-  ) {}
+    private readonly httpService: HttpService,
+  ) { }
 
   /**
    * Create unified review for complete order rating
@@ -203,6 +206,54 @@ export class ReviewService {
         { id: createReviewDto.order_id },
         { overall_rating: createReviewDto.overall_rating },
       );
+
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      const payload = {
+        order_id: order.order_number,
+        store_id: order.store.id,
+        user_phone: user?.phone_number,
+        rating: createReviewDto.restaurant_rating,
+        title: createReviewDto.restaurant_comment,
+        comments: createReviewDto.restaurant_comment,
+        status: "visible",
+        aspects: {
+          delivery_speed: createReviewDto.delivery_partner_rating || 0,
+          packaging: createReviewDto.restaurant_rating || 0,
+          service: createReviewDto.restaurant_rating || 0,
+        },
+        food_quality:
+          createReviewDto.food_ratings?.map((item) => {
+            const matchedOrderItem = order.order_items.find(
+              (oi) => oi.item.id === item.item_id,
+            );
+
+            return {
+              product_id: matchedOrderItem?.item?.reference_id, // Use reference_id
+              rating: item.rating,
+              review: item.comment,
+              media_urls: createReviewDto.photos || [],
+            };
+          }) || [],
+      };
+
+      const sellerApiUrl =
+        process.env.SELLER_API_URL || "http://localhost:3000";
+      const endpoint = `${sellerApiUrl}/reviews`;
+
+      const response = await firstValueFrom(
+        this.httpService.post(endpoint, payload, {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          timeout: 10000, // 10 second timeout
+        }),
+      );
+      console.log('response: ', response.data);
+
       this.logger.log(
         `Saved overall rating ${createReviewDto.overall_rating} to order ${createReviewDto.order_id}`,
       );
