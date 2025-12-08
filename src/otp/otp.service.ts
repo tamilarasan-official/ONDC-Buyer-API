@@ -77,7 +77,7 @@ export class OtpService {
       // Store OTP in database
       await this.storeOtp(cleanPhoneNumber, otp, purpose, expiresAt);
 
-      if (environment === "staging") {
+      if (environment === "local") {
         return {
           success: true,
           message: "OTP sent successfully",
