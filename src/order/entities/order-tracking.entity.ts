@@ -49,6 +49,14 @@ export class OrderTracking {
   @Column({ type: "varchar", length: 20, nullable: true })
   delivery_code?: string;
 
+  // Cancel reason details (stored when status is 'cancelled')
+  @Column({ type: "jsonb", nullable: true })
+  cancel_reason?: {
+    code?: string;
+    reason?: string;
+    cancelled_by?: string;
+  };
+
   @Column({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   timestamp: Date;
 

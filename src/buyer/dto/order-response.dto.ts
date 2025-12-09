@@ -159,6 +159,21 @@ export class OrderTrackingResponseDto {
     required: false,
   })
   agent_photo_url?: string;
+
+  @ApiProperty({
+    description: "Cancel reason details (only present when status is 'cancelled')",
+    example: {
+      code: "004",
+      reason: "Store is not accepting order",
+      cancelled_by: "buyer",
+    },
+    required: false,
+  })
+  cancel_reason?: {
+    code?: string;
+    reason?: string;
+    cancelled_by?: string;
+  };
 }
 
 export class DeliveryAddressDto {
@@ -337,6 +352,21 @@ export class OrderDataDto {
     example: "confirmed",
   })
   status: string;
+
+  @ApiProperty({
+    description: "Cancel reason details (only present when status is 'cancelled')",
+    example: {
+      code: "004",
+      reason: "Store is not accepting order",
+      cancelled_by: "buyer",
+    },
+    required: false,
+  })
+  cancel_reason?: {
+    code?: string;
+    reason?: string;
+    cancelled_by?: string;
+  };
 
   @ApiProperty({
     description: "Payment method",

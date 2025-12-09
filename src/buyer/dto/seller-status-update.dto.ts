@@ -113,6 +113,38 @@ export class AgentDetailsDto {
   };
 }
 
+export class CancelReasonDto {
+  @ApiProperty({
+    description: "Cancel reason code",
+    example: "004",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @ApiProperty({
+    description: "Cancel reason description",
+    example: "Store is not accepting order",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @ApiProperty({
+    description: "Who cancelled the order",
+    example: "buyer",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  cancelled_by?: string;
+}
+
 export class SellerStatusUpdateDto {
   @ApiProperty({
     description: "Order number from our system",
@@ -207,4 +239,14 @@ export class SellerStatusUpdateDto {
   @IsOptional()
   @IsString()
   delivery_code?: string;
+
+  @ApiProperty({
+    description: "Cancel reason details (required when status is 'cancelled')",
+    type: CancelReasonDto,
+    required: false,
+  })
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CancelReasonDto)
+  cancel_reason?: CancelReasonDto;
 }

@@ -280,7 +280,7 @@ export class OtpService {
     const purposeText =
       purpose === OtpPurpose.REGISTRATION ? "registration" : "verification";
     if(purposeText === OtpPurpose.REGISTRATION) {
-      return `Hi, your login OTP code is ${otp}. Do not share with anyone. Thanks, Valar Digital. Pz8rPx8/az9`;
+      return `Hi, your login OTP code is ${otp}. Do not share with anyone. Thanks, Valar Digital. zWlaZMRAFOV`;
     } else {
       return `Your Valar Verification code is ${otp}. Never share this OTP. Thanks, Valar Digital`;
     }

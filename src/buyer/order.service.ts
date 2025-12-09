@@ -28,7 +28,10 @@ import {
   UpdateOrderStatusDto,
   CancelOrderDto,
 } from "./dto/order-request.dto";
-import { SellerStatusUpdateDto } from "./dto/seller-status-update.dto";
+import {
+  SellerStatusUpdateDto,
+  CancelReasonDto,
+} from "./dto/seller-status-update.dto";
 
 @Injectable()
 export class OrderService {
@@ -849,7 +852,17 @@ export class OrderService {
     },
     trackingUrl?: string,
     deliveryCode?: string,
+    cancelReason?: CancelReasonDto,
   ) {
+    // Extract only code, reason, and cancelled_by from cancelReason
+    const cancelReasonToSave = cancelReason
+      ? {
+          code: cancelReason.code,
+          reason: cancelReason.reason,
+          cancelled_by: cancelReason.cancelled_by,
+        }
+      : undefined;
+
     const tracking = this.orderTrackingRepository.create({
       order: { id: orderId },
       status,
@@ -862,6 +875,7 @@ export class OrderService {
       agent_details_json: agentDetails || null, // Store complete agent details
       tracking_url: trackingUrl || undefined,
       delivery_code: deliveryCode || undefined,
+      cancel_reason: cancelReasonToSave,
       timestamp: new Date(),
     });
 
@@ -989,6 +1003,15 @@ export class OrderService {
       },
       notes: order.notes,
       estimated_delivery_time: order.estimated_delivery_time?.toISOString(),
+      // Extract cancel_reason from tracking if order is cancelled
+      cancel_reason: order.status === "cancelled" && order.tracking
+        ? (() => {
+            const cancelledTracking = order.tracking.find(
+              (t) => t.status === "cancelled",
+            );
+            return cancelledTracking?.cancel_reason || null;
+          })()
+        : undefined,
       tracking:
         order.tracking?.map((t) => ({
           id: t.id,
@@ -1002,6 +1025,7 @@ export class OrderService {
           agent_photo_url: t.agent_photo_url,
           tracking_url: t.tracking_url,
           delivery_code: t.delivery_code,
+          cancel_reason: t.cancel_reason,
         })) || [],
       tracking_url: order.tracking && order.tracking.length > 0 
         ? order.tracking[order.tracking.length - 1].tracking_url 
@@ -1167,6 +1191,9 @@ export class OrderService {
         agentDetails,
         sellerStatusUpdateDto.tracking_url,
         sellerStatusUpdateDto.delivery_code,
+        sellerStatusUpdateDto.status === "cancelled"
+          ? sellerStatusUpdateDto.cancel_reason
+          : undefined,
       );
 
       // Send notification to user
