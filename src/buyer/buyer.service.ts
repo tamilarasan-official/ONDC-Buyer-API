@@ -88,7 +88,7 @@ export class BuyerService {
     @InjectRepository(Banner)
     private readonly bannerRepository: Repository<Banner>,
     private readonly locationService: LocationService,
-  ) {}
+  ) { }
 
   /**
    * Get home page data with nearby restaurants, trending items, and promotional banner
@@ -535,7 +535,7 @@ export class BuyerService {
             const restaurant = await this.storeRepository.findOne({
               where: { reference_id: banner.promotion_link },
             });
-            if(!restaurant){
+            if (!restaurant) {
               return null;
             }
             return {
@@ -914,7 +914,7 @@ export class BuyerService {
     minPrice?: number,
     maxPrice?: number,
     favoriteStoreIds: Set<number> = new Set(),
-    veg_mode?:string
+    veg_mode?: string
   ) {
     try {
       const distanceQuery = this.locationService.buildDistanceQuery(
@@ -1215,6 +1215,7 @@ export class BuyerService {
           "c.id",
           "c.name",
           "q.available_count",
+          "q.maximum_count"
         ])
         .addSelect(`(${distanceSubquery})`, "distance");
 
@@ -1273,6 +1274,10 @@ export class BuyerService {
             category: {
               id: item.c_id,
               name: item.c_name,
+            },
+            quantity: {
+              available_count: parseInt(item.q_available_count) || 0,
+              maximum_count: parseInt(item.q_maximum_count) || 0,
             },
             is_available: (item.q_available_count || 0) > 0,
             is_favorite: favoriteItemIds.has(item.i_id),
@@ -1385,15 +1390,15 @@ export class BuyerService {
       // Get user location for distance calculation
       const userLocation = userId
         ? await this.locationService.getUserLocation(
-            userId,
-            deviceLat,
-            deviceLng,
-          )
+          userId,
+          deviceLat,
+          deviceLng,
+        )
         : {
-            lat: deviceLat || 9.93523,
-            lng: deviceLng || 78.130404,
-            source: "device_location",
-          };
+          lat: deviceLat || 9.93523,
+          lng: deviceLng || 78.130404,
+          source: "device_location",
+        };
 
       // Get restaurant basic info
       const restaurant = await this.storeRepository
@@ -1493,14 +1498,14 @@ export class BuyerService {
           })) || [],
         timings: restaurant.timings
           ? (() => {
-              // Check for active close timing for this single restaurant
-              const now = new Date();
-              const hasActiveCloseTiming = restaurant.closeTimings?.some(
-                (ct) =>
-                  ct.close_start_datetime <= now && ct.close_end_datetime >= now,
-              ) || false;
-              return this.expandTimingsToDays(restaurant.timings, hasActiveCloseTiming);
-            })()
+            // Check for active close timing for this single restaurant
+            const now = new Date();
+            const hasActiveCloseTiming = restaurant.closeTimings?.some(
+              (ct) =>
+                ct.close_start_datetime <= now && ct.close_end_datetime >= now,
+            ) || false;
+            return this.expandTimingsToDays(restaurant.timings, hasActiveCloseTiming);
+          })()
           : [],
         offers:
           restaurant.offers
@@ -2109,6 +2114,7 @@ export class BuyerService {
           select: ["item"],
           relations: ["item"],
         });
+        console.log('favoriteItems: ', favoriteItems.map((item) => item.item.quantities.map((quantity) => quantity.maximum_count)));
         favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
         this.logger.log(
           `❤️ User has ${favoriteItemIds.size} favorite items for menu`,
@@ -3785,7 +3791,7 @@ export class BuyerService {
           // Store all timings for this item - TypeORM should load all via leftJoinAndSelect
           const timings = item.timings || [];
           allItemTimingsMap.set(item.id, timings);
-          
+
           if (timings.length > 0) {
             this.logger.debug(
               `Loaded ${timings.length} timing(s) for item ${item.id}`,
@@ -3833,7 +3839,7 @@ export class BuyerService {
 
         // Process standalone items
         const processedItems: any[] = [];
-        
+
         for (const item of standaloneItems) {
           const itemRating = await this.calculateItemRating(item.id);
           const dietaryAttr = item.attributes?.find(
@@ -3845,6 +3851,11 @@ export class BuyerService {
 
           const basePrice = item.prices?.[0]?.base_price || 0;
           const currency = item.prices?.[0]?.currency || "INR";
+
+          const quantity = item.quantities?.[0];
+          const availableCount = quantity?.available_count || 0;
+          const maximumCount = quantity?.maximum_count || 0;
+          const isAvailable = availableCount > 0;
 
           const customizations = await this.getCustomizationGroups(item.id);
           const hasCustomizations = customizations.length > 0;
@@ -3865,7 +3876,9 @@ export class BuyerService {
               currency: currency,
             },
             rating: itemRating.rating,
-            is_available: item.status,
+            is_available: isAvailable,
+            available_count: availableCount,
+            maximum_count: maximumCount,
             is_recommended: item.is_recommended,
             dietary_preference: dietaryPref,
             food_type: store?.food_type || undefined,
