@@ -33,7 +33,7 @@ import { ConfigService } from "@nestjs/config";
 @Injectable()
 export class CartService {
   private readonly logger = new Logger(CartService.name);
-  
+
   // Maximum tip amount constant (fixed amount in INR)
   private readonly MAX_TIP_AMOUNT = 450.0;
 
@@ -60,7 +60,7 @@ export class CartService {
     private readonly deliveryPricingService: DeliveryPricingService,
     private readonly couponService: CouponService,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   /**
    * Get user's active cart
@@ -86,7 +86,7 @@ export class CartService {
       if (!cart) {
         // Get platform fee configuration for empty cart
         const platformFeeConfig = this.getPlatformFee();
-        
+
         return {
           success: true,
           message: "Cart is empty",
@@ -156,11 +156,31 @@ export class CartService {
         );
       }
 
-      if (
-        !item.quantities?.[0] ||
-        item.quantities[0].available_count < addToCartDto.quantity
-      ) {
-        throw new BadRequestException("Insufficient quantity available");
+      // if (
+      //   !item.quantities?.[0] ||
+      //   item.quantities[0].available_count < addToCartDto.quantity
+      // ) {
+      //   throw new BadRequestException("Insufficient quantity available");
+      // }
+
+      const stock = item.quantities?.[0];
+
+      if (!stock) {
+        throw new BadRequestException("Item has no stock configuration");
+      }
+
+      // Check available stock limit
+      if (stock.available_count < addToCartDto.quantity) {
+        throw new BadRequestException(
+          `Only ${stock.available_count} units available`
+        );
+      }
+
+      // Check maximum_count (per-customer limit)
+      if (stock.maximum_count < addToCartDto.quantity) {
+        throw new BadRequestException(
+          `You can only purchase up to ${stock.maximum_count} units of this item`
+        );
       }
 
       // Validate customizations if provided
@@ -249,16 +269,44 @@ export class CartService {
         (itemTotalPrice + customizationPrice).toFixed(2),
       );
 
+      // if (existingCartItem) {
+      //   // Update existing item quantity
+      //   existingCartItem.quantity += addToCartDto.quantity;
+      //   // Recalculate total price with new quantity
+      //   const newItemTotalPrice = Number(
+      //     (unitPrice * existingCartItem.quantity).toFixed(2),
+      //   );
+      //   existingCartItem.total_price = Number(
+      //     (newItemTotalPrice + customizationPrice).toFixed(2),
+      //   );
+      //   cartItem = await this.cartItemRepository.save(existingCartItem);
+      // } 
       if (existingCartItem) {
-        // Update existing item quantity
-        existingCartItem.quantity += addToCartDto.quantity;
-        // Recalculate total price with new quantity
+        const newTotalQty = existingCartItem.quantity + addToCartDto.quantity;
+
+        // Validate stock limits again after adding
+        if (newTotalQty > stock.available_count) {
+          throw new BadRequestException(
+            `Only ${stock.available_count} units available`
+          );
+        }
+
+        if (newTotalQty > stock.maximum_count) {
+          throw new BadRequestException(
+            `You can only purchase up to ${stock.maximum_count} units of this item`
+          );
+        }
+
+        existingCartItem.quantity = newTotalQty;
+
         const newItemTotalPrice = Number(
-          (unitPrice * existingCartItem.quantity).toFixed(2),
+          (unitPrice * newTotalQty).toFixed(2)
         );
+
         existingCartItem.total_price = Number(
-          (newItemTotalPrice + customizationPrice).toFixed(2),
+          (newItemTotalPrice + customizationPrice).toFixed(2)
         );
+
         cartItem = await this.cartItemRepository.save(existingCartItem);
       } else {
         // Create new cart item
@@ -287,15 +335,15 @@ export class CartService {
       const cartSummary = updatedCart
         ? await this.calculateCartSummary(updatedCart)
         : {
-            subtotal: 0,
-            delivery_fee: 0,
-            tax_amount: 0,
-            discount_amount: 0,
-            tip_amount: 0,
-            max_tip_amount: null,
-            final_amount: 0,
-            estimated_delivery_time: null,
-          };
+          subtotal: 0,
+          delivery_fee: 0,
+          tax_amount: 0,
+          discount_amount: 0,
+          tip_amount: 0,
+          max_tip_amount: null,
+          final_amount: 0,
+          estimated_delivery_time: null,
+        };
 
       return {
         success: true,
@@ -438,15 +486,15 @@ export class CartService {
       const cartSummary = updatedCart
         ? await this.calculateCartSummary(updatedCart)
         : {
-            subtotal: 0,
-            delivery_fee: 0,
-            tax_amount: 0,
-            discount_amount: 0,
-            tip_amount: 0,
-            max_tip_amount: null,
-            final_amount: 0,
-            estimated_delivery_time: null,
-          };
+          subtotal: 0,
+          delivery_fee: 0,
+          tax_amount: 0,
+          discount_amount: 0,
+          tip_amount: 0,
+          max_tip_amount: null,
+          final_amount: 0,
+          estimated_delivery_time: null,
+        };
 
       return {
         success: true,
@@ -511,15 +559,15 @@ export class CartService {
       const cartSummary = updatedCart
         ? await this.calculateCartSummary(updatedCart)
         : {
-            subtotal: 0,
-            delivery_fee: 0,
-            tax_amount: 0,
-            discount_amount: 0,
-            tip_amount: 0,
-            max_tip_amount: null,
-            final_amount: 0,
-            estimated_delivery_time: null,
-          };
+          subtotal: 0,
+          delivery_fee: 0,
+          tax_amount: 0,
+          discount_amount: 0,
+          tip_amount: 0,
+          max_tip_amount: null,
+          final_amount: 0,
+          estimated_delivery_time: null,
+        };
 
       return {
         success: true,
@@ -634,13 +682,13 @@ export class CartService {
       const deliveryFee = Number(cart.delivery_fee || 0);
       const taxAmount = Number(cart.tax_amount || 0);
       const tipAmount = Number(cart.tip_amount || 0);
-      
+
       const platformFeeConfig = this.getPlatformFee();
       // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
         : 0;
-      
+
       cart.discount_amount = discountAmount;
       cart.final_amount =
         cartSubtotal +
@@ -718,13 +766,13 @@ export class CartService {
       const taxAmount = Number(cart.tax_amount || 0);
       const discountAmount = Number(cart.discount_amount || 0);
       const tipAmountValue = Number(cart.tip_amount || 0);
-      
+
       const platformFeeConfig = this.getPlatformFee();
       // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
         : 0;
-      
+
       const finalAmount =
         subtotal +
         deliveryFee +
@@ -991,13 +1039,13 @@ export class CartService {
 
     // Get platform fee configuration
     const platformFeeConfig = this.getPlatformFee();
-    
+
     // Recalculate final_amount based on current values and platform fee setting
     // Only include platform fee in calculation if enabled
     const platformFeeForCalculation = platformFeeConfig.isEnabled
       ? platformFeeConfig.amount
       : 0;
-    
+
     const finalAmount =
       subtotal +
       deliveryFee +
@@ -1078,11 +1126,11 @@ export class CartService {
       applied_offer:
         discountAmount > 0
           ? {
-              id: 1,
-              name: "Applied Offer",
-              offer_code: "OFFER",
-              discount_amount: Number(discountAmount.toFixed(2)),
-            }
+            id: 1,
+            name: "Applied Offer",
+            offer_code: "OFFER",
+            discount_amount: Number(discountAmount.toFixed(2)),
+          }
           : undefined,
     };
   }
