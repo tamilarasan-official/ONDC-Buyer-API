@@ -197,4 +197,14 @@ export class SellerStatusUpdateDto {
   @IsOptional()
   @IsString()
   tracking_url?: string;
+
+  @ApiProperty({
+    description: "Delivery code for order verification (typically sent when status is 'picked')",
+    example: "4994",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  delivery_code?: string;
 }

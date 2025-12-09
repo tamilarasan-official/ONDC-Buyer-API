@@ -848,6 +848,7 @@ export class OrderService {
       current_location?: any;
     },
     trackingUrl?: string,
+    deliveryCode?: string,
   ) {
     const tracking = this.orderTrackingRepository.create({
       order: { id: orderId },
@@ -860,6 +861,7 @@ export class OrderService {
       agent_photo_url: agentDetails?.photo_url,
       agent_details_json: agentDetails || null, // Store complete agent details
       tracking_url: trackingUrl || undefined,
+      delivery_code: deliveryCode || undefined,
       timestamp: new Date(),
     });
 
@@ -999,9 +1001,19 @@ export class OrderService {
           agent_eta: t.agent_eta,
           agent_photo_url: t.agent_photo_url,
           tracking_url: t.tracking_url,
+          delivery_code: t.delivery_code,
         })) || [],
       tracking_url: order.tracking && order.tracking.length > 0 
         ? order.tracking[order.tracking.length - 1].tracking_url 
+        : null,
+      delivery_code: order.tracking && order.tracking.length > 0
+        ? (() => {
+            // Find the most recent tracking event that has a delivery_code
+            const trackingWithCode = [...order.tracking]
+              .reverse()
+              .find((t) => t.delivery_code);
+            return trackingWithCode?.delivery_code || null;
+          })()
         : null,
       created_at: order.created_at.toISOString(),
       updated_at: order.updated_at.toISOString(),
@@ -1154,6 +1166,7 @@ export class OrderService {
         fullMessage,
         agentDetails,
         sellerStatusUpdateDto.tracking_url,
+        sellerStatusUpdateDto.delivery_code,
       );
 
       // Send notification to user

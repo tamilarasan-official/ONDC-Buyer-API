@@ -45,6 +45,10 @@ export class OrderTracking {
   @Column({ type: "varchar", length: 500, nullable: true })
   tracking_url?: string;
 
+  // Delivery code for order verification (typically sent when status is 'picked')
+  @Column({ type: "varchar", length: 20, nullable: true })
+  delivery_code?: string;
+
   @Column({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   timestamp: Date;
 

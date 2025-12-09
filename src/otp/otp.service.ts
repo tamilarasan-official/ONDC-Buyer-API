@@ -278,7 +278,11 @@ export class OtpService {
   private createOtpMessage(otp: string, purpose: OtpPurpose): string {
     const purposeText =
       purpose === OtpPurpose.REGISTRATION ? "registration" : "verification";
-    return `Your Valar Verification code is ${otp}. Never share this OTP. Thanks, Valar Digital`;
+    if(purposeText === OtpPurpose.REGISTRATION) {
+      return `Hi, your login OTP code is ${otp}. Do not share with anyone. Thanks, Valar Digital. Pz8rPx8/az9`;
+    } else {
+      return `Your Valar Verification code is ${otp}. Never share this OTP. Thanks, Valar Digital`;
+    }
   }
 
   private async storeOtp(
