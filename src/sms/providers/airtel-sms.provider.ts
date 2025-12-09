@@ -3,6 +3,7 @@ import { HttpService } from "@nestjs/axios";
 import { ConfigService } from "@nestjs/config";
 import { firstValueFrom } from "rxjs";
 import { catchError, timeout } from "rxjs/operators";
+import { OtpPurpose } from "src/otp/entities/otp-verification.entity";
 
 export interface AirtelSmsRequest {
   customerId: string;
@@ -48,15 +49,20 @@ export class AirtelSmsProvider {
   async sendSms(
     phoneNumber: string,
     message: string,
+    purpose:string
   ): Promise<AirtelSmsResponse> {
     try {
       const cleanPhoneNumber = this.cleanPhoneNumber(phoneNumber);
 
       // Prepare Airtel SMS request
       const customerId = this.configService.get<string>("AIRTEL_CUSTOMER_ID");
-      const dltTemplateId = this.configService.get<string>(
+
+      const dltTemplateId = purpose === OtpPurpose.REGISTRATION || OtpPurpose.LOGIN ? this.configService.get<string>(
+        "AIRTEL_DLT_TEMPLATE_LOGIN_ID"
+      ) : this.configService.get<string>(
         "AIRTEL_DLT_TEMPLATE_ID",
       );
+
       const entityId = this.configService.get<string>("AIRTEL_ENTITY_ID");
       const sourceAddress =
         this.configService.get<string>("AIRTEL_SOURCE_ADDRESS") || "ONDC";

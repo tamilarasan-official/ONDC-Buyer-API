@@ -90,6 +90,7 @@ export class OtpService {
       const smsResponse = await this.airtelSmsProvider.sendSms(
         cleanPhoneNumber,
         message,
+        purpose
       );
 
       if (smsResponse.messageRequestId) {
