@@ -69,21 +69,6 @@ export class UserService {
         await this.userRepository.save(user);
       }
 
-      // Create OTP notification for tracking (optional)
-      try {
-        await this.notificationService.createOTPNotification(
-          user.id,
-          generateOtpDto.phone_number,
-          "OTP sent via SMS",
-        );
-      } catch (notificationError) {
-        console.error(
-          "Failed to create OTP notification:",
-          notificationError.message,
-        );
-        // Don't throw error as OTP generation should still succeed
-      }
-
       return {
         ...user,
         otp_sent: true,

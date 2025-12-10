@@ -156,10 +156,12 @@ export class OrderService {
         }
 
         // Reserve the single preorder item before creating order
+        // FIX: Pass store_id directly since cartItem.cart is not loaded
         const reservationToken = await this.reservePreorderFromCart(
           userId,
           cartItem,
           deliveryAddress.pincode,
+          cart.store.id, // Pass store_id directly
         );
         
         // Update cart item with reservation token
@@ -1628,6 +1630,7 @@ export class OrderService {
     userId: number,
     cartItem: CartItem,
     pincode: string,
+    storeId: number, // FIX: Accept store_id as parameter instead of accessing from cartItem.cart
   ): Promise<string> {
     // Find PREORDER coupon
     const coupon = await this.couponRepository.findOne({
@@ -1647,7 +1650,7 @@ export class OrderService {
     const reservation = await this.couponService.reserveCoupon({
       code: coupon.code,
       user_id: userId,
-      store_id: cartItem.cart.store.id,
+      store_id: storeId, // FIX: Use passed store_id instead of cartItem.cart.store.id
       cart_total: cartItem.total_price,
       pincode: pincode, // Required field
     });

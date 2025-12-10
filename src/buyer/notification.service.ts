@@ -314,31 +314,6 @@ export class NotificationService {
   }
 
   /**
-   * Create OTP notification
-   */
-  async createOTPNotification(
-    userId: number,
-    phoneNumber: number,
-    otp: string,
-  ): Promise<Notification> {
-    const notification = await this.createNotification({
-      user_id: userId,
-      title: "OTP for Login",
-      message: `Your OTP is ${otp}. Valid for 1 minute.`,
-      type: "system",
-      data: {
-        phone_number: phoneNumber,
-        otp: otp,
-        expires_at: new Date(Date.now() + 1 * 60 * 1000).toISOString(), // 1 minute
-      },
-    });
-    
-    this.logger.log(`🔐 OTP NOTIFICATION | User: ${userId} | Phone: ${phoneNumber} | OTP: ${otp} | Expires: 1 minute | Title: "OTP for Login" | Message: "Your OTP is ${otp}. Valid for 1 minute."`);
-    
-    return notification;
-  }
-
-  /**
    * Create payment success notification
    */
   async createPaymentSuccessNotification(
