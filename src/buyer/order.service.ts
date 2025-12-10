@@ -249,6 +249,11 @@ export class OrderService {
         estimatedDeliveryTime = this.calculateEstimatedDeliveryTime();
       }
 
+      // FIX: Log cart values before creating order to debug payment amount mismatch
+      this.logger.log(
+        `💰 Cart totals before order creation: subtotal=${cart.total_amount}, delivery_fee=${cart.delivery_fee}, tax=${cart.tax_amount}, discount=${cart.discount_amount}, tip=${cart.tip_amount || 0}, final_amount=${cart.final_amount}`,
+      );
+
       const order = this.orderRepository.create({
         order_number: orderNumber,
         user: { id: userId },
@@ -278,6 +283,11 @@ export class OrderService {
       });
 
       const savedOrder = await this.orderRepository.save(order);
+      
+      // FIX: Log order values after saving to verify what was stored
+      this.logger.log(
+        `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
+      );
 
       // Create order items from cart items
       const orderItems = cart.cart_items.map((cartItem) =>
@@ -378,15 +388,72 @@ export class OrderService {
         };
       }
 
-      // For online payment, return order with payment_required flag
-      return {
+      // For online payment, create Razorpay order and return payment details
+      // FIX: Use savedOrder.total_amount instead of cart.final_amount to ensure consistency
+      const paymentAmountInPaise = Math.round(savedOrder.total_amount * 100);
+      
+      this.logger.log(
+        `💳 Creating Razorpay order for order ${savedOrder.id}: amount=${paymentAmountInPaise} paise (₹${savedOrder.total_amount})`,
+      );
+
+      // Create Razorpay order
+      const razorpayOrder = await this.razorpayService.createOrder(
+        paymentAmountInPaise,
+        "INR",
+        savedOrder.order_number,
+      );
+
+      this.logger.log(
+        `✅ Razorpay order created: ${razorpayOrder.id}, amount: ${razorpayOrder.amount}`,
+      );
+
+      // Create payment record
+      const payment = this.paymentRepository.create({
+        order: { id: savedOrder.id },
+        user: { id: userId },
+        payment_id: razorpayOrder.id, // Store Razorpay order ID temporarily
+        payment_method: "online",
+        payment_status: "pending",
+        amount: savedOrder.total_amount,
+        gateway: "razorpay",
+      });
+
+      await this.paymentRepository.save(payment);
+
+      // Get user details for prefill
+      const user = await this.userRepository.findOne({
+        where: { id: userId },
+      });
+
+      // Return order with payment details
+      // FIX: Use cart.store.name instead of savedOrder.store.name since store relation is not loaded
+      const response = {
         success: true,
         message: "Order created successfully - Payment required",
         order: orderData,
         payment_required: true,
-        payment_amount: Math.round(cart.final_amount * 100), // in paise
+        payment_amount: paymentAmountInPaise,
         currency: "INR",
+        payment_details: {
+          razorpay_order_id: razorpayOrder.id,
+          amount: paymentAmountInPaise,
+          currency: "INR",
+          key: this.razorpayService.getRazorpayKey(),
+          name: cart.store.name,
+          description: `Order #${savedOrder.order_number}`,
+          prefill: {
+            name: user?.name || "User",
+            email: user?.email || "",
+            contact: user?.phone_number?.toString() || "",
+          },
+        },
       };
+
+      this.logger.log(
+        `✅ Order creation response prepared with payment_details: ${JSON.stringify({ razorpay_order_id: razorpayOrder.id, amount: paymentAmountInPaise })}`,
+      );
+
+      return response;
     } catch (error) {
       this.logger.error(
         `❌ Error creating order: ${error.message}`,
@@ -600,6 +667,11 @@ export class OrderService {
       if (order.status !== "pending_payment") {
         throw new BadRequestException("Order is not in pending payment status");
       }
+
+      // FIX: Log order total_amount before payment initiation to debug amount mismatch
+      this.logger.log(
+        `💰 Payment initiation: Order ID=${order.id}, order.total_amount=${order.total_amount}, payment_amount_in_paise=${Math.round(order.total_amount * 100)}`,
+      );
 
       // Create Razorpay order
       const razorpayOrder = await this.razorpayService.createOrder(

@@ -519,6 +519,13 @@ export class CreateOrderResponseDto {
       amount: 68564,
       currency: "INR",
       key: "rzp_test_1DP5mmOlF5G5ag",
+      name: "Restaurant Name",
+      description: "Order #ORD-20250102-001",
+      prefill: {
+        name: "User Name",
+        email: "user@example.com",
+        contact: "+91-9876543210"
+      }
     },
     required: false,
   })
@@ -527,6 +534,13 @@ export class CreateOrderResponseDto {
     amount: number;
     currency: string;
     key: string;
+    name?: string;
+    description?: string;
+    prefill?: {
+      name: string;
+      email: string;
+      contact: string;
+    };
   };
 }
 
