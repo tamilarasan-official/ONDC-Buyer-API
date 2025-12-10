@@ -306,6 +306,10 @@ export class CartService {
       // Calculate this AFTER we know the item price, so we can pass correct cart_total
       let preorderCoupon: Coupon | null = null;
       if (addToCartDto.is_preorder) {
+        this.logger.log(
+          `🛒 Preorder item detected: item_id=${addToCartDto.item_id}, validating and auto-applying coupon...`,
+        );
+        
         // Validate preorder requirements
         preorderCoupon = await this.validatePreorderItem(
           addToCartDto.item_id,
@@ -313,6 +317,10 @@ export class CartService {
           userId,
           addToCartDto.quantity,
           addToCartDto.restaurant_id,
+        );
+
+        this.logger.log(
+          `✅ Preorder validation passed: coupon_id=${preorderCoupon.id}, code=${preorderCoupon.code}`,
         );
 
         // Auto-apply preorder coupon to cart
@@ -330,9 +338,16 @@ export class CartService {
           // Proposed cart total = existing items + new item
           const proposedCartTotal = existingSubtotal + totalPrice;
 
+          this.logger.log(
+            `💰 Auto-applying preorder coupon: code=${preorderCoupon.code}, proposed_cart_total=₹${proposedCartTotal}`,
+          );
+
           // Check if cart already has a coupon
           if (cart.coupon_id && cart.coupon_id !== preorderCoupon.id) {
             // If cart has different coupon, remove it (preorder takes priority)
+            this.logger.log(
+              `🔄 Removing existing coupon (id=${cart.coupon_id}) to apply preorder coupon`,
+            );
             await this.removeCoupon(userId);
           }
 
@@ -341,6 +356,18 @@ export class CartService {
             userId,
             { coupon_code: preorderCoupon.code },
             proposedCartTotal,
+          );
+
+          this.logger.log(
+            `✅ Preorder coupon auto-applied successfully: code=${preorderCoupon.code}`,
+          );
+        } else if (!preorderCoupon) {
+          this.logger.warn(
+            `⚠️ Preorder item added but no valid coupon found for item_id=${addToCartDto.item_id}`,
+          );
+        } else if (!cart) {
+          this.logger.warn(
+            `⚠️ Preorder item added but cart not found for user_id=${userId}`,
           );
         }
       }
