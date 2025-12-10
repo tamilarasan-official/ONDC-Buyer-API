@@ -1032,5 +1032,104 @@ export class CouponService {
       message: message || "Coupon is valid",
     };
   }
+
+  // ==================== Quota Management ====================
+
+  /**
+   * Get current quota for a coupon
+   */
+  async getCouponQuota(couponId: number): Promise<{
+    coupon_id: number;
+    current_quota: number | null;
+    global_usage_limit: number | null;
+  }> {
+    const coupon = await this.couponRepository.findOne({
+      where: { id: couponId },
+      select: ["id", "global_usage_limit"],
+    });
+
+    if (!coupon) {
+      throw new NotFoundException(`Coupon with ID ${couponId} not found`);
+    }
+
+    const currentQuota = await this.redisCouponService.getQuota(couponId);
+
+    return {
+      coupon_id: couponId,
+      current_quota: currentQuota,
+      global_usage_limit: coupon.global_usage_limit ?? null,
+    };
+  }
+
+  /**
+   * Increment quota for a coupon
+   */
+  async incrementCouponQuota(
+    couponId: number,
+    amount: number,
+  ): Promise<{
+    coupon_id: number;
+    previous_quota: number | null;
+    new_quota: number | null;
+    amount_added: number;
+  }> {
+    const coupon = await this.couponRepository.findOne({
+      where: { id: couponId },
+      select: ["id", "global_usage_limit"],
+    });
+
+    if (!coupon) {
+      throw new NotFoundException(`Coupon with ID ${couponId} not found`);
+    }
+
+    const previousQuota = await this.redisCouponService.getQuota(couponId);
+    await this.redisCouponService.incrementQuota(couponId, amount);
+    const newQuota = await this.redisCouponService.getQuota(couponId);
+
+    this.logger.log(
+      `✅ Incremented quota for coupon ${couponId}: ${previousQuota} → ${newQuota} (+${amount})`,
+    );
+
+    return {
+      coupon_id: couponId,
+      previous_quota: previousQuota,
+      new_quota: newQuota,
+      amount_added: amount,
+    };
+  }
+
+  /**
+   * Reset quota for a coupon to a specific value
+   */
+  async resetCouponQuota(
+    couponId: number,
+    newQuota: number,
+  ): Promise<{
+    coupon_id: number;
+    previous_quota: number | null;
+    new_quota: number;
+  }> {
+    const coupon = await this.couponRepository.findOne({
+      where: { id: couponId },
+      select: ["id", "global_usage_limit"],
+    });
+
+    if (!coupon) {
+      throw new NotFoundException(`Coupon with ID ${couponId} not found`);
+    }
+
+    const previousQuota = await this.redisCouponService.getQuota(couponId);
+    await this.redisCouponService.initializeQuota(couponId, newQuota);
+
+    this.logger.log(
+      `✅ Reset quota for coupon ${couponId}: ${previousQuota} → ${newQuota}`,
+    );
+
+    return {
+      coupon_id: couponId,
+      previous_quota: previousQuota,
+      new_quota: newQuota,
+    };
+  }
 }
 

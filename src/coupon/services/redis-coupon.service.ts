@@ -141,6 +141,8 @@ export class RedisCouponService {
 
   /**
    * Release reservation and increment quota (rollback)
+   * IMPORTANT: Always restores quota if reservation token exists, even if reservation expired
+   * This is because quota was consumed when reservation was created, so it must be restored
    */
   async releaseReservation(
     couponId: number,
@@ -151,15 +153,26 @@ export class RedisCouponService {
 
     // Check if reservation exists
     const exists = await this.redis.exists(reservationKey);
+    
     if (exists) {
-      // Delete reservation
+      // Delete reservation if it exists
       await this.redis.del(reservationKey);
-      // Increment quota
-      await this.redis.incr(quotaKey);
       this.logger.log(
-        `Released reservation ${reservationToken} for coupon ${couponId}`,
+        `🗑️ Deleted reservation ${reservationToken} for coupon ${couponId}`,
+      );
+    } else {
+      // Reservation doesn't exist (expired or already deleted)
+      this.logger.warn(
+        `⚠️ Reservation ${reservationToken} for coupon ${couponId} does not exist in Redis (may have expired). Quota will still be restored.`,
       );
     }
+
+    // ALWAYS restore quota - quota was consumed when reservation was created
+    // Even if reservation expired, we need to restore the quota
+    await this.redis.incr(quotaKey);
+    this.logger.log(
+      `✅ Restored quota for coupon ${couponId} (reservation ${exists ? 'released' : 'expired/missing'})`,
+    );
   }
 
   /**

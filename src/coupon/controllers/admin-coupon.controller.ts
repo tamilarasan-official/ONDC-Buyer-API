@@ -27,6 +27,7 @@ import { CreateCampaignDto } from "../dto/create-campaign.dto";
 import { UpdateCampaignDto } from "../dto/update-campaign.dto";
 import { GenerateCodesDto } from "../dto/generate-codes.dto";
 import { ExportCodesDto, ExportFormat } from "../dto/export-codes.dto";
+import { IncrementQuotaDto, ResetQuotaDto } from "../dto/manage-quota.dto";
 import { CampaignStatus } from "../entities/coupon-campaign.entity";
 // import { JwtAuthGuard } from "../../authentication/jwt-auth.guard"; // Uncomment when auth is ready
 
@@ -45,16 +46,51 @@ export class AdminCouponController {
   @Post("campaigns")
   @ApiOperation({
     summary: "Create a new coupon campaign",
-    description: "Create a new coupon campaign with a unique key",
+    description:
+      "Create a new coupon campaign with a unique key. Campaigns are containers for multiple coupon codes. Each campaign can have multiple coupon codes with the same discount rules.",
   })
-  @ApiBody({ type: CreateCampaignDto })
+  @ApiBody({
+    type: CreateCampaignDto,
+    examples: {
+      example1: {
+        summary: "Summer Sale Campaign",
+        value: {
+          campaign_key: "summer-2025",
+          title: "Summer Sale 2025",
+          description: "Summer discount campaign for 2025",
+          created_by: "admin@example.com",
+          status: "draft",
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: "Campaign created successfully",
+    schema: {
+      type: "object",
+      properties: {
+        id: { type: "number", example: 1 },
+        campaign_key: { type: "string", example: "summer-2025" },
+        title: { type: "string", example: "Summer Sale 2025" },
+        description: { type: "string", example: "Summer discount campaign for 2025" },
+        status: { type: "string", example: "draft", enum: ["draft", "active", "inactive"] },
+        created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
+        updated_at: { type: "string", example: "2025-01-15T10:00:00Z" },
+      },
+    },
   })
   @ApiResponse({
     status: 409,
     description: "Campaign key already exists",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 409 },
+        message: { type: "string", example: "Campaign with key 'summer-2025' already exists" },
+        error: { type: "string", example: "Conflict" },
+      },
+    },
   })
   async createCampaign(@Body() dto: CreateCampaignDto) {
     return this.couponService.createCampaign(dto);
@@ -63,17 +99,54 @@ export class AdminCouponController {
   @Patch("campaigns/:id")
   @ApiOperation({
     summary: "Update a coupon campaign",
-    description: "Update campaign title, description, or status",
+    description:
+      "Update campaign title, description, or status. Only provided fields will be updated. Use this to activate/deactivate campaigns or update campaign details.",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
-  @ApiBody({ type: UpdateCampaignDto })
+  @ApiBody({
+    type: UpdateCampaignDto,
+    examples: {
+      updateStatus: {
+        summary: "Activate Campaign",
+        value: {
+          status: "active",
+        },
+      },
+      updateDetails: {
+        summary: "Update Title and Description",
+        value: {
+          title: "Updated Summer Sale 2025",
+          description: "Updated description for summer campaign",
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
     description: "Campaign updated successfully",
+    schema: {
+      type: "object",
+      properties: {
+        id: { type: "number", example: 1 },
+        campaign_key: { type: "string", example: "summer-2025" },
+        title: { type: "string", example: "Updated Summer Sale 2025" },
+        description: { type: "string", example: "Updated description" },
+        status: { type: "string", example: "active" },
+        updated_at: { type: "string", example: "2025-01-15T10:30:00Z" },
+      },
+    },
   })
   @ApiResponse({
     status: 404,
     description: "Campaign not found",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 404 },
+        message: { type: "string", example: "Campaign with ID 1 not found" },
+        error: { type: "string", example: "Not Found" },
+      },
+    },
   })
   async updateCampaign(
     @Param("id", ParseIntPipe) id: number,
@@ -85,31 +158,53 @@ export class AdminCouponController {
   @Get("campaigns")
   @ApiOperation({
     summary: "List coupon campaigns",
-    description: "Get paginated list of campaigns with optional status filter",
+    description:
+      "Get paginated list of campaigns with optional status filter. Returns all campaigns ordered by creation date (newest first). Use status filter to get only active, draft, or inactive campaigns.",
   })
   @ApiQuery({
     name: "status",
     required: false,
     enum: CampaignStatus,
-    description: "Filter by campaign status",
+    description: "Filter by campaign status (draft, active, inactive)",
+    example: "active",
   })
   @ApiQuery({
     name: "page",
     required: false,
     type: Number,
-    description: "Page number",
+    description: "Page number (starts from 1)",
     example: 1,
   })
   @ApiQuery({
     name: "limit",
     required: false,
     type: Number,
-    description: "Items per page",
+    description: "Items per page (default: 20)",
     example: 20,
   })
   @ApiResponse({
     status: 200,
     description: "Campaigns retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        campaigns: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "number", example: 1 },
+              campaign_key: { type: "string", example: "summer-2025" },
+              title: { type: "string", example: "Summer Sale 2025" },
+              description: { type: "string", example: "Summer discount campaign" },
+              status: { type: "string", example: "active" },
+              created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
+            },
+          },
+        },
+        total: { type: "number", example: 50 },
+      },
+    },
   })
   async getCampaigns(
     @Query("status") status?: CampaignStatus,
@@ -126,16 +221,48 @@ export class AdminCouponController {
   @Get("campaigns/:id")
   @ApiOperation({
     summary: "Get campaign details",
-    description: "Get campaign details with associated coupons",
+    description:
+      "Get detailed information about a specific campaign including all associated coupon codes. Use this to view campaign configuration and all generated codes.",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
   @ApiResponse({
     status: 200,
     description: "Campaign retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        id: { type: "number", example: 1 },
+        campaign_key: { type: "string", example: "summer-2025" },
+        title: { type: "string", example: "Summer Sale 2025" },
+        description: { type: "string", example: "Summer discount campaign" },
+        status: { type: "string", example: "active" },
+        coupons: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "number", example: 1 },
+              code: { type: "string", example: "SUMMER-ABC12345" },
+              type: { type: "string", example: "percent" },
+              status: { type: "string", example: "active" },
+            },
+          },
+        },
+        created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
+      },
+    },
   })
   @ApiResponse({
     status: 404,
     description: "Campaign not found",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 404 },
+        message: { type: "string", example: "Campaign with ID 1 not found" },
+        error: { type: "string", example: "Not Found" },
+      },
+    },
   })
   async getCampaign(@Param("id", ParseIntPipe) id: number) {
     return this.couponService.getCampaign(id);
@@ -317,26 +444,54 @@ export class AdminCouponController {
   @Get("campaigns/:id/codes")
   @ApiOperation({
     summary: "List codes in campaign",
-    description: "Get paginated list of coupon codes in a campaign",
+    description:
+      "Get paginated list of all coupon codes in a campaign. Returns codes ordered by creation date (newest first). Use this to view all generated codes for a campaign.",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
   @ApiQuery({
     name: "page",
     required: false,
     type: Number,
-    description: "Page number",
+    description: "Page number (starts from 1)",
     example: 1,
   })
   @ApiQuery({
     name: "limit",
     required: false,
     type: Number,
-    description: "Items per page",
+    description: "Items per page (default: 50)",
     example: 50,
   })
   @ApiResponse({
     status: 200,
     description: "Codes retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        codes: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              id: { type: "number", example: 1 },
+              code: { type: "string", example: "SUMMER-ABC12345" },
+              type: { type: "string", example: "percent" },
+              value: { type: "number", example: 20 },
+              value_type: { type: "string", example: "percent" },
+              status: { type: "string", example: "active" },
+              global_usage_limit: { type: "number", example: 1000, nullable: true },
+              user_usage_limit: { type: "number", example: 1 },
+              created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
+            },
+          },
+        },
+        total: { type: "number", example: 100 },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Campaign not found",
   })
   async getCampaignCodes(
     @Param("id", ParseIntPipe) campaignId: number,
@@ -354,17 +509,68 @@ export class AdminCouponController {
   @ApiOperation({
     summary: "Export coupon codes",
     description:
-      "Export coupon codes to CSV, PDF, or ZIP format. Includes QR codes if requested.",
+      "Export coupon codes to CSV, PDF, or ZIP format. Includes QR codes if requested. The exported file will be downloaded directly. CSV format is recommended for bulk exports, PDF for printing, and ZIP for QR code distribution.",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
-  @ApiBody({ type: ExportCodesDto })
+  @ApiBody({
+    type: ExportCodesDto,
+    examples: {
+      csvExport: {
+        summary: "Export to CSV",
+        value: {
+          format: "csv",
+          include_qr: false,
+          exported_by: "admin@example.com",
+        },
+      },
+      pdfExport: {
+        summary: "Export to PDF with QR codes",
+        value: {
+          format: "pdf",
+          include_qr: true,
+          exported_by: "admin@example.com",
+        },
+      },
+      zipExport: {
+        summary: "Export to ZIP with QR codes",
+        value: {
+          format: "zip",
+          include_qr: true,
+          exported_by: "admin@example.com",
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 200,
-    description: "Export file generated",
+    description: "Export file generated and downloaded",
     content: {
-      "application/csv": { schema: { type: "string", format: "binary" } },
-      "application/pdf": { schema: { type: "string", format: "binary" } },
-      "application/zip": { schema: { type: "string", format: "binary" } },
+      "application/csv": {
+        schema: { type: "string", format: "binary" },
+        example: "SUMMER-ABC12345,SUMMER-XYZ67890,...",
+      },
+      "application/pdf": {
+        schema: { type: "string", format: "binary" },
+      },
+      "application/zip": {
+        schema: { type: "string", format: "binary" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Campaign not found",
+  })
+  @ApiResponse({
+    status: 500,
+    description: "Export failed",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Failed to export codes" },
+        error: { type: "string", example: "Error message" },
+      },
     },
   })
   async exportCodes(
@@ -429,6 +635,218 @@ export class AdminCouponController {
         error: error.message,
       });
     }
+  }
+
+  @Get("coupons/:id/quota")
+  @ApiOperation({
+    summary: "Get coupon quota",
+    description:
+      "Get current available quota (slots) for a coupon. Returns current quota from Redis and the original global_usage_limit from database.",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Coupon ID" })
+  @ApiResponse({
+    status: 200,
+    description: "Quota retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Quota retrieved successfully" },
+        data: {
+          type: "object",
+          properties: {
+            coupon_id: { type: "number", example: 123 },
+            current_quota: { type: "number", example: 45, nullable: true },
+            global_usage_limit: { type: "number", example: 100, nullable: true },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Coupon not found",
+  })
+  async getCouponQuota(@Param("id", ParseIntPipe) couponId: number) {
+    const quota = await this.couponService.getCouponQuota(couponId);
+    return {
+      success: true,
+      message: "Quota retrieved successfully",
+      data: quota,
+    };
+  }
+
+  @Post("coupons/:id/quota/increment")
+  @ApiOperation({
+    summary: "Increment coupon quota",
+    description:
+      "Add more slots to a coupon's quota. Useful when slots reach 0 and you want to make more available. This adds to the existing quota. Example: If current quota is 0 and you increment by 50, new quota becomes 50. If current quota is 10 and you increment by 50, new quota becomes 60.",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Coupon ID" })
+  @ApiBody({
+    type: IncrementQuotaDto,
+    examples: {
+      addSlots: {
+        summary: "Add 50 slots",
+        value: {
+          amount: 50,
+        },
+      },
+      restoreQuota: {
+        summary: "Restore quota after cancellation",
+        value: {
+          amount: 10,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Quota incremented successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Quota incremented by 50 successfully" },
+        data: {
+          type: "object",
+          properties: {
+            coupon_id: { type: "number", example: 123 },
+            previous_quota: { type: "number", example: 0, nullable: true },
+            new_quota: { type: "number", example: 50, nullable: true },
+            amount_added: { type: "number", example: 50 },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Coupon not found",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 404 },
+        message: { type: "string", example: "Coupon with ID 123 not found" },
+        error: { type: "string", example: "Not Found" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid amount (must be >= 1)",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 400 },
+        message: {
+          type: "array",
+          items: { type: "string" },
+          example: ["amount must not be less than 1"],
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
+  })
+  async incrementCouponQuota(
+    @Param("id", ParseIntPipe) couponId: number,
+    @Body() dto: IncrementQuotaDto,
+  ) {
+    const result = await this.couponService.incrementCouponQuota(
+      couponId,
+      dto.amount,
+    );
+    return {
+      success: true,
+      message: `Quota incremented by ${dto.amount} successfully`,
+      data: result,
+    };
+  }
+
+  @Post("coupons/:id/quota/reset")
+  @ApiOperation({
+    summary: "Reset coupon quota",
+    description:
+      "Reset coupon quota to a specific value. This overwrites the current quota completely. Use this when you want to set an exact quota value regardless of current quota. Example: If current quota is 5 and you reset to 100, new quota becomes 100. If current quota is 50 and you reset to 100, new quota becomes 100 (not 150).",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Coupon ID" })
+  @ApiBody({
+    type: ResetQuotaDto,
+    examples: {
+      resetToOriginal: {
+        summary: "Reset to original limit",
+        value: {
+          quota: 200,
+        },
+      },
+      setNewLimit: {
+        summary: "Set new quota limit",
+        value: {
+          quota: 500,
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Quota reset successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Quota reset to 100 successfully" },
+        data: {
+          type: "object",
+          properties: {
+            coupon_id: { type: "number", example: 123 },
+            previous_quota: { type: "number", example: 5, nullable: true },
+            new_quota: { type: "number", example: 100 },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Coupon not found",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 404 },
+        message: { type: "string", example: "Coupon with ID 123 not found" },
+        error: { type: "string", example: "Not Found" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid quota (must be >= 0)",
+    schema: {
+      type: "object",
+      properties: {
+        statusCode: { type: "number", example: 400 },
+        message: {
+          type: "array",
+          items: { type: "string" },
+          example: ["quota must not be less than 0"],
+        },
+        error: { type: "string", example: "Bad Request" },
+      },
+    },
+  })
+  async resetCouponQuota(
+    @Param("id", ParseIntPipe) couponId: number,
+    @Body() dto: ResetQuotaDto,
+  ) {
+    const result = await this.couponService.resetCouponQuota(
+      couponId,
+      dto.quota,
+    );
+    return {
+      success: true,
+      message: `Quota reset to ${dto.quota} successfully`,
+      data: result,
+    };
   }
 }
 

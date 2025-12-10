@@ -163,8 +163,23 @@ export class OrderService {
         );
         
         // Update cart item with reservation token
-        cartItem.preorder_reservation_token = reservationToken;
-        await this.cartItemRepository.save(cartItem);
+        // FIX: Handle cart item save failure - rollback reservation if save fails
+        try {
+          cartItem.preorder_reservation_token = reservationToken;
+          await this.cartItemRepository.save(cartItem);
+        } catch (saveError) {
+          // Release reservation if cart item save fails
+          this.logger.error(
+            `❌ Failed to save cart item with reservation token: ${saveError.message}. Releasing reservation.`
+          );
+          if (cartItem.preorder_campaign_id && reservationToken) {
+            await this.redisCouponService.releaseReservation(
+              cartItem.preorder_campaign_id,
+              reservationToken
+            );
+          }
+          throw saveError;
+        }
       }
 
       // Generate order number
@@ -281,19 +296,30 @@ export class OrderService {
       await this.orderItemRepository.save(orderItems);
 
       // NEW: If preorder, redeem coupon after order is created
+      // FIX: Only redeem for COD orders. Online payment orders will be redeemed on payment success.
       const preorderCartItemsForRedemption = cart.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
 
       for (const cartItem of preorderCartItemsForRedemption) {
         if (cartItem.preorder_reservation_token) {
-          await this.couponService.redeemCoupon({
-            reservation_token: cartItem.preorder_reservation_token,
-            order_id: savedOrder.id,
-            user_id: userId,
-            payment_status: createOrderDto.payment_method === "cod" 
-              ? PaymentStatus.PAID 
-              : PaymentStatus.FAILED, // Will be updated on payment success
-            // Note: idempotency_key is optional but recommended for idempotency
-          });
+          // Only redeem for COD orders immediately
+          if (createOrderDto.payment_method === "cod") {
+            try {
+              await this.couponService.redeemCoupon({
+                reservation_token: cartItem.preorder_reservation_token,
+                order_id: savedOrder.id,
+                user_id: userId,
+                payment_status: PaymentStatus.PAID,
+                // Note: idempotency_key is optional but recommended for idempotency
+              });
+            } catch (redeemError) {
+              // Log error but don't fail order creation
+              // Quota will be restored when reservation expires or on payment failure
+              this.logger.error(
+                `❌ Failed to redeem coupon for COD order: ${redeemError.message}. Order created but coupon not redeemed.`
+              );
+            }
+          }
+          // For online payment, coupon will be redeemed when payment succeeds (in verifyPayment)
         }
       }
 
@@ -364,6 +390,47 @@ export class OrderService {
         `❌ Error creating order: ${error.message}`,
         error.stack,
       );
+      
+      // FIX: Restore quota if reservation was created but order creation failed
+      // Get cart again to check for reservation tokens
+      try {
+        const failedCart = await this.cartRepository
+          .createQueryBuilder("c")
+          .leftJoinAndSelect("c.cart_items", "ci")
+          .leftJoin("c.user", "u")
+          .where("u.id = :userId", { userId })
+          .andWhere("c.is_active = :isActive", { isActive: true })
+          .getOne();
+
+        if (failedCart && failedCart.cart_items) {
+          const preorderItems = failedCart.cart_items.filter(
+            ci => ci.is_preorder && ci.preorder_reservation_token && ci.preorder_campaign_id
+          );
+
+          for (const cartItem of preorderItems) {
+            if (cartItem.preorder_campaign_id && cartItem.preorder_reservation_token) {
+              try {
+                await this.redisCouponService.releaseReservation(
+                  cartItem.preorder_campaign_id,
+                  cartItem.preorder_reservation_token
+                );
+                this.logger.log(
+                  `✅ Restored quota for preorder coupon ${cartItem.preorder_campaign_id} after order creation failure`
+                );
+              } catch (rollbackError) {
+                this.logger.error(
+                  `❌ Failed to restore quota after order creation failure: ${rollbackError.message}`
+                );
+              }
+            }
+          }
+        }
+      } catch (rollbackError) {
+        this.logger.error(
+          `❌ Error during quota rollback after order creation failure: ${rollbackError.message}`
+        );
+      }
+      
       throw error;
     }
   }
@@ -694,12 +761,22 @@ export class OrderService {
           });
 
           if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
-            // Restore quota in Redis
-            await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
-            
-            this.logger.log(
-              `✅ Restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
-            );
+            // FIX: Use releaseReservation instead of incrementQuota to properly clean up reservation
+            if (couponRedemption.reserved_token) {
+              await this.redisCouponService.releaseReservation(
+                couponRedemption.coupon.id,
+                couponRedemption.reserved_token
+              );
+              this.logger.log(
+                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
+              );
+            } else {
+              // Fallback: If no reservation token, restore quota directly
+              await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
+              this.logger.log(
+                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon.id} after order cancellation (no reservation token found)`
+              );
+            }
           }
         }
       }
@@ -790,6 +867,40 @@ export class OrderService {
       // Update payment status
       await this.updatePaymentStatus(order.id, "paid", razorpay_payment_id);
 
+      // FIX: Redeem preorder coupon when payment succeeds for online payments
+      const orderItems = await this.orderItemRepository.find({
+        where: { order: { id: order.id } },
+      });
+
+      for (const orderItem of orderItems) {
+        if (orderItem.is_preorder) {
+          // Find the coupon redemption for this order
+          const couponRedemption = await this.couponRedemptionRepository.findOne({
+            where: { order_id: order.id },
+          });
+
+          if (couponRedemption && couponRedemption.reserved_token) {
+            try {
+              await this.couponService.redeemCoupon({
+                reservation_token: couponRedemption.reserved_token,
+                order_id: order.id,
+                user_id: userId,
+                payment_status: PaymentStatus.PAID,
+              });
+              this.logger.log(
+                `✅ Redeemed preorder coupon for order ${order.order_number} after payment success`
+              );
+            } catch (redeemError) {
+              // Log error but don't fail payment verification
+              // The reservation will expire and quota will be restored
+              this.logger.error(
+                `❌ Failed to redeem coupon after payment success: ${redeemError.message}. Reservation will expire.`
+              );
+            }
+          }
+        }
+      }
+
       // Update order status
       await this.updateOrderStatus(order.id, "confirmed");
 
@@ -851,16 +962,24 @@ export class OrderService {
             relations: ['coupon'],
           });
 
-          if (couponRedemption && couponRedemption.reserved_token) {
-            // Release reservation and restore quota
-            await this.redisCouponService.releaseReservation(
-              couponRedemption.coupon_id,
-              couponRedemption.reserved_token
-            );
-            
-            this.logger.log(
-              `✅ Released reservation for preorder coupon ${couponRedemption.coupon_id} after payment failure`
-            );
+          if (couponRedemption && couponRedemption.coupon_id) {
+            if (couponRedemption.reserved_token) {
+              // Release reservation and restore quota
+              // releaseReservation() always restores quota, even if reservation expired
+              await this.redisCouponService.releaseReservation(
+                couponRedemption.coupon_id,
+                couponRedemption.reserved_token
+              );
+              this.logger.log(
+                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment failure`
+              );
+            } else {
+              // No reservation token - restore quota directly (quota was consumed but no reservation record)
+              await this.redisCouponService.incrementQuota(couponRedemption.coupon_id, 1);
+              this.logger.log(
+                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment failure (no reservation token found)`
+              );
+            }
           }
         }
       }

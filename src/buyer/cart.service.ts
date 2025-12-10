@@ -503,9 +503,20 @@ export class CartService {
       );
     }
 
+    // Ensure campaignId is a number if provided
+    const numericCampaignId = campaignId ? Number(campaignId) : undefined;
+    if (campaignId && (isNaN(numericCampaignId!) || numericCampaignId! <= 0)) {
+      throw new BadRequestException("Invalid campaign_id provided");
+    }
+
+    this.logger.log(
+      `🔍 Validating preorder item: item_id=${itemId}, campaign_id=${numericCampaignId}, store_id=${storeId}, user_id=${userId}`,
+    );
+
     // Find active PREORDER coupon for this item
     const queryBuilder = this.couponRepository
       .createQueryBuilder("coupon")
+      .leftJoinAndSelect("coupon.campaign", "campaign")
       .where("coupon.type = :type", { type: CouponType.PREORDER })
       .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
       .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: itemId.toString() })
@@ -514,17 +525,24 @@ export class CartService {
         { storeId }
       );
 
-    if (campaignId) {
-      queryBuilder.andWhere("coupon.campaign_id = :campaignId", { campaignId });
+    if (numericCampaignId) {
+      queryBuilder.andWhere("coupon.campaign_id = :campaignId", { campaignId: numericCampaignId });
     }
 
     const coupon = await queryBuilder.getOne();
 
     if (!coupon) {
+      this.logger.error(
+        `❌ No preorder coupon found: item_id=${itemId}, campaign_id=${numericCampaignId}, store_id=${storeId}`,
+      );
       throw new BadRequestException(
         "No active preorder campaign found for this item. Please ensure a preorder coupon exists with matching item_id and store_id, and the campaign is currently active.",
       );
     }
+
+    this.logger.log(
+      `✅ Found preorder coupon: coupon_id=${coupon.id}, code=${coupon.code}, campaign_id=${coupon.campaign_id}, global_usage_limit=${coupon.global_usage_limit}`,
+    );
 
     // Check campaign is active (time-based)
     const now = new Date();
@@ -537,8 +555,28 @@ export class CartService {
 
     // Check quota available
     const quota = await this.redisCouponService.getQuota(coupon.id);
-    if (quota !== null && quota <= 0) {
+    
+    // Log quota details for debugging
+    this.logger.log(
+      `🔍 Preorder quota check: coupon_id=${coupon.id}, global_usage_limit=${coupon.global_usage_limit}, current_quota=${quota}`,
+    );
+    
+    // Validate quota
+    if (quota === null && coupon.global_usage_limit) {
+      // Quota not initialized - this should have been done during code generation
+      this.logger.error(
+        `❌ Quota not initialized for coupon ${coupon.id} with global_usage_limit=${coupon.global_usage_limit}. Please initialize quota using the admin API.`,
+      );
+      throw new BadRequestException(
+        "Preorder quota not initialized. Please contact support or use the admin API to initialize quota.",
+      );
+    } else if (quota !== null && quota <= 0) {
       throw new BadRequestException("All preorder slots are taken");
+    } else if (quota === null && !coupon.global_usage_limit) {
+      // No quota limit set - allow unlimited (for testing/development)
+      this.logger.warn(
+        `⚠️ Preorder coupon ${coupon.id} has no global_usage_limit set - allowing unlimited usage`,
+      );
     }
 
     // Check user hasn't already reserved (via coupon user_usage_limit validation)
@@ -737,12 +775,23 @@ export class CartService {
       const cart = cartItem.cart;
       
       // NEW: Release reservation if preorder item has reservation token
-      if (cartItem.is_preorder && cartItem.preorder_reservation_token && cartItem.preorder_campaign_id) {
-        // Release reservation and restore quota
-        await this.redisCouponService.releaseReservation(
-          cartItem.preorder_campaign_id,
-          cartItem.preorder_reservation_token
-        );
+      if (cartItem.is_preorder && cartItem.preorder_campaign_id) {
+        if (cartItem.preorder_reservation_token) {
+          // Release reservation and restore quota
+          // releaseReservation() always restores quota, even if reservation expired
+          await this.redisCouponService.releaseReservation(
+            cartItem.preorder_campaign_id,
+            cartItem.preorder_reservation_token
+          );
+          this.logger.log(
+            `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id}`
+          );
+        } else {
+          // No reservation token - quota was never consumed (item added but checkout never happened)
+          this.logger.log(
+            `ℹ️ Preorder item removed but no reservation token found. Quota was not consumed (item was not checked out).`
+          );
+        }
       }
 
       await this.cartItemRepository.remove(cartItem);
@@ -840,16 +889,28 @@ export class CartService {
         // NEW: Release reservations for preorder items
         if (cartWithItems && cartWithItems.cart_items) {
           const preorderItems = cartWithItems.cart_items.filter(ci => 
-            ci.is_preorder && ci.preorder_reservation_token
+            ci.is_preorder && ci.preorder_campaign_id
           );
 
           for (const cartItem of preorderItems) {
             // Release reservation and restore quota
-            if (cartItem.preorder_campaign_id && cartItem.preorder_reservation_token) {
-              await this.redisCouponService.releaseReservation(
-                cartItem.preorder_campaign_id,
-                cartItem.preorder_reservation_token
-              );
+            if (cartItem.preorder_campaign_id) {
+              if (cartItem.preorder_reservation_token) {
+                // Release reservation and restore quota
+                // releaseReservation() always restores quota, even if reservation expired
+                await this.redisCouponService.releaseReservation(
+                  cartItem.preorder_campaign_id,
+                  cartItem.preorder_reservation_token
+                );
+                this.logger.log(
+                  `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id}`
+                );
+              } else {
+                // No reservation token - quota was never consumed (item added but checkout never happened)
+                this.logger.log(
+                  `ℹ️ Preorder item cleared but no reservation token found. Quota was not consumed (item was not checked out).`
+                );
+              }
             }
           }
         }
