@@ -712,8 +712,10 @@ export class CouponService {
   async reserveCoupon(
     dto: ReserveCouponDto,
   ): Promise<{ reservation_token: string; expires_in_seconds: number }> {
+    // FIX: Load campaign relation since runValidationChecks needs coupon.campaign.status
     const coupon = await this.couponRepository.findOne({
       where: { code: dto.code },
+      relations: ["campaign"], // Load campaign relation
     });
 
     if (!coupon) {
