@@ -11,7 +11,7 @@ export class LocationService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserAddress)
     private readonly userAddressRepository: Repository<UserAddress>,
-  ) {}
+  ) { }
 
   /**
    * Calculate distance between two points using Haversine formula
@@ -34,9 +34,9 @@ export class LocationService {
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(this.toRadians(lat1)) *
-        Math.cos(this.toRadians(lat2)) *
-        Math.sin(dLng / 2) *
-        Math.sin(dLng / 2);
+      Math.cos(this.toRadians(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
@@ -118,33 +118,63 @@ export class LocationService {
    * Formula: d = R * 2 * atan2(√a, √(1-a))
    * where a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
    */
-  buildDistanceQuery(
-    userLat: number,
-    userLng: number,
-    radiusKm: number = 10,
-  ): string {
-    // Calculate the Haversine 'a' value once and reuse
-    const dLat = `radians(sl.gps_lat - ${userLat})`;
-    const dLng = `radians(sl.gps_lng - ${userLng})`;
-    const sinDLatHalf = `sin(${dLat} / 2)`;
-    const sinDLngHalf = `sin(${dLng} / 2)`;
-    const cosUserLat = `cos(radians(${userLat}))`;
-    const cosStoreLat = `cos(radians(sl.gps_lat))`;
+  // buildDistanceQuery(
+  //   userLat: number,
+  //   userLng: number,
+  //   radiusKm: number = 10,
+  // ): string {
+  //   // Calculate the Haversine 'a' value once and reuse
+  //   const dLat = `radians(sl.gps_lat - ${userLat})`;
+  //   const dLng = `radians(sl.gps_lng - ${userLng})`;
+  //   const sinDLatHalf = `sin(${dLat} / 2)`;
+  //   const sinDLngHalf = `sin(${dLng} / 2)`;
+  //   const cosUserLat = `cos(radians(${userLat}))`;
+  //   const cosStoreLat = `cos(radians(sl.gps_lat))`;
 
-    // Haversine 'a' component
-    const haversineA = `(
-      ${sinDLatHalf} * ${sinDLatHalf} +
-      ${cosUserLat} * ${cosStoreLat} *
-      ${sinDLngHalf} * ${sinDLngHalf}
-    )`;
+  //   // Haversine 'a' component
+  //   const haversineA = `(
+  //     ${sinDLatHalf} * ${sinDLatHalf} +
+  //     ${cosUserLat} * ${cosStoreLat} *
+  //     ${sinDLngHalf} * ${sinDLngHalf}
+  //   )`;
 
+  //   return `
+  //     (6371 * 2 * atan2(
+  //       sqrt(${haversineA}),
+  //       sqrt(1 - ${haversineA})
+  //     )) AS distance
+  //   `;
+  // }
+
+  buildDistanceQuery(userLat: number, userLng: number): string {
     return `
-      (6371 * 2 * atan2(
-        sqrt(${haversineA}),
-        sqrt(1 - ${haversineA})
-      )) AS distance
-    `;
+    6371 * 2 * atan2(
+      sqrt(
+        sin(radians(sl.gps_lat - ${userLat})/2)^2 +
+        cos(radians(${userLat})) * cos(radians(sl.gps_lat)) *
+        sin(radians(sl.gps_lng - ${userLng})/2)^2
+      ),
+      sqrt(
+        1 - (
+          sin(radians(sl.gps_lat - ${userLat})/2)^2 +
+          cos(radians(${userLat})) * cos(radians(sl.gps_lat)) *
+          sin(radians(sl.gps_lng - ${userLng})/2)^2
+        )
+      )
+    )
+  `;
   }
+
+  buildDistanceQuerys(): string {
+  return `
+    6371 * acos(
+      cos(radians(:userLat)) * cos(radians(sl.gps_lat)) *
+      cos(radians(sl.gps_lng) - radians(:userLng)) +
+      sin(radians(:userLat)) * sin(radians(sl.gps_lat))
+    )
+  `;
+}
+
 
   /**
    * Build distance filter for WHERE clause using Haversine formula
@@ -154,31 +184,49 @@ export class LocationService {
    * Formula: d = R * 2 * atan2(√a, √(1-a))
    * where a = sin²(Δφ/2) + cos(φ1) * cos(φ2) * sin²(Δλ/2)
    */
-  buildDistanceFilter(
-    userLat: number,
-    userLng: number,
-    radiusKm: number = 10,
-  ): string {
-    // Calculate the Haversine 'a' value once and reuse
-    const dLat = `radians(sl.gps_lat - ${userLat})`;
-    const dLng = `radians(sl.gps_lng - ${userLng})`;
-    const sinDLatHalf = `sin(${dLat} / 2)`;
-    const sinDLngHalf = `sin(${dLng} / 2)`;
-    const cosUserLat = `cos(radians(${userLat}))`;
-    const cosStoreLat = `cos(radians(sl.gps_lat))`;
+  // buildDistanceFilter(
+  //   userLat: number,
+  //   userLng: number,
+  //   radiusKm: number = 10,
+  // ): string {
+  //   // Calculate the Haversine 'a' value once and reuse
+  //   const dLat = `radians(sl.gps_lat - ${userLat})`;
+  //   const dLng = `radians(sl.gps_lng - ${userLng})`;
+  //   const sinDLatHalf = `sin(${dLat} / 2)`;
+  //   const sinDLngHalf = `sin(${dLng} / 2)`;
+  //   const cosUserLat = `cos(radians(${userLat}))`;
+  //   const cosStoreLat = `cos(radians(sl.gps_lat))`;
 
-    // Haversine 'a' component
-    const haversineA = `(
-      ${sinDLatHalf} * ${sinDLatHalf} +
-      ${cosUserLat} * ${cosStoreLat} *
-      ${sinDLngHalf} * ${sinDLngHalf}
-    )`;
+  //   // Haversine 'a' component
+  //   const haversineA = `(
+  //     ${sinDLatHalf} * ${sinDLatHalf} +
+  //     ${cosUserLat} * ${cosStoreLat} *
+  //     ${sinDLngHalf} * ${sinDLngHalf}
+  //   )`;
 
+  //   return `
+  //     (6371 * 2 * atan2(
+  //       sqrt(${haversineA}),
+  //       sqrt(1 - ${haversineA})
+  //     )) <= ${radiusKm}
+  //   `;
+  // }
+  buildDistanceFilter(userLat: number, userLng: number): string {
     return `
-      (6371 * 2 * atan2(
-        sqrt(${haversineA}),
-        sqrt(1 - ${haversineA})
-      )) <= ${radiusKm}
-    `;
+    (6371 * 2 * atan2(
+      sqrt(
+        sin(radians(sl.gps_lat - ${userLat})/2) * sin(radians(sl.gps_lat - ${userLat})/2) +
+        cos(radians(${userLat})) * cos(radians(sl.gps_lat)) *
+        sin(radians(sl.gps_lng - ${userLng})/2) * sin(radians(sl.gps_lng - ${userLng})/2)
+      ),
+      sqrt(
+        1 - (
+          sin(radians(sl.gps_lat - ${userLat})/2) * sin(radians(sl.gps_lat - ${userLat})/2) +
+          cos(radians(${userLat})) * cos(radians(sl.gps_lat)) *
+          sin(radians(sl.gps_lng - ${userLng})/2) * sin(radians(sl.gps_lng - ${userLng})/2)
+        )
+      )
+    )) <= sl.delivery_radius_km
+  `;
   }
 }

@@ -238,12 +238,12 @@ export class BuyerService {
       const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
-        radiusKm,
+        // radiusKm,
       );
       const distanceSubquery = this.locationService.buildDistanceQuery(
         userLat,
         userLng,
-        radiusKm,
+        // radiusKm,
       );
 
       this.logger.log(`🔍 Distance filter: ${distanceFilter}`);
@@ -599,7 +599,7 @@ export class BuyerService {
       const distanceSubquery = this.locationService.buildDistanceQuery(
         userLat,
         userLng,
-        radiusKm,
+        // radiusKm,
       );
 
       const queryBuilder = this.itemRepository
@@ -747,6 +747,8 @@ export class BuyerService {
       // Get user location - prioritize lat/lng from request
       let userLocation;
       if (lat && lng) {
+        console.log('lng: ', lng);
+        console.log('lat: ', lat);
         // Use location from request if provided
         userLocation = {
           lat,
@@ -800,6 +802,7 @@ export class BuyerService {
 
       // Search restaurants
       if (type === "all" || type === "restaurant") {
+        console.log('type: ', type);
         results.restaurants = await this.searchRestaurants(
           query,
           userLocation.lat,
@@ -896,6 +899,37 @@ export class BuyerService {
     }
   }
 
+  private clampUserLocation(lat: number, lng: number) {
+    const NORTH = Number(process.env.MADURAI_BOUND_NORTH);
+    const SOUTH = Number(process.env.MADURAI_BOUND_SOUTH);
+    const EAST = Number(process.env.MADURAI_BOUND_EAST);
+    const WEST = Number(process.env.MADURAI_BOUND_WEST);
+
+    if ([NORTH, SOUTH, EAST, WEST].some(v => isNaN(v))) {
+      throw new Error(
+        "MADURAI BOUND ENV values are missing or invalid. Please set: MADURAI_BOUND_NORTH, MADURAI_BOUND_SOUTH, MADURAI_BOUND_EAST, MADURAI_BOUND_WEST"
+      );
+    }
+
+    if (SOUTH > NORTH || WEST > EAST) {
+      throw new Error("Invalid MADURAI BOUND range: SOUTH>NORTH or WEST>EAST");
+    }
+
+    const isInside =
+      lat >= SOUTH &&
+      lat <= NORTH &&
+      lng >= WEST &&
+      lng <= EAST;
+
+    if (!isInside) {
+      throw new Error(
+        `User location (${lat}, ${lng}) is outside allowed service area bounds.`
+      );
+    }
+
+    return { lat, lng };
+  }
+
   /**
    * Search restaurants with enhanced filters
    */
@@ -917,15 +951,19 @@ export class BuyerService {
     veg_mode?: string
   ) {
     try {
+
+      const { lat: boundedLat, lng: boundedLng } = this.clampUserLocation(userLat, userLng);
+
       const distanceQuery = this.locationService.buildDistanceQuery(
-        userLat,
-        userLng,
-        radius,
+        boundedLat,
+        boundedLng,
+        // radius,
       );
+      console.log('distanceQuery: ', distanceQuery);
       const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
-        radius,
+        // radius,
       );
 
       let queryBuilder = this.storeRepository
@@ -938,7 +976,15 @@ export class BuyerService {
           deliveryType: "Delivery",
         })
         .where("s.status = :status", { status: true })
-        .andWhere(distanceFilter);
+        .andWhere("sl.gps_lat BETWEEN :south AND :north", {
+          south: parseFloat(process.env.MADURAI_BOUND_SOUTH || "9.85"),
+          north: parseFloat(process.env.MADURAI_BOUND_NORTH || "10.00"),
+        })
+        .andWhere("sl.gps_lng BETWEEN :west AND :east", {
+          west: parseFloat(process.env.MADURAI_BOUND_WEST || "78.05"),
+          east: parseFloat(process.env.MADURAI_BOUND_EAST || "78.25"),
+        })
+
 
       // Apply search query
       // NOTE: Extend matching to include item names as well, using partial (LIKE) match
@@ -997,8 +1043,9 @@ export class BuyerService {
           "sl.address_locality as sl_address_locality",
           "sf.contact_phone as sf_contact_phone",
           "sf.contact_email as sf_contact_email",
-          `${distanceQuery}`,
+          // `${distanceQuery}`,
         ])
+        .addSelect(`${distanceQuery}`, "distance")
         .groupBy("s.id, sl.id, sf.id");
 
       // Apply sorting
@@ -1132,10 +1179,13 @@ export class BuyerService {
     favoriteItemIds: Set<number> = new Set(),
   ) {
     try {
+      const { lat: validLat, lng: validLng } =
+        this.clampUserLocation(userLat, userLng);
+
       const distanceSubquery = this.locationService.buildDistanceQuery(
-        userLat,
-        userLng,
-        radius,
+        validLat,
+        validLng,
+        // radius,
       );
 
       let queryBuilder = this.itemRepository
@@ -1149,11 +1199,21 @@ export class BuyerService {
         .leftJoin("ic.category", "c")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, {
-          userLat,
-          userLng,
-          radius,
-        });
+        // .andWhere(`(${distanceSubquery}) <= :radius`, {
+        //   userLat,
+        //   userLng,
+        //   radius,
+        // });
+        .andWhere("sl.gps_lat BETWEEN :south AND :north", {
+          south: Number(process.env.MADURAI_BOUND_SOUTH),
+          north: Number(process.env.MADURAI_BOUND_NORTH),
+        })
+        .andWhere("sl.gps_lng BETWEEN :west AND :east", {
+          west: Number(process.env.MADURAI_BOUND_WEST),
+          east: Number(process.env.MADURAI_BOUND_EAST),
+        })
+      // .andWhere(`${distanceSubquery} <= sl.delivery_radius_km`);
+
 
       // Apply search query
       if (query) {
@@ -1259,7 +1319,15 @@ export class BuyerService {
             id: item.i_id,
             name: item.i_name,
             description: item.i_short_desc,
-            images: item.i_images ? JSON.parse(item.i_images) : [],
+            // images: item.i_images ? JSON.parse(item.i_images) : [],
+            images: (() => {
+              if (!item.i_images) return [];
+              try {
+                return JSON.parse(item.i_images);
+              } catch {
+                return [item.i_images];
+              }
+            })(),
             price: {
               amount: parseFloat(item.p_base_price) || 0,
               currency: item.p_currency || "INR",
@@ -2967,12 +3035,12 @@ export class BuyerService {
       const distanceQuery = this.locationService.buildDistanceQuery(
         userLat,
         userLng,
-        radius,
+        // radius,
       );
       const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
-        radius,
+        // radius,
       );
 
       // Get restaurants with their average ratings
