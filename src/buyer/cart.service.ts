@@ -27,6 +27,9 @@ import { LocationService } from "../shared/services/location.service";
 import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { CouponService } from "../coupon/services/coupon.service";
+import { RedisCouponService } from "../coupon/services/redis-coupon.service";
+import { Coupon } from "../coupon/entities/coupon.entity";
+import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
 
@@ -54,11 +57,14 @@ export class CartService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(Offers)
     private readonly offersRepository: Repository<Offers>,
+    @InjectRepository(Coupon)
+    private readonly couponRepository: Repository<Coupon>,
     @Inject(forwardRef(() => BuyerService))
     private readonly buyerService: BuyerService,
     private readonly locationService: LocationService,
     private readonly deliveryPricingService: DeliveryPricingService,
     private readonly couponService: CouponService,
+    private readonly redisCouponService: RedisCouponService,
     private readonly configService: ConfigService,
   ) { }
 
@@ -198,6 +204,7 @@ export class CartService {
       let cart = await this.cartRepository
         .createQueryBuilder("c")
         .leftJoinAndSelect("c.store", "s")
+        .leftJoinAndSelect("c.cart_items", "ci")
         .leftJoin("c.user", "u")
         .where("u.id = :userId", { userId })
         .andWhere("c.is_active = :isActive", { isActive: true })
@@ -208,6 +215,32 @@ export class CartService {
         throw new BadRequestException(
           "Cannot add items from different restaurants. Please clear your cart first.",
         );
+      }
+
+      // NEW: Validate cart restrictions (preorder vs regular items)
+      if (cart && cart.cart_items && cart.cart_items.length > 0) {
+        const hasPreorderItems = cart.cart_items.some(ci => ci.is_preorder);
+        const isAddingPreorder = addToCartDto.is_preorder === true;
+
+        // Prevent mixing preorder and regular items
+        if (hasPreorderItems && !isAddingPreorder) {
+          throw new BadRequestException(
+            "Cannot add regular items to cart with preorder items. Please clear your cart first."
+          );
+        }
+
+        if (!hasPreorderItems && isAddingPreorder) {
+          throw new BadRequestException(
+            "Cannot add preorder items to cart with regular items. Please clear your cart first."
+          );
+        }
+
+        // Prevent multiple preorder items (only one preorder item allowed per cart)
+        if (hasPreorderItems && isAddingPreorder) {
+          throw new BadRequestException(
+            "Only one preorder item is allowed per cart. Please remove existing preorder item first."
+          );
+        }
       }
 
       if (!cart) {
@@ -269,6 +302,49 @@ export class CartService {
         (itemTotalPrice + customizationPrice).toFixed(2),
       );
 
+      // NEW: Preorder validation and auto-apply coupon
+      // Calculate this AFTER we know the item price, so we can pass correct cart_total
+      let preorderCoupon: Coupon | null = null;
+      if (addToCartDto.is_preorder) {
+        // Validate preorder requirements
+        preorderCoupon = await this.validatePreorderItem(
+          addToCartDto.item_id,
+          addToCartDto.campaign_id,
+          userId,
+          addToCartDto.quantity,
+          addToCartDto.restaurant_id,
+        );
+
+        // Auto-apply preorder coupon to cart
+        // IMPORTANT: Calculate cart total including the new item price for validation
+        if (preorderCoupon && cart) {
+          // Get existing cart items subtotal
+          const existingCartItems = await this.cartItemRepository.find({
+            where: { cart: { id: cart.id } },
+          });
+          const existingSubtotal = existingCartItems.reduce(
+            (sum, item) => sum + Number(item.total_price || 0),
+            0,
+          );
+          
+          // Proposed cart total = existing items + new item
+          const proposedCartTotal = existingSubtotal + totalPrice;
+
+          // Check if cart already has a coupon
+          if (cart.coupon_id && cart.coupon_id !== preorderCoupon.id) {
+            // If cart has different coupon, remove it (preorder takes priority)
+            await this.removeCoupon(userId);
+          }
+
+          // Apply preorder coupon with correct cart total
+          await this.applyCouponWithCartTotal(
+            userId,
+            { coupon_code: preorderCoupon.code },
+            proposedCartTotal,
+          );
+        }
+      }
+
       // if (existingCartItem) {
       //   // Update existing item quantity
       //   existingCartItem.quantity += addToCartDto.quantity;
@@ -282,6 +358,20 @@ export class CartService {
       //   cartItem = await this.cartItemRepository.save(existingCartItem);
       // } 
       if (existingCartItem) {
+        // NEW: Validate preorder status matches
+        if (existingCartItem.is_preorder !== (addToCartDto.is_preorder === true)) {
+          throw new BadRequestException(
+            "Cannot change item type. If this is a preorder item, it must remain a preorder item, and vice versa."
+          );
+        }
+
+        // NEW: Prevent quantity changes for preorder items
+        if (existingCartItem.is_preorder) {
+          throw new BadRequestException(
+            "Preorder items cannot have quantity increased. Only one preorder item is allowed per cart."
+          );
+        }
+
         const newTotalQty = existingCartItem.quantity + addToCartDto.quantity;
 
         // Validate stock limits again after adding
@@ -319,6 +409,8 @@ export class CartService {
           customizations: addToCartDto.customizations || [],
           variants: addToCartDto.variants || [],
           special_instructions: addToCartDto.special_instructions,
+          is_preorder: addToCartDto.is_preorder || false, // NEW
+          preorder_campaign_id: preorderCoupon?.id, // NEW
         });
         cartItem = await this.cartItemRepository.save(cartItem);
       }
@@ -361,6 +453,68 @@ export class CartService {
   }
 
   /**
+   * Validate preorder item before adding to cart
+   * Returns the coupon if valid
+   */
+  private async validatePreorderItem(
+    itemId: number,
+    campaignId: number | undefined,
+    userId: number,
+    quantity: number,
+    storeId: number,
+  ): Promise<Coupon> {
+    // Quantity must be 1 for preorders
+    if (quantity !== 1) {
+      throw new BadRequestException(
+        "Preorder items can only be added with quantity 1",
+      );
+    }
+
+    // Find active PREORDER coupon for this item
+    const queryBuilder = this.couponRepository
+      .createQueryBuilder("coupon")
+      .where("coupon.type = :type", { type: CouponType.PREORDER })
+      .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+      .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: itemId.toString() })
+      .andWhere(
+        "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+        { storeId }
+      );
+
+    if (campaignId) {
+      queryBuilder.andWhere("coupon.campaign_id = :campaignId", { campaignId });
+    }
+
+    const coupon = await queryBuilder.getOne();
+
+    if (!coupon) {
+      throw new BadRequestException(
+        "No active preorder campaign found for this item. Please ensure a preorder coupon exists with matching item_id and store_id, and the campaign is currently active.",
+      );
+    }
+
+    // Check campaign is active (time-based)
+    const now = new Date();
+    if (coupon.start_at && now < coupon.start_at) {
+      throw new BadRequestException("Preorder campaign has not started yet");
+    }
+    if (coupon.end_at && now > coupon.end_at) {
+      throw new BadRequestException("Preorder campaign has ended");
+    }
+
+    // Check quota available
+    const quota = await this.redisCouponService.getQuota(coupon.id);
+    if (quota !== null && quota <= 0) {
+      throw new BadRequestException("All preorder slots are taken");
+    }
+
+    // Check user hasn't already reserved (via coupon user_usage_limit validation)
+    // This will be checked again during checkout
+
+    return coupon; // Return coupon for auto-apply
+  }
+
+  /**
    * Update cart item
    */
   async updateCartItem(userId: number, updateCartItemDto: UpdateCartItemDto) {
@@ -385,6 +539,18 @@ export class CartService {
 
       if (!cartItem) {
         throw new NotFoundException("Cart item not found");
+      }
+
+      // NEW: Prevent quantity changes for preorder items
+      if (cartItem.is_preorder && updateCartItemDto.quantity !== 1) {
+        throw new BadRequestException(
+          "Preorder items cannot have quantity changed. Quantity must be 1."
+        );
+      }
+
+      // If preorder item, force quantity to 1
+      if (cartItem.is_preorder) {
+        updateCartItemDto.quantity = 1;
       }
 
       // Validate restaurant if provided
@@ -535,6 +701,17 @@ export class CartService {
       }
 
       const cartId = cartItem.cart.id;
+      const cart = cartItem.cart;
+      
+      // NEW: Release reservation if preorder item has reservation token
+      if (cartItem.is_preorder && cartItem.preorder_reservation_token && cartItem.preorder_campaign_id) {
+        // Release reservation and restore quota
+        await this.redisCouponService.releaseReservation(
+          cartItem.preorder_campaign_id,
+          cartItem.preorder_reservation_token
+        );
+      }
+
       await this.cartItemRepository.remove(cartItem);
 
       // Check if cart is empty
@@ -545,7 +722,30 @@ export class CartService {
       if (remainingItems === 0) {
         // Deactivate empty cart
         await this.cartRepository.update(cartId, { is_active: false });
+        // Remove coupon if exists
+        if (cart.coupon_id) {
+          await this.removeCoupon(userId);
+        }
       } else {
+        // NEW: Check if any preorder items remain
+        const remainingPreorderItems = await this.cartItemRepository.count({
+          where: { 
+            cart: { id: cartId },
+            is_preorder: true 
+          },
+        });
+
+        // If no preorder items remain, remove coupon
+        if (remainingPreorderItems === 0 && cart.coupon_id) {
+          const coupon = await this.couponRepository.findOne({
+            where: { id: cart.coupon_id },
+          });
+          
+          if (coupon && coupon.type === CouponType.PREORDER) {
+            await this.removeCoupon(userId);
+          }
+        }
+
         // Update cart totals
         await this.updateCartTotals(cartId);
       }
@@ -598,8 +798,36 @@ export class CartService {
         .getOne();
 
       if (cart) {
+        // Load cart items with relations
+        const cartWithItems = await this.cartRepository.findOne({
+          where: { id: cart.id },
+          relations: ["cart_items"],
+        });
+
+        // NEW: Release reservations for preorder items
+        if (cartWithItems && cartWithItems.cart_items) {
+          const preorderItems = cartWithItems.cart_items.filter(ci => 
+            ci.is_preorder && ci.preorder_reservation_token
+          );
+
+          for (const cartItem of preorderItems) {
+            // Release reservation and restore quota
+            if (cartItem.preorder_campaign_id && cartItem.preorder_reservation_token) {
+              await this.redisCouponService.releaseReservation(
+                cartItem.preorder_campaign_id,
+                cartItem.preorder_reservation_token
+              );
+            }
+          }
+        }
+
         // Remove all cart items
         await this.cartItemRepository.delete({ cart: { id: cart.id } });
+
+        // NEW: Remove coupon if exists
+        if (cart.coupon_id) {
+          await this.removeCoupon(userId);
+        }
 
         // Deactivate cart
         await this.cartRepository.update(cart.id, { is_active: false });
@@ -947,23 +1175,47 @@ export class CartService {
       deliveryFee = 0;
     }
 
-    // Calculate tax based on item's tax rate and type
-    let taxAmount = 0;
-    for (const cartItem of cartItems) {
-      if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
-        const itemTax =
-          (Number(cartItem.total_price) * cartItem.item.tax_rate) / 100;
-        taxAmount += itemTax;
-      }
-    }
-    taxAmount = Number(taxAmount.toFixed(2));
-
-    // Get current tip amount (preserve existing tip)
+    // Get current tip amount and discount (preserve existing tip)
     const currentCart = await this.cartRepository.findOne({
       where: { id: cartId },
     });
     const tipAmount = Number(currentCart?.tip_amount || 0);
     const discountAmount = Number(currentCart?.discount_amount || 0);
+
+    // Calculate tax based on item's tax rate and type
+    // IMPORTANT: GST should be calculated on the transaction value (discounted price), not original price
+    // As per GST guidelines, tax is calculated on the amount actually charged to the customer
+    let taxAmount = 0;
+    
+    // Calculate discounted subtotal (transaction value)
+    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
+    
+    // Calculate tax proportionally based on each item's contribution to the discounted subtotal
+    // This ensures tax is calculated on the actual amount charged, not the original price
+    if (discountedSubtotal > 0 && subtotal > 0) {
+      for (const cartItem of cartItems) {
+        if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
+          // Calculate item's share of the discount proportionally
+          const itemPrice = Number(cartItem.total_price);
+          const itemDiscountShare = (itemPrice / subtotal) * discountAmount;
+          const discountedItemPrice = Math.max(0, itemPrice - itemDiscountShare);
+          
+          // Calculate tax on the discounted price (transaction value)
+          const itemTax = (discountedItemPrice * cartItem.item.tax_rate) / 100;
+          taxAmount += itemTax;
+        }
+      }
+    } else {
+      // Fallback: if no discount, calculate tax on original price
+      for (const cartItem of cartItems) {
+        if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
+          const itemTax =
+            (Number(cartItem.total_price) * cartItem.item.tax_rate) / 100;
+          taxAmount += itemTax;
+        }
+      }
+    }
+    taxAmount = Number(taxAmount.toFixed(2));
 
     // Get platform fee configuration
     const platformFeeConfig = this.getPlatformFee();
@@ -1032,10 +1284,28 @@ export class CartService {
         (sum, item) => sum + Number(item.total_price || 0),
         0,
       ) || 0;
-    const deliveryFee = Number(cart.delivery_fee || 0);
+    let deliveryFee = Number(cart.delivery_fee || 0);
     const taxAmount = Number(cart.tax_amount || 0);
-    const discountAmount = Number(cart.discount_amount || 0);
+    let discountAmount = Number(cart.discount_amount || 0);
     const tipAmount = Number(cart.tip_amount || 0);
+
+    // NEW: Handle preorder discount and free delivery
+    if (cart.coupon_id) {
+      const coupon = await this.couponRepository.findOne({
+        where: { id: cart.coupon_id },
+      });
+
+      if (coupon && coupon.type === CouponType.PREORDER) {
+        // If free delivery is included, set delivery fee to 0
+        if (coupon.type_meta?.free_delivery === true) {
+          deliveryFee = 0;
+          // Update cart delivery fee if needed
+          if (cart.delivery_fee !== 0) {
+            await this.cartRepository.update(cart.id, { delivery_fee: 0 });
+          }
+        }
+      }
+    }
 
     // Get platform fee configuration
     const platformFeeConfig = this.getPlatformFee();
@@ -1055,60 +1325,95 @@ export class CartService {
       discountAmount;
 
     // Fetch estimated delivery time if cart has items
-    // NOTE: This is fetched dynamically on every cart summary request to ensure it reflects
-    // the latest user location. When user's address changes, getUserLocation() will return
-    // the updated default address, ensuring estimated_delivery_time is always accurate.
+    // NOTE: For preorder items, use delivery_date from coupon instead of delivery pricing service
     let estimatedDeliveryTime: string | null = null;
     if (cart.cart_items && cart.cart_items.length > 0 && cart.store && cart.user) {
-      try {
-        // Use already loaded relations if available, otherwise fetch them
-        const storeLocations = cart.store.locations || [];
-        let storeLocation = storeLocations.length > 0 ? storeLocations[0] : null;
-
-        // If store locations not loaded, fetch them
-        if (!storeLocation) {
-          const cartWithRelations = await this.cartRepository.findOne({
-            where: { id: cart.id },
-            relations: ["store", "store.locations", "user"],
+      // NEW: Check if cart has preorder items
+      const hasPreorderItems = cart.cart_items.some((item) => item.is_preorder === true);
+      
+      if (hasPreorderItems && cart.coupon_id) {
+        // For preorder, use delivery_date from coupon
+        try {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: cart.coupon_id },
           });
 
-          if (
-            cartWithRelations?.store?.locations &&
-            cartWithRelations.store.locations.length > 0 &&
-            cartWithRelations.user
-          ) {
-            storeLocation = cartWithRelations.store.locations[0];
-            cart.user = cartWithRelations.user; // Update cart.user if needed
+          if (preorderCoupon?.type_meta?.delivery_date) {
+            // Parse delivery_date (supports ISO datetime or date-only)
+            const deliveryDateStr = preorderCoupon.type_meta.delivery_date;
+            const deliveryDate = new Date(deliveryDateStr);
+            
+            if (!isNaN(deliveryDate.getTime())) {
+              // Format as ISO string for response
+              estimatedDeliveryTime = deliveryDate.toISOString();
+              this.logger.log(
+                `📅 Preorder cart: Using delivery_date ${deliveryDateStr} for estimated_delivery_time`,
+              );
+            } else {
+              this.logger.warn(
+                `⚠️ Invalid delivery_date format in preorder coupon: ${deliveryDateStr}`,
+              );
+            }
           }
-        }
-
-        if (storeLocation && cart.user) {
-          const pickupLat = Number(storeLocation.gps_lat);
-          const pickupLng = Number(storeLocation.gps_lng);
-
-          // Get current user location (will return updated default address if address was changed)
-          const userLocation = await this.locationService.getUserLocation(
-            cart.user.id,
-          );
-
-          const deliveryInfo = await this.deliveryPricingService.getDeliveryCharge(
-            pickupLat,
-            pickupLng,
-            Number(userLocation.lat),
-            Number(userLocation.lng),
-          );
-
-          estimatedDeliveryTime = deliveryInfo.estimated_delivery_time;
-
-          this.logger.log(
-            `⏱️ Estimated delivery time fetched for cart ${cart.id}: ${estimatedDeliveryTime || "N/A"}`,
+        } catch (error) {
+          this.logger.warn(
+            `Failed to fetch preorder delivery_date: ${error.message}`,
           );
         }
-      } catch (error) {
-        this.logger.warn(
-          `Failed to fetch estimated delivery time for cart summary: ${error.message}`,
-        );
-        // Continue without estimated delivery time
+      }
+
+      // For regular orders (or if preorder delivery_date not found), use delivery pricing service
+      if (!estimatedDeliveryTime) {
+        try {
+          // Use already loaded relations if available, otherwise fetch them
+          const storeLocations = cart.store.locations || [];
+          let storeLocation = storeLocations.length > 0 ? storeLocations[0] : null;
+
+          // If store locations not loaded, fetch them
+          if (!storeLocation) {
+            const cartWithRelations = await this.cartRepository.findOne({
+              where: { id: cart.id },
+              relations: ["store", "store.locations", "user"],
+            });
+
+            if (
+              cartWithRelations?.store?.locations &&
+              cartWithRelations.store.locations.length > 0 &&
+              cartWithRelations.user
+            ) {
+              storeLocation = cartWithRelations.store.locations[0];
+              cart.user = cartWithRelations.user; // Update cart.user if needed
+            }
+          }
+
+          if (storeLocation && cart.user) {
+            const pickupLat = Number(storeLocation.gps_lat);
+            const pickupLng = Number(storeLocation.gps_lng);
+
+            // Get current user location (will return updated default address if address was changed)
+            const userLocation = await this.locationService.getUserLocation(
+              cart.user.id,
+            );
+
+            const deliveryInfo = await this.deliveryPricingService.getDeliveryCharge(
+              pickupLat,
+              pickupLng,
+              Number(userLocation.lat),
+              Number(userLocation.lng),
+            );
+
+            estimatedDeliveryTime = deliveryInfo.estimated_delivery_time;
+
+            this.logger.log(
+              `⏱️ Estimated delivery time fetched for cart ${cart.id}: ${estimatedDeliveryTime || "N/A"}`,
+            );
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Failed to fetch estimated delivery time for cart summary: ${error.message}`,
+          );
+          // Continue without estimated delivery time
+        }
       }
     }
 
@@ -1163,7 +1468,7 @@ export class CartService {
           `Item ${item.item.id} (${item.item.name}): dietary_preference = ${dietaryPref}, has_customizations = ${hasCustomizations}`,
         );
 
-        return {
+        const itemPayload: any = {
           id: item.id,
           item_id: item.item.id,
           item_name: item.item.name,
@@ -1179,6 +1484,44 @@ export class CartService {
           special_instructions: item.special_instructions,
           is_available: item.item.quantities?.[0]?.available_count > 0,
         };
+
+        // NEW: Add preorder details if this is a preorder item
+        if (item.is_preorder && item.preorder_campaign_id) {
+          try {
+            const preorderCoupon = await this.couponRepository.findOne({
+              where: { id: item.preorder_campaign_id },
+            });
+
+            if (preorderCoupon && preorderCoupon.type_meta) {
+              // Get available slots from Redis
+              let availableSlots = 0;
+              try {
+                const quota = await this.redisCouponService.getQuota(
+                  preorderCoupon.id,
+                );
+                availableSlots = quota || 0;
+              } catch (error) {
+                this.logger.warn(
+                  `Could not fetch quota for coupon ${preorderCoupon.id}: ${error.message}`,
+                );
+              }
+
+              itemPayload.is_preorder = true;
+              itemPayload.preorder_campaign = {
+                id: preorderCoupon.campaign_id,
+                title: preorderCoupon.type_meta.title || "Preorder",
+                delivery_date: preorderCoupon.type_meta.delivery_date,
+                available_slots: availableSlots,
+              };
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Could not fetch preorder coupon ${item.preorder_campaign_id}: ${error.message}`,
+            );
+          }
+        }
+
+        return itemPayload;
       }),
     );
 
@@ -1372,9 +1715,15 @@ export class CartService {
         );
       }
 
+      // Get coupon to set coupon_id
+      const coupon = await this.couponRepository.findOne({
+        where: { code: applyCouponDto.coupon_code },
+      });
+
       // Update cart with coupon details
       cart.coupon_code = applyCouponDto.coupon_code;
       cart.coupon_reservation_token = validation.reservation_token;
+      cart.coupon_id = coupon?.id;
       cart.discount_amount = validation.discount_amount || 0;
 
       // If delivery is waived, set delivery fee to 0
@@ -1420,6 +1769,88 @@ export class CartService {
   }
 
   /**
+   * Apply coupon to cart with a proposed cart total
+   * Used when adding items to cart, so we can validate with the new item included
+   */
+  private async applyCouponWithCartTotal(
+    userId: number,
+    applyCouponDto: ApplyCouponDto,
+    proposedCartTotal: number,
+  ) {
+    try {
+      this.logger.log(
+        `🎟️ Applying coupon ${applyCouponDto.coupon_code} to cart for user ${userId} with proposed cart total: ₹${proposedCartTotal}`,
+      );
+
+      // Get user's active cart
+      const cart = await this.cartRepository
+        .createQueryBuilder("c")
+        .leftJoinAndSelect("c.store", "s")
+        .leftJoin("c.user", "u")
+        .where("u.id = :userId", { userId })
+        .andWhere("c.is_active = :isActive", { isActive: true })
+        .getOne();
+
+      if (!cart) {
+        throw new NotFoundException("Active cart not found");
+      }
+
+      // Get user location for pincode
+      const userLocation = await this.locationService.getUserLocation(userId);
+      const pincode = userLocation?.address?.pincode;
+      if (!pincode) {
+        throw new BadRequestException(
+          "User location (pincode) is required to apply coupon",
+        );
+      }
+
+      // Validate and reserve coupon with proposed cart total
+      const validation = await this.couponService.validateCoupon({
+        code: applyCouponDto.coupon_code,
+        user_id: userId,
+        cart_total: proposedCartTotal, // Use proposed total instead of current cart total
+        pincode: pincode,
+        store_id: cart.store.id,
+        reserve: true, // Reserve immediately
+      });
+
+      if (!validation.valid) {
+        throw new BadRequestException(
+          validation.message || "Invalid coupon code",
+        );
+      }
+
+      // Get coupon to set coupon_id
+      const coupon = await this.couponRepository.findOne({
+        where: { code: applyCouponDto.coupon_code },
+      });
+
+      // Update cart with coupon details
+      cart.coupon_code = applyCouponDto.coupon_code;
+      cart.coupon_reservation_token = validation.reservation_token;
+      cart.coupon_id = coupon?.id;
+      cart.discount_amount = validation.discount_amount || 0;
+
+      // If delivery is waived, set delivery fee to 0
+      if (validation.delivery_waived) {
+        cart.delivery_fee = 0;
+      }
+
+      await this.cartRepository.save(cart);
+
+      this.logger.log(
+        `✅ Preorder coupon applied successfully. Discount: ₹${validation.discount_amount}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error applying preorder coupon: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
    * Remove coupon from cart
    */
   async removeCoupon(userId: number) {
@@ -1445,7 +1876,7 @@ export class CartService {
       if (cart.coupon_reservation_token) {
         try {
           await this.couponService.rollbackCoupon({
-            reservation_token: cart.coupon_reservation_token,
+            reservation_token: cart.coupon_reservation_token as string,
             reason: "Removed by user",
           });
         } catch (error) {

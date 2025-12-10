@@ -38,6 +38,15 @@ export class CartItem {
   @Column({ type: "text", nullable: true })
   special_instructions?: string; // Special instructions for this item
 
+  @Column({ type: "boolean", default: false })
+  is_preorder: boolean; // NEW - Mark as preorder item
+
+  @Column({ type: "bigint", nullable: true })
+  preorder_campaign_id?: number; // NEW - Link to campaign
+
+  @Column({ type: "uuid", nullable: true })
+  preorder_reservation_token?: string; // NEW - Reservation token (set on checkout)
+
   @CreateDateColumn()
   created_at: Date;
 

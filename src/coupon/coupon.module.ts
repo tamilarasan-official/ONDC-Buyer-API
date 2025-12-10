@@ -5,6 +5,7 @@ import { CouponCampaign } from "./entities/coupon-campaign.entity";
 import { Coupon } from "./entities/coupon.entity";
 import { CouponRedemption } from "./entities/coupon-redemption.entity";
 import { CouponCounter } from "./entities/coupon-counter.entity";
+import { Item } from "../item/entities/item.entity";
 import { CouponService } from "./services/coupon.service";
 import { CouponExportService } from "./services/coupon-export.service";
 import { RedisCouponService } from "./services/redis-coupon.service";
@@ -19,6 +20,7 @@ import { PublicCouponController } from "./controllers/public-coupon.controller";
       Coupon,
       CouponRedemption,
       CouponCounter,
+      Item,
     ]),
   ],
   controllers: [AdminCouponController, PublicCouponController],

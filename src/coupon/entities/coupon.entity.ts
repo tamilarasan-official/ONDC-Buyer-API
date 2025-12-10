@@ -20,6 +20,7 @@ export enum CouponType {
   FIRST_ORDER = "first_order",
   NTH_ORDER = "nth_order",
   REFERRAL = "referral",
+  PREORDER = "preorder",
 }
 
 export enum CouponStatus {

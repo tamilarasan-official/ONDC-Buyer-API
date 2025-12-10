@@ -8,6 +8,7 @@ import {
   ValidateNested,
   Min,
   Max,
+  IsBoolean,
 } from "class-validator";
 import { Type } from "class-transformer";
 
@@ -120,6 +121,24 @@ export class AddToCartDto {
   @IsOptional()
   @IsString()
   special_instructions?: string;
+
+  @ApiProperty({
+    description: "Is this a preorder item? If true, quantity must be 1 and campaign_id is required. Preorder coupon will be auto-applied.",
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  is_preorder?: boolean;
+
+  @ApiProperty({
+    description: "Preorder campaign ID",
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  campaign_id?: number;
 }
 
 export class UpdateCartItemDto {

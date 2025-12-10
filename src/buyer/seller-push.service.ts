@@ -5,6 +5,7 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { Order } from "../order/entities/order.entity";
 import { Item } from "../item/entities/item.entity";
+import { Coupon } from "../coupon/entities/coupon.entity";
 
 @Injectable()
 export class SellerPushService {
@@ -14,6 +15,8 @@ export class SellerPushService {
     private readonly httpService: HttpService,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(Coupon)
+    private readonly couponRepository: Repository<Coupon>,
   ) {}
 
   /**
@@ -72,12 +75,37 @@ export class SellerPushService {
     const items: any[] = [];
 
     for (const orderItem of orderItems) {
-      // Add main item
-      items.push({
+      // Build base item object
+      const itemPayload: any = {
         product_id: orderItem.item.reference_id,
         quantity: orderItem.quantity,
         price: Number(orderItem.unit_price || 0).toFixed(2),
-      });
+      };
+
+      // NEW: Add preorder details if this is a preorder item
+      if (orderItem.is_preorder && orderItem.preorder_campaign_id) {
+        try {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: orderItem.preorder_campaign_id },
+          });
+
+          if (preorderCoupon && preorderCoupon.type_meta) {
+            itemPayload.is_preorder = true;
+            itemPayload.preorder_campaign = {
+              campaign_id: preorderCoupon.campaign_id,
+              title: preorderCoupon.type_meta.title || "Preorder",
+              delivery_date: preorderCoupon.type_meta.delivery_date,
+              free_delivery: preorderCoupon.type_meta.free_delivery === true,
+            };
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Could not fetch preorder coupon ${orderItem.preorder_campaign_id}: ${error.message}`,
+          );
+        }
+      }
+
+      items.push(itemPayload);
 
       // Add customization items if they exist
       if (orderItem.customizations && Array.isArray(orderItem.customizations)) {
@@ -147,10 +175,40 @@ export class SellerPushService {
       longitude: order.delivery_longitude,
     };
 
-    return {
+    // Build items array with preorder details
+    const items = await this.buildItemsArray(order.order_items);
+
+    // NEW: Check if order has any preorder items
+    const hasPreorderItems = order.order_items?.some(
+      (item) => item.is_preorder === true,
+    );
+
+    // NEW: Get preorder delivery date (from first preorder item)
+    let preorderDeliveryDate: string | undefined;
+    if (hasPreorderItems) {
+      const firstPreorderItem = order.order_items?.find(
+        (item) => item.is_preorder === true && item.preorder_campaign_id,
+      );
+      if (firstPreorderItem?.preorder_campaign_id) {
+        try {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: firstPreorderItem.preorder_campaign_id },
+          });
+          if (preorderCoupon?.type_meta?.delivery_date) {
+            preorderDeliveryDate = preorderCoupon.type_meta.delivery_date;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Could not fetch preorder delivery date: ${error.message}`,
+          );
+        }
+      }
+    }
+
+    const payload: any = {
       contact_number: order.user.phone_number.toString(),
       store_id: order.store.reference_id,
-      items: await this.buildItemsArray(order.order_items),
+      items: items,
       billing: {
         name: order.user.name || "Customer",
         email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
@@ -191,8 +249,29 @@ export class SellerPushService {
       total_amount: Number(order.total_amount).toFixed(2),
       external_order_no: order.order_number,
       order_through: "tazty",
-      collected_by:order.payment_method === "cod" ? "seller" : "buyer",
+      collected_by: order.payment_method === "cod" ? "seller" : "buyer",
     };
+
+    // NEW: Add preorder fields if order has preorder items
+    if (hasPreorderItems) {
+      payload.order_type = "preorder";
+      if (preorderDeliveryDate) {
+        payload.preorder_delivery_date = preorderDeliveryDate;
+        // Use preorder delivery_date for pickup_date_time and estimated_delivery_time
+        payload.pickup_date_time = preorderDeliveryDate;
+      }
+      // Include estimated_delivery_time from order (which was set based on preorder delivery_date)
+      if (order.estimated_delivery_time) {
+        payload.estimated_delivery_time = order.estimated_delivery_time.toISOString();
+      }
+    } else {
+      // For regular orders, use order's estimated_delivery_time if available
+      if (order.estimated_delivery_time) {
+        payload.estimated_delivery_time = order.estimated_delivery_time.toISOString();
+      }
+    }
+
+    return payload;
   }
 
   /**

@@ -344,6 +344,25 @@ export class MenuItemDto {
     type: "boolean",
   })
   is_favorite: boolean;
+
+  @ApiProperty({ 
+    description: "Is preorder available for this item?", 
+    required: false 
+  })
+  is_preorder_available?: boolean;
+
+  @ApiProperty({ 
+    description: "Preorder campaign info (if available)", 
+    required: false 
+  })
+  preorder_campaign?: {
+    id: number;
+    title: string;
+    available_slots: number;
+    delivery_date: string;
+    discount_amount: number;
+    free_delivery: boolean;
+  };
 }
 
 export class MenuCategoryDto {

@@ -225,7 +225,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Search restaurants, items, and categories",
     description:
-      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters.",
+      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters. Items include preorder campaign info if available.",
   })
   @ApiResponse({
     status: 200,
@@ -384,7 +384,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get restaurant details",
     description:
-      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM).",
+      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM). Items include preorder campaign info if available.",
   })
   @ApiParam({
     name: "id",
@@ -489,7 +489,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get restaurant menu",
     description:
-      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search.",
+      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search. Items include preorder campaign info if available.",
   })
   @ApiParam({
     name: "id",
@@ -639,7 +639,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get user cart",
     description:
-      "Retrieve the current user's active cart with all items, pricing, and summary.",
+      "Retrieve the current user's active cart with all items, pricing, and summary. Includes preorder campaign info for preorder items.",
   })
   @ApiResponse({
     status: 200,
@@ -669,7 +669,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Add item to cart",
     description:
-      "Add an item to the user's cart with quantity, customizations, and variants.",
+      "Add an item to the user's cart with quantity, customizations, and variants. Supports preorder items with is_preorder flag. Preorder items automatically apply coupon and have quantity=1 restriction.",
   })
   @ApiBody({ type: AddToCartDto })
   @ApiResponse({
@@ -712,7 +712,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Update cart item",
     description:
-      "Update quantity, customizations, or variants of an existing cart item.",
+      "Update quantity, customizations, or variants of an existing cart item. Note: Preorder items cannot have quantity changed (must be 1).",
   })
   @ApiBody({ type: UpdateCartItemDto })
   @ApiResponse({
@@ -1033,7 +1033,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Create order from cart",
     description:
-      "Create a new order from the user's active cart with delivery address and payment method.",
+      "Create a new order from the user's active cart with delivery address and payment method. For preorder items, validates campaign status, reserves quota, and redeems coupon automatically.",
   })
   @ApiBody({ type: CreateOrderDto })
   @ApiResponse({

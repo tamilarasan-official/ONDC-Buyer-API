@@ -53,6 +53,8 @@ import { Dish } from "../dish/entities/dish.entity";
 import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-restaurant.entity";
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
+import { Coupon } from "../coupon/entities/coupon.entity";
+import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
 
 @Module({
   imports: [
@@ -92,6 +94,8 @@ import { Banner } from "../banner/entities/banner.entity";
       UserFavoriteRestaurant,
       UserFavoriteItem,
       Banner,
+      Coupon,
+      CouponRedemption,
     ]),
     HttpModule.register({
       timeout: 10000,

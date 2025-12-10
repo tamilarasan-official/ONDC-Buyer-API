@@ -37,6 +37,12 @@ export class OrderItem {
   @Column({ type: "text", nullable: true })
   special_instructions: string; // Special instructions for this item
 
+  @Column({ type: "boolean", default: false })
+  is_preorder: boolean; // NEW - Mark as preorder item
+
+  @Column({ type: "bigint", nullable: true })
+  preorder_campaign_id?: number; // NEW - Link to campaign
+
   @CreateDateColumn()
   created_at: Date;
 }

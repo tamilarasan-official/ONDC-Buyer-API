@@ -57,9 +57,10 @@ export class GenerateCodesDto {
   length?: number;
 
   @ApiProperty({
-    description: "Coupon type",
+    description: "Coupon type. Options: flat (₹ discount), percent (% discount), free_delivery, first_order, nth_order, referral, preorder",
     enum: CouponType,
     example: CouponType.PERCENT,
+    enumName: "CouponType",
   })
   @IsNotEmpty()
   @IsEnum(CouponType)
@@ -76,9 +77,10 @@ export class GenerateCodesDto {
   value: number;
 
   @ApiProperty({
-    description: "Value type",
+    description: "Value type. Use 'percent' for percentage discount, 'rupees' for flat discount",
     enum: ValueType,
     example: ValueType.PERCENT,
+    enumName: "ValueType",
   })
   @IsNotEmpty()
   @IsEnum(ValueType)
@@ -161,9 +163,14 @@ export class GenerateCodesDto {
   preview?: boolean;
 
   @ApiProperty({
-    description: "Type-specific metadata (JSON)",
+    description: "Type-specific metadata (JSON). Required fields vary by coupon type:\n" +
+      "- preorder: { item_id: number, title: string, delivery_date: string (ISO datetime: YYYY-MM-DDTHH:mm:ssZ or YYYY-MM-DD HH:mm:ss), free_delivery?: boolean }\n" +
+      "- nth_order: { nth: number }\n" +
+      "- free_delivery: { delivery_fee_cap?: number }\n" +
+      "- referral: { referrer_bonus?: number, referee_bonus?: number }",
     example: { nth: 3 },
     required: false,
+    type: Object,
   })
   @IsOptional()
   type_meta?: Record<string, any>;

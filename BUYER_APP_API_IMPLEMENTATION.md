@@ -996,9 +996,31 @@ Authorization: Bearer <jwt_token>
             }
           ],
           "variants": [],
-          "special_instructions": "Extra cheese"
+          "special_instructions": "Extra cheese",
+          "is_preorder": false
+        },
+        {
+          "id": 2,
+          "item_id": 956,
+          "item_name": "Chicken 65 Biriyani",
+          "quantity": 1,
+          "unit_price": 150.00,
+          "total_price": 15.00,
+          "customizations": [],
+          "variants": [],
+          "special_instructions": null,
+          "is_preorder": true,
+          "preorder_campaign": {
+            "campaign_id": 2,
+            "title": "12 O Clock - Preorder Briyani",
+            "delivery_date": "2025-02-11",
+            "available_slots": 10,
+            "free_delivery": true
+          }
         }
       ],
+      "has_preorder_items": true,
+      "preorder_delivery_date": "2025-02-11",
       "tracking": [
         {
           "status": "pending",
@@ -1030,6 +1052,11 @@ Authorization: Bearer <jwt_token>
   }
 }
 ```
+
+**Note:** For orders containing preorder items:
+- Items with `is_preorder: true` include a `preorder_campaign` object with campaign details
+- The order response includes `has_preorder_items: true` and `preorder_delivery_date` at the root level
+- `available_slots` in `preorder_campaign` shows remaining slots from Redis quota
 
 ### **4. Cancel Order**
 ```bash

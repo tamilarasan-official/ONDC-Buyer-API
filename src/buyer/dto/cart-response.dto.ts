@@ -143,6 +143,17 @@ export class CartItemResponseDto {
     type: "boolean",
   })
   is_available: boolean;
+
+  @ApiProperty({ description: "Is this a preorder item?", required: false })
+  is_preorder?: boolean;
+
+  @ApiProperty({ description: "Preorder campaign info", required: false })
+  preorder_campaign?: {
+    id: number;
+    title: string;
+    delivery_date: string;
+    available_slots: number;
+  };
 }
 
 export class CartSummaryDto {

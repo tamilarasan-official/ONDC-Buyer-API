@@ -145,17 +145,165 @@ export class AdminCouponController {
   @ApiOperation({
     summary: "Generate coupon codes",
     description:
-      "Generate unique coupon codes for a campaign. Supports preview mode to see first 10 codes.",
+      "Generate unique coupon codes for a campaign. Supports preview mode to see first 10 codes. Use different examples below for different coupon types (percent, flat, preorder, etc.).",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
-  @ApiBody({ type: GenerateCodesDto })
+  @ApiBody({
+    type: GenerateCodesDto,
+    description: "Coupon generation parameters",
+    examples: {
+      percentDiscount: {
+        summary: "Percent Discount Coupon",
+        description: "Generate 100 codes with 20% discount, max ₹500",
+        value: {
+          count: 100,
+          prefix: "SUMMER",
+          length: 8,
+          type: "percent",
+          value: 20,
+          value_type: "percent",
+          max_discount_amount: 500,
+          min_cart_value: 500,
+          expires_at: "2025-12-31T23:59:59Z",
+          start_at: "2025-01-01T00:00:00Z",
+          user_usage_limit: 1,
+          global_usage_limit: 1000,
+          preview: false,
+        },
+      },
+      flatDiscount: {
+        summary: "Flat Discount Coupon",
+        description: "Generate 50 codes with ₹100 flat discount",
+        value: {
+          count: 50,
+          prefix: "FLAT100",
+          length: 8,
+          type: "flat",
+          value: 100,
+          value_type: "rupees",
+          min_cart_value: 300,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 500,
+          preview: false,
+        },
+      },
+      preorderCoupon: {
+        summary: "Preorder Coupon",
+        description: "Generate preorder coupon codes with item-specific discount",
+        value: {
+          count: 200,
+          prefix: "PREORDER",
+          length: 8,
+          type: "preorder",
+          value: 15,
+          value_type: "percent",
+          max_discount_amount: 300,
+          min_cart_value: 0,
+          expires_at: "2025-12-31T23:59:59Z",
+          start_at: "2025-01-01T00:00:00Z",
+          user_usage_limit: 1,
+          global_usage_limit: 200,
+          preview: false,
+          type_meta: {
+            item_id: 123,
+            title: "Special Preorder Offer",
+            delivery_date: "2025-02-15T12:00:00Z",
+            free_delivery: true,
+          },
+        },
+      },
+      freeDelivery: {
+        summary: "Free Delivery Coupon",
+        description: "Generate free delivery coupon codes",
+        value: {
+          count: 500,
+          prefix: "FREEDEL",
+          length: 8,
+          type: "free_delivery",
+          value: 0,
+          value_type: "rupees",
+          min_cart_value: 200,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 5000,
+          preview: false,
+          type_meta: {
+            delivery_fee_cap: 50,
+          },
+        },
+      },
+      nthOrder: {
+        summary: "Nth Order Coupon",
+        description: "Generate coupon for 3rd order discount",
+        value: {
+          count: 1000,
+          prefix: "3RDORDER",
+          length: 8,
+          type: "nth_order",
+          value: 25,
+          value_type: "percent",
+          max_discount_amount: 1000,
+          min_cart_value: 0,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: null,
+          preview: false,
+          type_meta: {
+            nth: 3,
+          },
+        },
+      },
+      previewMode: {
+        summary: "Preview Mode",
+        description: "Preview first 10 codes before generating full batch",
+        value: {
+          count: 1000,
+          prefix: "TEST",
+          length: 8,
+          type: "percent",
+          value: 10,
+          value_type: "percent",
+          max_discount_amount: 200,
+          min_cart_value: 100,
+          preview: true,
+        },
+      },
+    },
+  })
   @ApiResponse({
     status: 201,
     description: "Codes generated successfully",
     schema: {
-      example: {
-        codes: ["SUMMER-ABC12345", "SUMMER-XYZ67890"],
-        preview: false,
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Codes generated successfully" },
+        data: {
+          type: "object",
+          properties: {
+            codes: {
+              type: "array",
+              items: { type: "string" },
+              example: ["SUMMER-ABC12345", "SUMMER-XYZ67890", "SUMMER-DEF45678"],
+            },
+            preview: { type: "boolean", example: false },
+            count: { type: "number", example: 100 },
+            campaign_id: { type: "number", example: 1 },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Invalid parameters",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "max_discount_amount is required for percent type" },
+        error: { type: "string", example: "BAD_REQUEST" },
       },
     },
   })

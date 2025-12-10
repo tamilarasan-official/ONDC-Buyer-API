@@ -37,6 +37,9 @@ import { StoreCloseTimings } from "../store/entities/store-close-timings.entity"
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
+import { Coupon } from "../coupon/entities/coupon.entity";
+import { RedisCouponService } from "../coupon/services/redis-coupon.service";
+import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
 
 @Injectable()
 export class BuyerService {
@@ -87,6 +90,9 @@ export class BuyerService {
     private readonly favoriteItemRepository: Repository<UserFavoriteItem>,
     @InjectRepository(Banner)
     private readonly bannerRepository: Repository<Banner>,
+    @InjectRepository(Coupon)
+    private readonly couponRepository: Repository<Coupon>,
+    private readonly redisCouponService: RedisCouponService,
     private readonly locationService: LocationService,
   ) { }
 
@@ -1287,6 +1293,11 @@ export class BuyerService {
         }),
       );
 
+      // NEW: Enrich items with preorder info
+      for (const item of itemsWithData) {
+        await this.enrichItemWithPreorderInfo(item, item.store.id);
+      }
+
       return itemsWithData;
     } catch (error) {
       this.logger.error(
@@ -1294,6 +1305,59 @@ export class BuyerService {
         error.stack,
       );
       return [];
+    }
+  }
+
+  /**
+   * Enrich item with preorder campaign info
+   */
+  private async enrichItemWithPreorderInfo(
+    item: any,
+    storeId: number
+  ): Promise<void> {
+    try {
+      // Find active PREORDER coupon for this item
+      const preorderCoupon = await this.couponRepository
+        .createQueryBuilder("coupon")
+        .where("coupon.type = :type", { type: CouponType.PREORDER })
+        .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+        .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.id.toString() })
+        .andWhere(
+          "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+          { storeId }
+        )
+        .getOne();
+
+      if (!preorderCoupon) return;
+
+      // Check if campaign is active (time-based)
+      const now = new Date();
+      const isActive = 
+        (!preorderCoupon.start_at || now >= preorderCoupon.start_at) &&
+        (!preorderCoupon.end_at || now <= preorderCoupon.end_at);
+
+      if (!isActive) return;
+
+      // Get available slots
+      const quota = await this.redisCouponService.getQuota(preorderCoupon.id);
+      const availableSlots = quota !== null ? quota : preorderCoupon.global_usage_limit || 0;
+
+      if (availableSlots > 0) {
+        item.is_preorder_available = true;
+        item.preorder_campaign = {
+          id: preorderCoupon.campaign_id || preorderCoupon.id,
+          title: preorderCoupon.type_meta?.title || "Preorder",
+          available_slots: availableSlots,
+          delivery_date: preorderCoupon.type_meta?.delivery_date,
+          discount_amount: preorderCoupon.value || 0,
+          free_delivery: preorderCoupon.type_meta?.free_delivery === true,
+        };
+      }
+    } catch (error) {
+      // Log error but don't fail the request
+      this.logger.warn(
+        `Failed to enrich item ${item.id} with preorder info: ${error.message}`,
+      );
     }
   }
 
@@ -2315,7 +2379,7 @@ export class BuyerService {
           (attr) => attr.attribute_code === "veg_nonveg",
         );
 
-        processedItems.push({
+        const menuItem = {
           id: item.id,
           name: item.name,
           short_desc: item.short_desc,
@@ -2346,7 +2410,12 @@ export class BuyerService {
           hsn_code: item.hsn_code || null,
           is_favorite: favoriteItemIds.has(item.id),
           dietary_preference: dietaryAttr?.attribute_value || null,
-        });
+        };
+
+        // NEW: Enrich with preorder info
+        await this.enrichItemWithPreorderInfo(menuItem, restaurantId);
+
+        processedItems.push(menuItem);
       }
 
       // Process variant groups
@@ -2447,7 +2516,7 @@ export class BuyerService {
           };
         });
 
-        processedItems.push({
+        const variantMenuItem = {
           id: baseItem.id,
           name: variantGroupCategory?.name || variantGroup.name,
           short_desc: variantGroupCategory?.description || baseItem.short_desc || "",
@@ -2477,7 +2546,12 @@ export class BuyerService {
           hsn_code: baseItem.hsn_code || null,
           is_favorite: favoriteItemIds.has(baseItem.id),
           dietary_preference: dietaryAttr?.attribute_value || null,
-        });
+        };
+
+        // NEW: Enrich with preorder info
+        await this.enrichItemWithPreorderInfo(variantMenuItem, restaurantId);
+
+        processedItems.push(variantMenuItem);
       }
 
       return processedItems;
@@ -3865,7 +3939,7 @@ export class BuyerService {
             ? this.normalizeItemTimings(allItemTimings)
             : [];
 
-          processedItems.push({
+          const restaurantItem = {
             id: item.id,
             name: item.name,
             description: item.short_desc || "",
@@ -3888,7 +3962,12 @@ export class BuyerService {
             customizations: customizations,
             is_favorite: favoriteItemIds.has(item.id),
             timings: itemTimings,
-          });
+          };
+
+          // NEW: Enrich with preorder info
+          await this.enrichItemWithPreorderInfo(restaurantItem, restaurantId);
+
+          processedItems.push(restaurantItem);
         }
 
         // Process variant groups
@@ -3999,7 +4078,7 @@ export class BuyerService {
             };
           });
 
-          processedItems.push({
+          const variantRestaurantItem = {
             id: baseItem.id,
             name: variantGroupCategory?.name || variantGroup.name,
             description: variantGroupCategory?.description || baseItem.short_desc || "",
@@ -4022,7 +4101,12 @@ export class BuyerService {
             attribute_options: variantAttributeOptions,
             variants: variants,
             is_favorite: favoriteItemIds.has(baseItem.id),
-          });
+          };
+
+          // NEW: Enrich with preorder info
+          await this.enrichItemWithPreorderInfo(variantRestaurantItem, restaurantId);
+
+          processedItems.push(variantRestaurantItem);
         }
 
         // Sort items by rating (highest first)

@@ -97,6 +97,33 @@ export class OrderItemResponseDto {
     required: false,
   })
   special_instructions?: string;
+
+  @ApiProperty({
+    description: "Is this a preorder item?",
+    example: false,
+    type: "boolean",
+    required: false,
+  })
+  is_preorder?: boolean;
+
+  @ApiProperty({
+    description: "Preorder campaign details (only present if is_preorder is true)",
+    example: {
+      campaign_id: 2,
+      title: "12 O Clock - Preorder Briyani",
+      delivery_date: "2025-02-11",
+      available_slots: 10,
+      free_delivery: true,
+    },
+    required: false,
+  })
+  preorder_campaign?: {
+    campaign_id: number;
+    title: string;
+    delivery_date: string;
+    available_slots: number;
+    free_delivery: boolean;
+  };
 }
 
 export class OrderTrackingResponseDto {
@@ -448,6 +475,21 @@ export class OrderDataDto {
     download_url: string | null;
     data_url: string | null;
   };
+
+  @ApiProperty({
+    description: "Does this order contain preorder items?",
+    example: false,
+    type: "boolean",
+    required: false,
+  })
+  has_preorder_items?: boolean;
+
+  @ApiProperty({
+    description: "Preorder delivery date (only present if has_preorder_items is true)",
+    example: "2025-02-11",
+    required: false,
+  })
+  preorder_delivery_date?: string;
 }
 
 export class CreateOrderResponseDto {

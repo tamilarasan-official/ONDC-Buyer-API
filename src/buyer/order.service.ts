@@ -32,6 +32,12 @@ import {
   SellerStatusUpdateDto,
   CancelReasonDto,
 } from "./dto/seller-status-update.dto";
+import { Coupon } from "../coupon/entities/coupon.entity";
+import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
+import { CouponService } from "../coupon/services/coupon.service";
+import { RedisCouponService } from "../coupon/services/redis-coupon.service";
+import { CouponType } from "../coupon/entities/coupon.entity";
+import { PaymentStatus } from "../coupon/dto/redeem-coupon.dto";
 
 @Injectable()
 export class OrderService {
@@ -60,6 +66,12 @@ export class OrderService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(ItemCustomizationGroups)
     private readonly itemCustomizationGroupsRepository: Repository<ItemCustomizationGroups>,
+    @InjectRepository(CouponRedemption)
+    private readonly couponRedemptionRepository: Repository<CouponRedemption>,
+    @InjectRepository(Coupon)
+    private readonly couponRepository: Repository<Coupon>,
+    private readonly couponService: CouponService,
+    private readonly redisCouponService: RedisCouponService,
     private readonly razorpayService: RazorpayService,
     private readonly notificationService: NotificationService,
     private readonly sellerPushService: SellerPushService,
@@ -97,6 +109,58 @@ export class OrderService {
         throw new NotFoundException("Delivery address not found");
       }
 
+      // NEW: Re-validate preorder campaigns before checkout
+      const preorderCartItems = cart.cart_items.filter(ci => ci.is_preorder);
+      
+      if (preorderCartItems.length > 0) {
+        if (preorderCartItems.length > 1) {
+          throw new BadRequestException(
+            "Multiple preorder items found in cart. Only one preorder item is allowed."
+          );
+        }
+
+        // Re-validate campaign status and quota
+        const cartItem = preorderCartItems[0];
+        const coupon = await this.couponRepository.findOne({
+          where: {
+            type: CouponType.PREORDER,
+            id: cartItem.preorder_campaign_id || undefined,
+          },
+        });
+
+        if (!coupon) {
+          throw new BadRequestException(
+            `Preorder campaign not found for item ${cartItem.item.id}`
+          );
+        }
+
+        // Re-validate campaign is active (time-based)
+        const now = new Date();
+        if (coupon.start_at && now < coupon.start_at) {
+          throw new BadRequestException("Preorder campaign has not started yet");
+        }
+        if (coupon.end_at && now > coupon.end_at) {
+          throw new BadRequestException("Preorder campaign has ended");
+        }
+
+        // Re-validate quota
+        const quota = await this.redisCouponService.getQuota(coupon.id);
+        if (quota !== null && quota <= 0) {
+          throw new BadRequestException("All preorder slots are taken");
+        }
+
+        // Reserve the single preorder item before creating order
+        const reservationToken = await this.reservePreorderFromCart(
+          userId,
+          cartItem,
+          deliveryAddress.pincode,
+        );
+        
+        // Update cart item with reservation token
+        cartItem.preorder_reservation_token = reservationToken;
+        await this.cartItemRepository.save(cartItem);
+      }
+
       // Generate order number
       const orderNumber = this.generateOrderNumber();
 
@@ -107,6 +171,60 @@ export class OrderService {
           : "pending_payment";
       const paymentStatus =
         createOrderDto.payment_method === "cod" ? "pending" : "pending";
+
+      // NEW: Calculate estimated delivery time - use preorder delivery date if order has preorder items
+      let estimatedDeliveryTime: Date;
+      if (preorderCartItems.length > 0) {
+        // Get preorder delivery date from coupon
+        const preorderCartItem = preorderCartItems[0];
+        const preorderCoupon = await this.couponRepository.findOne({
+          where: {
+            type: CouponType.PREORDER,
+            id: preorderCartItem.preorder_campaign_id || undefined,
+          },
+        });
+
+        if (preorderCoupon?.type_meta?.delivery_date) {
+          // Parse delivery_date which includes both date and time
+          // Supports formats: "2025-02-11T12:00:00Z", "2025-02-11 12:00:00", "2025-02-11T12:00:00"
+          const deliveryDateTimeStr = preorderCoupon.type_meta.delivery_date;
+          
+          // Try to parse as ISO datetime string
+          estimatedDeliveryTime = new Date(deliveryDateTimeStr);
+          
+          // Validate the parsed date
+          if (isNaN(estimatedDeliveryTime.getTime())) {
+            // If parsing fails, try to parse as date-only and default to noon
+            const dateOnlyMatch = deliveryDateTimeStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+            if (dateOnlyMatch) {
+              const [, year, month, day] = dateOnlyMatch.map(Number);
+              estimatedDeliveryTime = new Date(year, month - 1, day, 12, 0, 0);
+              this.logger.warn(
+                `⚠️ Could not parse delivery_date time, using date with default 12:00 PM: ${deliveryDateTimeStr}`,
+              );
+            } else {
+              // Fallback to default calculation
+              estimatedDeliveryTime = this.calculateEstimatedDeliveryTime();
+              this.logger.warn(
+                `⚠️ Invalid delivery_date format, using default estimated delivery time: ${deliveryDateTimeStr}`,
+              );
+            }
+          } else {
+            this.logger.log(
+              `📅 Preorder order: Using delivery date/time ${deliveryDateTimeStr} for estimated delivery time`,
+            );
+          }
+        } else {
+          // Fallback to default calculation if delivery_date not found
+          estimatedDeliveryTime = this.calculateEstimatedDeliveryTime();
+          this.logger.warn(
+            `⚠️ Preorder coupon found but delivery_date not set, using default estimated delivery time`,
+          );
+        }
+      } else {
+        // Regular order - use default calculation
+        estimatedDeliveryTime = this.calculateEstimatedDeliveryTime();
+      }
 
       const order = this.orderRepository.create({
         order_number: orderNumber,
@@ -133,7 +251,7 @@ export class OrderService {
         payment_method: createOrderDto.payment_method,
         payment_status: paymentStatus,
         notes: createOrderDto.notes,
-        estimated_delivery_time: this.calculateEstimatedDeliveryTime(),
+        estimated_delivery_time: estimatedDeliveryTime,
       });
 
       const savedOrder = await this.orderRepository.save(order);
@@ -148,10 +266,30 @@ export class OrderService {
           total_price: cartItem.total_price,
           customizations: cartItem.customizations,
           variants: cartItem.variants,
+          special_instructions: cartItem.special_instructions, // Include special instructions
+          is_preorder: cartItem.is_preorder || false, // NEW
+          preorder_campaign_id: cartItem.preorder_campaign_id, // NEW
         }),
       );
 
       await this.orderItemRepository.save(orderItems);
+
+      // NEW: If preorder, redeem coupon after order is created
+      const preorderCartItemsForRedemption = cart.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
+
+      for (const cartItem of preorderCartItemsForRedemption) {
+        if (cartItem.preorder_reservation_token) {
+          await this.couponService.redeemCoupon({
+            reservation_token: cartItem.preorder_reservation_token,
+            order_id: savedOrder.id,
+            user_id: userId,
+            payment_status: createOrderDto.payment_method === "cod" 
+              ? PaymentStatus.PAID 
+              : PaymentStatus.FAILED, // Will be updated on payment success
+            // Note: idempotency_key is optional but recommended for idempotency
+          });
+        }
+      }
 
       // Create initial tracking entry
       const trackingMessage =
@@ -535,6 +673,31 @@ export class OrderService {
         status: "cancelled",
       });
 
+      // NEW: Restore quota for preorder items
+      const orderItems = await this.orderItemRepository.find({
+        where: { order: { id: orderId } },
+        relations: ['item'],
+      });
+
+      for (const orderItem of orderItems) {
+        if (orderItem.is_preorder) {
+          // Find the coupon redemption for this order
+          const couponRedemption = await this.couponRedemptionRepository.findOne({
+            where: { order_id: orderId },
+            relations: ['coupon'],
+          });
+
+          if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
+            // Restore quota in Redis
+            await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
+            
+            this.logger.log(
+              `✅ Restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
+            );
+          }
+        }
+      }
+
       // Create tracking entry
       await this.createOrderTracking(
         orderId,
@@ -667,6 +830,34 @@ export class OrderService {
 
       // Update payment status to failed
       await this.updatePaymentStatus(order.id, "failed");
+
+      // NEW: Release reservations for preorder items on payment failure
+      const orderItems = await this.orderItemRepository.find({
+        where: { order: { id: orderId } },
+        relations: ['item'],
+      });
+
+      for (const orderItem of orderItems) {
+        if (orderItem.is_preorder) {
+          // Find the coupon redemption for this order
+          const couponRedemption = await this.couponRedemptionRepository.findOne({
+            where: { order_id: orderId },
+            relations: ['coupon'],
+          });
+
+          if (couponRedemption && couponRedemption.reserved_token) {
+            // Release reservation and restore quota
+            await this.redisCouponService.releaseReservation(
+              couponRedemption.coupon_id,
+              couponRedemption.reserved_token
+            );
+            
+            this.logger.log(
+              `✅ Released reservation for preorder coupon ${couponRedemption.coupon_id} after payment failure`
+            );
+          }
+        }
+      }
 
       // Keep order in pending_payment status so user can retry
       await this.createOrderTracking(
@@ -940,14 +1131,14 @@ export class OrderService {
    * Format order data for response
    */
   private async formatOrderData(order: Order) {
-    // Format order items with customizations
+    // Format order items with customizations and preorder details
     const formattedItems = await Promise.all(
       (order.order_items || []).map(async (item) => {
         const formattedCustomizations = await this.formatCustomizations(
           item.customizations || [],
         );
 
-        return {
+        const itemPayload: any = {
           id: item.id,
           item_id: item.item.id,
           item_name: item.item.name,
@@ -960,10 +1151,76 @@ export class OrderService {
           variants: item.variants || [],
           special_instructions: item.special_instructions,
         };
+
+        // NEW: Add preorder details if this is a preorder item
+        if (item.is_preorder && item.preorder_campaign_id) {
+          try {
+            const preorderCoupon = await this.couponRepository.findOne({
+              where: { id: item.preorder_campaign_id },
+            });
+
+            if (preorderCoupon && preorderCoupon.type_meta) {
+              // Get available slots from Redis
+              let availableSlots = 0;
+              try {
+                const quota = await this.redisCouponService.getQuota(
+                  preorderCoupon.id,
+                );
+                availableSlots = quota || 0;
+              } catch (error) {
+                this.logger.warn(
+                  `Could not fetch quota for coupon ${preorderCoupon.id}: ${error.message}`,
+                );
+              }
+
+              itemPayload.is_preorder = true;
+              itemPayload.preorder_campaign = {
+                campaign_id: preorderCoupon.campaign_id,
+                title: preorderCoupon.type_meta.title || "Preorder",
+                delivery_date: preorderCoupon.type_meta.delivery_date,
+                available_slots: availableSlots,
+                free_delivery: preorderCoupon.type_meta.free_delivery === true,
+              };
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Could not fetch preorder coupon ${item.preorder_campaign_id}: ${error.message}`,
+            );
+          }
+        }
+
+        return itemPayload;
       }),
     );
 
-    return {
+    // NEW: Check if order has any preorder items
+    const hasPreorderItems = order.order_items?.some(
+      (item) => item.is_preorder === true,
+    );
+
+    // NEW: Get preorder delivery date (from first preorder item)
+    let preorderDeliveryDate: string | undefined;
+    if (hasPreorderItems) {
+      const firstPreorderItem = order.order_items?.find(
+        (item) => item.is_preorder === true && item.preorder_campaign_id,
+      );
+      if (firstPreorderItem?.preorder_campaign_id) {
+        try {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: firstPreorderItem.preorder_campaign_id },
+          });
+          if (preorderCoupon?.type_meta?.delivery_date) {
+            preorderDeliveryDate = preorderCoupon.type_meta.delivery_date;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `Could not fetch preorder delivery date: ${error.message}`,
+          );
+        }
+      }
+    }
+
+    const orderData: any = {
       id: order.id,
       order_number: order.order_number,
       status: order.status,
@@ -1055,6 +1312,16 @@ export class OrderService {
             : null,
       },
     };
+
+    // NEW: Add preorder fields if order has preorder items
+    if (hasPreorderItems) {
+      orderData.has_preorder_items = true;
+      if (preorderDeliveryDate) {
+        orderData.preorder_delivery_date = preorderDeliveryDate;
+      }
+    }
+
+    return orderData;
   }
 
   /**
@@ -1227,5 +1494,40 @@ export class OrderService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Reserve preorder item from cart
+   */
+  private async reservePreorderFromCart(
+    userId: number,
+    cartItem: CartItem,
+    pincode: string,
+  ): Promise<string> {
+    // Find PREORDER coupon
+    const coupon = await this.couponRepository.findOne({
+      where: {
+        type: CouponType.PREORDER,
+        id: cartItem.preorder_campaign_id || undefined,
+      },
+    });
+
+    if (!coupon) {
+      throw new BadRequestException(
+        `Preorder campaign not found for item ${cartItem.item.id}`,
+      );
+    }
+
+    // Reserve coupon using correct DTO structure
+    const reservation = await this.couponService.reserveCoupon({
+      code: coupon.code,
+      user_id: userId,
+      store_id: cartItem.cart.store.id,
+      cart_total: cartItem.total_price,
+      pincode: pincode, // Required field
+    });
+
+    // reserveCoupon returns { reservation_token, expires_in_seconds }
+    return reservation.reservation_token;
   }
 }

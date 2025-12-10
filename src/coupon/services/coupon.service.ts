@@ -21,6 +21,7 @@ import {
   RedemptionStatus,
 } from "../entities/coupon-redemption.entity";
 import { CouponCounter } from "../entities/coupon-counter.entity";
+import { Item } from "../../item/entities/item.entity";
 import { RedisCouponService } from "./redis-coupon.service";
 import { CreateCampaignDto } from "../dto/create-campaign.dto";
 import { UpdateCampaignDto } from "../dto/update-campaign.dto";
@@ -46,6 +47,8 @@ export class CouponService {
     private readonly redemptionRepository: Repository<CouponRedemption>,
     @InjectRepository(CouponCounter)
     private readonly counterRepository: Repository<CouponCounter>,
+    @InjectRepository(Item)
+    private readonly itemRepository: Repository<Item>,
     private readonly redisCouponService: RedisCouponService,
     private readonly dataSource: DataSource,
   ) {}
@@ -140,6 +143,68 @@ export class CouponService {
     ) {
       throw new BadRequestException(
         "Percent coupons must have max_discount_amount > 0",
+      );
+    }
+
+    // NEW: Validate preorder coupon specific fields
+    if (dto.type === CouponType.PREORDER) {
+      if (!dto.type_meta) {
+        throw new BadRequestException(
+          "type_meta is required for preorder coupons",
+        );
+      }
+
+      // Validate item_id exists
+      if (!dto.type_meta.item_id) {
+        throw new BadRequestException(
+          "item_id is required in type_meta for preorder coupons",
+        );
+      }
+
+      const itemId = Number(dto.type_meta.item_id);
+      if (isNaN(itemId) || itemId <= 0) {
+        throw new BadRequestException(
+          "item_id must be a valid positive number",
+        );
+      }
+
+      const item = await this.itemRepository.findOne({
+        where: { id: itemId },
+      });
+
+      if (!item) {
+        throw new BadRequestException(
+          `Item with ID ${itemId} not found`,
+        );
+      }
+
+      // Validate delivery_date exists
+      if (!dto.type_meta.delivery_date) {
+        throw new BadRequestException(
+          "delivery_date is required in type_meta for preorder coupons",
+        );
+      }
+
+      // Parse delivery_date
+      const deliveryDate = new Date(dto.type_meta.delivery_date);
+      if (isNaN(deliveryDate.getTime())) {
+        throw new BadRequestException(
+          "delivery_date must be a valid ISO datetime string",
+        );
+      }
+
+      // Validate delivery_date >= expires_at (or end_at)
+      if (dto.expires_at) {
+        const expiresAt = new Date(dto.expires_at);
+        if (deliveryDate < expiresAt) {
+          throw new BadRequestException(
+            `delivery_date (${dto.type_meta.delivery_date}) must be after or equal to expires_at (${dto.expires_at})`,
+          );
+        }
+      }
+
+      this.logger.log(
+        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}`,
       );
     }
 
@@ -484,6 +549,24 @@ export class CouponService {
       }
     }
 
+    // PREORDER-specific validations
+    if (coupon.type === CouponType.PREORDER) {
+      // Validate item_id matches (if provided in DTO)
+      if (coupon.type_meta?.item_id && (dto as any).item_id) {
+        if (coupon.type_meta.item_id !== (dto as any).item_id) {
+          return {
+            valid: false,
+            reason_code: "INVALID_ITEM",
+            message: "This preorder is not for this item",
+          };
+        }
+      }
+
+      // NOTE: Cart can only contain preorder items OR regular items, not both
+      // This validation is handled in CartService.addToCart()
+      // Preorder coupon only applies when cart contains preorder items
+    }
+
     return { valid: true };
   }
 
@@ -544,6 +627,25 @@ export class CouponService {
         } else {
           discountAmount = Math.min(coupon.value || 0, cartTotal);
         }
+        break;
+
+      case CouponType.PREORDER:
+        // Preorder supports both flat and percentage discounts
+        if (coupon.value_type === ValueType.PERCENT) {
+          // Percentage discount with optional max cap
+          const percentDiscount = (cartTotal * (coupon.value || 0)) / 100;
+          discountAmount = Math.min(
+            percentDiscount,
+            coupon.max_discount_amount || Infinity,
+          );
+        } else {
+          // Flat discount (value_type === ValueType.RUPEES)
+          // Fixed rupee amount off the item price
+          discountAmount = Math.min(coupon.value || 0, cartTotal);
+        }
+
+        // Check if free delivery is included
+        deliveryWaived = coupon.type_meta?.free_delivery === true;
         break;
 
       default:
