@@ -40,6 +40,7 @@ import { VegMode } from "../shared/enums/veg-mode.enum";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
+import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 
 @Injectable()
 export class BuyerService {
@@ -94,6 +95,7 @@ export class BuyerService {
     private readonly couponRepository: Repository<Coupon>,
     private readonly redisCouponService: RedisCouponService,
     private readonly locationService: LocationService,
+    private readonly appOperationHoursService: AppOperationHoursService,
   ) { }
 
   /**
@@ -149,7 +151,7 @@ export class BuyerService {
       this.logger.log(
         `🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`,
       );
-      const [restaurantsResult, whatsOnYourMind, promotionalBanner] =
+      const [restaurantsResult, whatsOnYourMind, promotionalBanner, appOperationStatus] =
         await Promise.all([
           this.getFeaturedRestaurants(
             userLocation.lat,
@@ -162,10 +164,14 @@ export class BuyerService {
           ),
           this.getWhatsOnYourMind(vegMode),
           this.getPromotionalBanner(),
+          Promise.resolve(this.appOperationHoursService.checkAppOperationStatus()),
         ]);
 
       this.logger.log(
         `📊 Results - Restaurants: ${restaurantsResult.restaurants.length}/${restaurantsResult.total}, Dishes: ${whatsOnYourMind.length}`,
+      );
+      this.logger.log(
+        `🕐 App operation status: ${appOperationStatus.isOpen ? "OPEN" : "CLOSED"} - ${appOperationStatus.message}`,
       );
 
       const data = {
@@ -179,6 +185,12 @@ export class BuyerService {
         },
         whats_on_your_mind: whatsOnYourMind,
         promotional_banner: promotionalBanner,
+        app_operation_status: {
+          is_open: appOperationStatus.isOpen,
+          reason: appOperationStatus.reason,
+          message: appOperationStatus.message,
+          next_open_time: appOperationStatus.nextOpenTime || null,
+        },
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);
@@ -869,6 +881,9 @@ export class BuyerService {
         results.categories.length;
       const totalPages = Math.ceil(totalResults / limit);
 
+      // Get app operation status
+      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+
       return {
         success: true,
         message: "Search completed successfully",
@@ -893,6 +908,12 @@ export class BuyerService {
             type,
             sort_by,
             sort_order,
+          },
+          app_operation_status: {
+            is_open: appOperationStatus.isOpen,
+            reason: appOperationStatus.reason,
+            message: appOperationStatus.message,
+            next_open_time: appOperationStatus.nextOpenTime || null,
           },
         },
       };
@@ -1650,6 +1671,15 @@ export class BuyerService {
 
       this.logger.log(`✅ Restaurant details retrieved successfully`);
 
+      // Get app operation status
+      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+      restaurantDetails.app_operation_status = {
+        is_open: appOperationStatus.isOpen,
+        reason: appOperationStatus.reason,
+        message: appOperationStatus.message,
+        next_open_time: appOperationStatus.nextOpenTime || null,
+      };
+
       return {
         success: true,
         message: "Restaurant details retrieved successfully",
@@ -2207,6 +2237,9 @@ export class BuyerService {
       );
       const totalCategories = categories.length;
 
+      // Get app operation status
+      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+
       const menuData = {
         restaurant_id: restaurant.id,
         restaurant_name: restaurant.name,
@@ -2221,6 +2254,12 @@ export class BuyerService {
           min_price: menuParams.min_price,
           max_price: menuParams.max_price,
           dietary_preference: menuParams.dietary_preference,
+        },
+        app_operation_status: {
+          is_open: appOperationStatus.isOpen,
+          reason: appOperationStatus.reason,
+          message: appOperationStatus.message,
+          next_open_time: appOperationStatus.nextOpenTime || null,
         },
       };
 

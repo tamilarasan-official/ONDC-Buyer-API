@@ -32,6 +32,7 @@ import { Coupon } from "../coupon/entities/coupon.entity";
 import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
+import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 
 @Injectable()
 export class CartService {
@@ -66,6 +67,7 @@ export class CartService {
     private readonly couponService: CouponService,
     private readonly redisCouponService: RedisCouponService,
     private readonly configService: ConfigService,
+    private readonly appOperationHoursService: AppOperationHoursService,
   ) { }
 
   /**
@@ -161,6 +163,10 @@ export class CartService {
           "Item not found in the specified restaurant",
         );
       }
+
+      // NEW: Validate app operation hours before allowing cart operations
+      // This is separate from restaurant timings - it's a global app-level control
+      this.appOperationHoursService.validateAppIsOpen();
 
       // if (
       //   !item.quantities?.[0] ||

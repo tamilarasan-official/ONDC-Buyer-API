@@ -21,6 +21,7 @@ import { RazorpayService } from "./razorpay.service";
 import { NotificationService } from "./notification.service";
 import { SellerPushService } from "./seller-push.service";
 import { SellerStatusService } from "../shared/services/seller-status.service";
+import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import {
   CreateOrderDto,
   CreatePaymentDto,
@@ -76,6 +77,7 @@ export class OrderService {
     private readonly notificationService: NotificationService,
     private readonly sellerPushService: SellerPushService,
     private readonly sellerStatusService: SellerStatusService,
+    private readonly appOperationHoursService: AppOperationHoursService,
   ) {}
 
   /**
@@ -99,6 +101,10 @@ export class OrderService {
       if (!cart || !cart.cart_items || cart.cart_items.length === 0) {
         throw new BadRequestException("Cart is empty");
       }
+
+      // NEW: Validate app operation hours before allowing order creation
+      // This is separate from restaurant timings - it's a global app-level control
+      this.appOperationHoursService.validateAppIsOpen();
 
       // Get delivery address
       const deliveryAddress = await this.userAddressRepository.findOne({

@@ -108,7 +108,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get home page data",
     description:
-      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, and promotional banners (dynamically fetched from banner management system - returns all active banners ordered by sequence). Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants.',
+      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, promotional banners (dynamically fetched from banner management system - returns all active banners ordered by sequence), and app operation hours status. Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants. App operation status indicates if ordering is currently available.',
   })
   @ApiQuery({
     name: "lat",
@@ -225,7 +225,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Search restaurants, items, and categories",
     description:
-      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters. Items include preorder campaign info if available.",
+      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters. Items include preorder campaign info if available. Response includes app operation hours status.",
   })
   @ApiResponse({
     status: 200,
@@ -384,7 +384,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get restaurant details",
     description:
-      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM). Items include preorder campaign info if available.",
+      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM). Items include preorder campaign info if available. Response includes app operation hours status.",
   })
   @ApiParam({
     name: "id",
@@ -489,7 +489,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Get restaurant menu",
     description:
-      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search. Items include preorder campaign info if available.",
+      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search. Items include preorder campaign info if available. Response includes app operation hours status.",
   })
   @ApiParam({
     name: "id",
@@ -669,7 +669,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Add item to cart",
     description:
-      "Add an item to the user's cart with quantity, customizations, and variants. Supports preorder items with is_preorder flag. Preorder items automatically apply coupon and have quantity=1 restriction.",
+      "Add an item to the user's cart with quantity, customizations, and variants. Supports preorder items with is_preorder flag. Preorder items automatically apply coupon and have quantity=1 restriction. Note: Orders are not accepted when app operation hours are closed.",
   })
   @ApiBody({ type: AddToCartDto })
   @ApiResponse({
@@ -698,6 +698,23 @@ export class BuyerController {
         success: { type: "boolean", example: false },
         message: { type: "string", example: "Item not found" },
         error: { type: "string", example: "NOT_FOUND" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 503,
+    description: "Service unavailable - App operation hours are closed",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 503 },
+        message: {
+          type: "string",
+          example: "Restaurants not accepting orders right now. Ordering will be available again at 8 AM.",
+        },
+        timestamp: { type: "string", example: "2025-01-15T22:30:00.000Z" },
+        path: { type: "string", example: "/api/buyer/cart/add" },
       },
     },
   })
@@ -1033,7 +1050,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Create order from cart",
     description:
-      "Create a new order from the user's active cart with delivery address and payment method. For preorder items, validates campaign status, reserves quota, and redeems coupon automatically.",
+      "Create a new order from the user's active cart with delivery address and payment method. For preorder items, validates campaign status, reserves quota, and redeems coupon automatically. Note: Orders are not accepted when app operation hours are closed.",
   })
   @ApiBody({ type: CreateOrderDto })
   @ApiResponse({
@@ -1062,6 +1079,23 @@ export class BuyerController {
         success: { type: "boolean", example: false },
         message: { type: "string", example: "Delivery address not found" },
         error: { type: "string", example: "NOT_FOUND" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 503,
+    description: "Service unavailable - App operation hours are closed",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 503 },
+        message: {
+          type: "string",
+          example: "Restaurants not accepting orders right now. Ordering will be available again at 8 AM.",
+        },
+        timestamp: { type: "string", example: "2025-01-15T22:30:00.000Z" },
+        path: { type: "string", example: "/api/buyer/orders" },
       },
     },
   })

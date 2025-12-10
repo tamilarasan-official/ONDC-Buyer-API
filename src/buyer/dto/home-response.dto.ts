@@ -520,6 +520,40 @@ export class HomeDataDto {
     type: [PromotionalBannerDto],
   })
   promotional_banner: PromotionalBannerDto[];
+
+  @ApiProperty({
+    description: "App operation hours status (indicates if app is currently accepting orders)",
+    type: "object",
+    properties: {
+      is_open: {
+        type: "boolean",
+        example: true,
+        description: "Whether the app is currently accepting orders",
+      },
+      reason: {
+        type: "string",
+        example: "OPEN",
+        description: "Status reason: OPEN, OUTSIDE_OPERATING_HOURS, HOURS_NOT_ENABLED, etc.",
+      },
+      message: {
+        type: "string",
+        example: "App is currently accepting orders",
+        description: "User-friendly status message",
+      },
+      next_open_time: {
+        type: "string",
+        example: "0800",
+        nullable: true,
+        description: "Next opening time in HHMM format (null if app is open or hours not configured)",
+      },
+    },
+  })
+  app_operation_status: {
+    is_open: boolean;
+    reason?: string;
+    message?: string;
+    next_open_time?: string | null;
+  };
 }
 
 export class HomeResponseDto {
