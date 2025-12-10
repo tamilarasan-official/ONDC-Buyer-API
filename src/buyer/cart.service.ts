@@ -802,12 +802,34 @@ export class CartService {
       });
 
       if (remainingItems === 0) {
+        // FIX: Clear coupon fields BEFORE deactivating cart
+        // If we deactivate first, removeCoupon() won't find the active cart
+        if (cart.coupon_id || cart.coupon_code || cart.coupon_reservation_token) {
+          // Rollback reservation if exists
+          if (cart.coupon_reservation_token) {
+            try {
+              await this.couponService.rollbackCoupon({
+                reservation_token: cart.coupon_reservation_token as string,
+                reason: "Cart emptied",
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Failed to rollback coupon reservation: ${error.message}`,
+              );
+            }
+          }
+          
+          // Clear coupon fields directly (don't call removeCoupon since cart will be deactivated)
+          await this.cartRepository.update(cartId, {
+            coupon_code: undefined,
+            coupon_reservation_token: undefined,
+            coupon_id: undefined,
+            discount_amount: 0,
+          });
+        }
+        
         // Deactivate empty cart
         await this.cartRepository.update(cartId, { is_active: false });
-        // Remove coupon if exists
-        if (cart.coupon_id) {
-          await this.removeCoupon(userId);
-        }
       } else {
         // NEW: Check if any preorder items remain
         const remainingPreorderItems = await this.cartItemRepository.count({
