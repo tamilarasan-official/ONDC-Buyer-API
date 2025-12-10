@@ -755,7 +755,7 @@ export class NotificationService {
   private getOrderNotificationTitle(status: string): string {
     const titles = {
       pending: "Order Placed Successfully",
-      pending_payment: "Order Placed Successfully",
+      created: "Order Placed Successfully",
       confirmed: "Order Placed Successfully",
       preparing: "Order Being Prepared",
       out_for_delivery: "Order Out for Delivery",
@@ -776,8 +776,8 @@ export class NotificationService {
     const baseMessages = {
       pending:
         "Your order has been placed successfully and is being processed.",
-      pending_payment:
-        "Your order has been placed successfully. Please complete the payment.",
+      created:
+        "Your order has been created successfully. Please complete the payment.",
       confirmed: "Your order has been placed successfully and confirmed by the restaurant.",
       preparing: "Your order is being prepared with care.",
       out_for_delivery:

@@ -193,7 +193,7 @@ export class OrderService {
       const orderStatus =
         createOrderDto.payment_method === "cod"
           ? "confirmed"
-          : "pending_payment";
+          : "created";
       const paymentStatus =
         createOrderDto.payment_method === "cod" ? "pending" : "pending";
 
@@ -571,6 +571,9 @@ export class OrderService {
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
           .where("u.id = :userId", { userId })
+          .andWhere("o.status NOT IN (:...excludedStatuses)", { 
+            excludedStatuses: ["pending", "created"] 
+          })
           .orderBy("o.created_at", "DESC")
           .skip((page - 1) * limit)
           .take(limit)
@@ -579,6 +582,9 @@ export class OrderService {
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
           .where("u.id = :userId", { userId })
+          .andWhere("o.status NOT IN (:...excludedStatuses)", { 
+            excludedStatuses: ["pending", "created"] 
+          })
           .getCount(),
       ]);
 
@@ -685,8 +691,8 @@ export class OrderService {
         throw new BadRequestException("Order is already paid");
       }
 
-      if (order.status !== "pending_payment") {
-        throw new BadRequestException("Order is not in pending payment status");
+      if (order.status !== "created") {
+        throw new BadRequestException("Order is not in created status");
       }
 
       // FIX: Log order total_amount before payment initiation to debug amount mismatch
@@ -1092,11 +1098,11 @@ export class OrderService {
         }
       }
 
-      // Keep order in pending_payment status so user can retry
+      // Keep order in created status so user can retry
       // Log payment failure without notification (user already knows from payment UI)
       await this.createOrderTracking(
         order.id,
-        "pending_payment",
+        "created",
         `Payment failed: ${failureReason || "Unknown error"}. You can retry payment.`,
         undefined,
         undefined,
@@ -1134,7 +1140,7 @@ export class OrderService {
         .leftJoinAndSelect("oi.item", "i")
         .leftJoin("o.user", "u")
         .where("u.id = :userId", { userId })
-        .andWhere("o.status = :status", { status: "pending_payment" })
+        .andWhere("o.status = :status", { status: "created" })
         .andWhere("o.payment_status = :paymentStatus", {
           paymentStatus: "pending",
         })
