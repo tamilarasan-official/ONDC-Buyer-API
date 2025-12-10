@@ -412,6 +412,15 @@ export class CouponService {
     }
 
     // Check campaign status
+    // FIX: Add null check for campaign (defensive programming)
+    if (!coupon.campaign) {
+      return {
+        valid: false,
+        reason_code: "CAMPAIGN_NOT_FOUND",
+        message: "Campaign not found for this coupon",
+      };
+    }
+    
     if (coupon.campaign.status !== CampaignStatus.ACTIVE) {
       return {
         valid: false,
