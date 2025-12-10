@@ -335,7 +335,7 @@ export class OrderService {
         }
       }
 
-      // Create initial tracking entry
+      // Create initial tracking entry (without notification - logged only)
       const trackingMessage =
         createOrderDto.payment_method === "cod"
           ? "Order placed successfully - Cash on Delivery"
@@ -344,6 +344,11 @@ export class OrderService {
         savedOrder.id,
         orderStatus,
         trackingMessage,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true, // skipNotification = true
       );
 
       // Deactivate cart
@@ -1059,10 +1064,16 @@ export class OrderService {
       }
 
       // Keep order in pending_payment status so user can retry
+      // Log payment failure without notification (user already knows from payment UI)
       await this.createOrderTracking(
         order.id,
         "pending_payment",
         `Payment failed: ${failureReason || "Unknown error"}. You can retry payment.`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true, // skipNotification = true
       );
 
       return {
@@ -1176,6 +1187,19 @@ export class OrderService {
         `📋 Updating order status for order ${orderId}: ${status}`,
       );
 
+      // Check if status has actually changed to prevent duplicate notifications
+      const currentOrder = await this.orderRepository.findOne({ 
+        where: { id: orderId },
+        select: ['id', 'status']
+      });
+      
+      if (currentOrder && currentOrder.status === status) {
+        this.logger.log(
+          `⏭️ Order ${orderId} already has status ${status}, skipping duplicate notification`,
+        );
+        return;
+      }
+
       await this.orderRepository.update(orderId, { status });
 
       // Push order to seller if status is confirmed
@@ -1243,6 +1267,7 @@ export class OrderService {
     trackingUrl?: string,
     deliveryCode?: string,
     cancelReason?: CancelReasonDto,
+    skipNotification?: boolean,
   ) {
     // Extract only code, reason, and cancelled_by from cancelReason
     const cancelReasonToSave = cancelReason
@@ -1271,32 +1296,38 @@ export class OrderService {
 
     const savedTracking = await this.orderTrackingRepository.save(tracking);
 
-    // Create notification for order status update
-    try {
-      const order = await this.orderRepository.findOne({
-        where: { id: orderId },
-        relations: ["user", "store"],
-      });
+    // Create notification for order status update (unless skipped)
+    if (!skipNotification) {
+      try {
+        const order = await this.orderRepository.findOne({
+          where: { id: orderId },
+          relations: ["user", "store"],
+        });
 
-      if (order && order.user) {
-        await this.notificationService.createOrderNotification(
-          order.user.id,
-          orderId,
-          status,
-          message,
-          {
-            order_number: order.order_number,
-            restaurant_name: order.store?.name,
-            estimated_time: this.calculateEstimatedDeliveryTime(),
-          },
+        if (order && order.user) {
+          await this.notificationService.createOrderNotification(
+            order.user.id,
+            orderId,
+            status,
+            message,
+            {
+              order_number: order.order_number,
+              restaurant_name: order.store?.name,
+              estimated_time: this.calculateEstimatedDeliveryTime(),
+            },
+          );
+        }
+      } catch (notificationError) {
+        this.logger.error(
+          `Failed to create notification for order tracking: ${notificationError.message}`,
+          notificationError.stack,
         );
+        // Don't throw error - notification failure shouldn't break order tracking
       }
-    } catch (notificationError) {
-      this.logger.error(
-        `Failed to create notification for order tracking: ${notificationError.message}`,
-        notificationError.stack,
+    } else {
+      this.logger.log(
+        `📝 Tracking logged without notification: Order ${orderId} | Status: ${status} | Message: "${message}"`,
       );
-      // Don't throw error - notification failure shouldn't break order tracking
     }
 
     return savedTracking;
