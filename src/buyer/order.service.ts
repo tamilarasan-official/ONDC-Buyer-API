@@ -20,6 +20,7 @@ import { ItemCustomizationGroups } from "../item/entities/item-customization-gro
 import { RazorpayService } from "./razorpay.service";
 import { NotificationService } from "./notification.service";
 import { SellerPushService } from "./seller-push.service";
+import { CartService } from "./cart.service";
 import { SellerStatusService } from "../shared/services/seller-status.service";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import {
@@ -76,6 +77,7 @@ export class OrderService {
     private readonly razorpayService: RazorpayService,
     private readonly notificationService: NotificationService,
     private readonly sellerPushService: SellerPushService,
+    private readonly cartService: CartService,
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
   ) {}
@@ -351,7 +353,8 @@ export class OrderService {
         true, // skipNotification = true
       );
 
-      // Deactivate cart
+      // Note: Cart will be cleared after order confirmation (COD) or payment success (online)
+      // For now, just deactivate it to prevent modifications during payment
       await this.cartRepository.update(cart.id, { is_active: false });
 
       // 🚀 PUSH ORDER TO SELLER IMMEDIATELY
@@ -383,8 +386,21 @@ export class OrderService {
       // Get complete order data
       const orderData = await this.getOrderById(savedOrder.id, userId);
 
-      // For COD orders, return immediately
+      // For COD orders, clear cart and return immediately
       if (createOrderDto.payment_method === "cod") {
+        // Clear cart after successful COD order creation
+        try {
+          await this.cartService.clearCart(userId);
+          this.logger.log(
+            `🗑️ Cart cleared for user ${userId} after COD order creation`,
+          );
+        } catch (clearCartError) {
+          this.logger.error(
+            `❌ Failed to clear cart after COD order: ${clearCartError.message}`,
+          );
+          // Don't fail order creation if cart clear fails
+        }
+
         return {
           success: true,
           message: "Order created successfully - Cash on Delivery",
@@ -982,6 +998,19 @@ export class OrderService {
 
       // Update order status
       await this.updateOrderStatus(order.id, "confirmed");
+
+      // Clear cart after successful payment
+      try {
+        await this.cartService.clearCart(userId);
+        this.logger.log(
+          `🗑️ Cart cleared for user ${userId} after payment success`,
+        );
+      } catch (clearCartError) {
+        this.logger.error(
+          `❌ Failed to clear cart after payment success: ${clearCartError.message}`,
+        );
+        // Don't fail payment verification if cart clear fails
+      }
 
       this.logger.log(
         `✅ Payment verified successfully for order ${order.order_number}`,
