@@ -1476,29 +1476,44 @@ export class CartService {
       // NEW: Check if cart has preorder items
       const hasPreorderItems = cart.cart_items.some((item) => item.is_preorder === true);
       
-      if (hasPreorderItems && cart.coupon_id) {
-        // For preorder, use delivery_date from coupon
+      if (hasPreorderItems) {
+        // FIX: Get preorder coupon from cart item's preorder_campaign_id, not from cart.coupon_id
+        // This is because cart.coupon_id might point to a regular coupon (like "OFFER") if user applied it
+        // after adding the preorder item
         try {
-          const preorderCoupon = await this.couponRepository.findOne({
-            where: { id: cart.coupon_id },
-          });
+          // Find the first preorder item and get its campaign coupon
+          const preorderCartItem = cart.cart_items.find((item) => item.is_preorder === true && item.preorder_campaign_id);
+          
+          if (preorderCartItem?.preorder_campaign_id) {
+            const preorderCoupon = await this.couponRepository.findOne({
+              where: { id: preorderCartItem.preorder_campaign_id },
+            });
 
-          if (preorderCoupon?.type_meta?.delivery_date) {
-            // Parse delivery_date (supports ISO datetime or date-only)
-            const deliveryDateStr = preorderCoupon.type_meta.delivery_date;
-            const deliveryDate = new Date(deliveryDateStr);
-            
-            if (!isNaN(deliveryDate.getTime())) {
-              // Format as ISO string for response
-              estimatedDeliveryTime = deliveryDate.toISOString();
-              this.logger.log(
-                `📅 Preorder cart: Using delivery_date ${deliveryDateStr} for estimated_delivery_time`,
-              );
+            if (preorderCoupon?.type_meta?.delivery_date) {
+              // Parse delivery_date (supports ISO datetime or date-only)
+              const deliveryDateStr = preorderCoupon.type_meta.delivery_date;
+              const deliveryDate = new Date(deliveryDateStr);
+              
+              if (!isNaN(deliveryDate.getTime())) {
+                // Format as ISO string for response
+                estimatedDeliveryTime = deliveryDate.toISOString();
+                this.logger.log(
+                  `📅 Preorder cart: Using delivery_date ${deliveryDateStr} for estimated_delivery_time (from preorder_campaign_id=${preorderCartItem.preorder_campaign_id})`,
+                );
+              } else {
+                this.logger.warn(
+                  `⚠️ Invalid delivery_date format in preorder coupon: ${deliveryDateStr}`,
+                );
+              }
             } else {
               this.logger.warn(
-                `⚠️ Invalid delivery_date format in preorder coupon: ${deliveryDateStr}`,
+                `⚠️ Preorder coupon ${preorderCartItem.preorder_campaign_id} found but no delivery_date in type_meta`,
               );
             }
+          } else {
+            this.logger.warn(
+              `⚠️ Cart has preorder items but no preorder_campaign_id found on cart items`,
+            );
           }
         } catch (error) {
           this.logger.warn(
