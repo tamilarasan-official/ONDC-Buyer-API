@@ -193,14 +193,16 @@ export class CouponService {
         );
       }
 
-      // Validate delivery_date >= expires_at (or end_at)
-      if (dto.expires_at) {
-        const expiresAt = new Date(dto.expires_at);
-        if (deliveryDate < expiresAt) {
-          throw new BadRequestException(
-            `delivery_date (${dto.type_meta.delivery_date}) must be after or equal to expires_at (${dto.expires_at})`,
-          );
-        }
+      // For preorder coupons, delivery_date can be after expires_at
+      // This is valid because:
+      // - expires_at: When campaign ends (no new orders can be placed)
+      // - delivery_date: When delivery happens (for orders already placed)
+      // So we don't validate delivery_date against expires_at for preorder type
+      // The delivery_date just needs to be a valid future date
+      if (deliveryDate < new Date()) {
+        throw new BadRequestException(
+          `delivery_date (${dto.type_meta.delivery_date}) must be a future date`,
+        );
       }
 
       this.logger.log(

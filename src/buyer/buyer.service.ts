@@ -1339,20 +1339,28 @@ export class BuyerService {
       if (!isActive) return;
 
       // Get available slots
-      const quota = await this.redisCouponService.getQuota(preorderCoupon.id);
-      const availableSlots = quota !== null ? quota : preorderCoupon.global_usage_limit || 0;
-
-      if (availableSlots > 0) {
-        item.is_preorder_available = true;
-        item.preorder_campaign = {
-          id: preorderCoupon.campaign_id || preorderCoupon.id,
-          title: preorderCoupon.type_meta?.title || "Preorder",
-          available_slots: availableSlots,
-          delivery_date: preorderCoupon.type_meta?.delivery_date,
-          discount_amount: preorderCoupon.value || 0,
-          free_delivery: preorderCoupon.type_meta?.free_delivery === true,
-        };
+      let availableSlots = 0;
+      try {
+        const quota = await this.redisCouponService.getQuota(preorderCoupon.id);
+        availableSlots = quota !== null ? quota : (preorderCoupon.global_usage_limit ? Number(preorderCoupon.global_usage_limit) : 0);
+      } catch (error) {
+        this.logger.warn(
+          `Could not fetch quota for coupon ${preorderCoupon.id}: ${error.message}`,
+        );
+        // Fallback to global_usage_limit if quota fetch fails
+        availableSlots = preorderCoupon.global_usage_limit ? Number(preorderCoupon.global_usage_limit) : 0;
       }
+
+      // Show preorder info regardless of available slots (even if 0, user should know it's a preorder)
+      item.is_preorder_available = true;
+      item.preorder_campaign = {
+        id: preorderCoupon.campaign_id || preorderCoupon.id,
+        title: preorderCoupon.type_meta?.title || "Preorder",
+        available_slots: availableSlots,
+        delivery_date: preorderCoupon.type_meta?.delivery_date,
+        discount_amount: preorderCoupon.value || 0,
+        free_delivery: preorderCoupon.type_meta?.free_delivery === true,
+      };
     } catch (error) {
       // Log error but don't fail the request
       this.logger.warn(

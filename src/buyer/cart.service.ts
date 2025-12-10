@@ -1290,6 +1290,9 @@ export class CartService {
     const tipAmount = Number(cart.tip_amount || 0);
 
     // NEW: Handle preorder discount and free delivery
+    // Check if cart has preorder items (either via coupon_id or cart items)
+    const hasPreorderItems = cart.cart_items?.some((item) => item.is_preorder === true);
+    
     if (cart.coupon_id) {
       const coupon = await this.couponRepository.findOne({
         where: { id: cart.coupon_id },
@@ -1304,6 +1307,32 @@ export class CartService {
             await this.cartRepository.update(cart.id, { delivery_fee: 0 });
           }
         }
+      }
+    } else if (hasPreorderItems) {
+      // FALLBACK: Check if any preorder item has free_delivery even if coupon not applied
+      // This handles cases where item was added before preorder campaign
+      try {
+        const preorderCartItem = cart.cart_items?.find((item) => item.is_preorder === true && item.preorder_campaign_id);
+        if (preorderCartItem?.preorder_campaign_id) {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: preorderCartItem.preorder_campaign_id },
+          });
+          
+          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
+            deliveryFee = 0;
+            // Update cart delivery fee if needed
+            if (cart.delivery_fee !== 0) {
+              await this.cartRepository.update(cart.id, { delivery_fee: 0 });
+            }
+            this.logger.log(
+              `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,
+            );
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Could not check free_delivery for preorder items: ${error.message}`,
+        );
       }
     }
 
@@ -1486,6 +1515,7 @@ export class CartService {
         };
 
         // NEW: Add preorder details if this is a preorder item
+        // First check if item has preorder flag set
         if (item.is_preorder && item.preorder_campaign_id) {
           try {
             const preorderCoupon = await this.couponRepository.findOne({
@@ -1512,11 +1542,138 @@ export class CartService {
                 title: preorderCoupon.type_meta.title || "Preorder",
                 delivery_date: preorderCoupon.type_meta.delivery_date,
                 available_slots: availableSlots,
+                free_delivery: preorderCoupon.type_meta?.free_delivery === true,
               };
             }
           } catch (error) {
             this.logger.warn(
               `Could not fetch preorder coupon ${item.preorder_campaign_id}: ${error.message}`,
+            );
+          }
+        } else if (cart.coupon_id) {
+          // FALLBACK 1: Check if cart has a PREORDER coupon that matches this item
+          // This handles cases where item was added before preorder campaign or without is_preorder flag
+          try {
+            const cartCoupon = await this.couponRepository.findOne({
+              where: { id: cart.coupon_id },
+            });
+
+            if (
+              cartCoupon &&
+              cartCoupon.type === CouponType.PREORDER &&
+              cartCoupon.type_meta &&
+              cartCoupon.type_meta.item_id &&
+              Number(cartCoupon.type_meta.item_id) === item.item.id
+            ) {
+              // This item matches the preorder coupon - add preorder info
+              let availableSlots = 0;
+              try {
+                const quota = await this.redisCouponService.getQuota(
+                  cartCoupon.id,
+                );
+                availableSlots = quota || 0;
+              } catch (error) {
+                this.logger.warn(
+                  `Could not fetch quota for coupon ${cartCoupon.id}: ${error.message}`,
+                );
+              }
+
+              itemPayload.is_preorder = true;
+              itemPayload.preorder_campaign = {
+                id: cartCoupon.campaign_id,
+                title: cartCoupon.type_meta.title || "Preorder",
+                delivery_date: cartCoupon.type_meta.delivery_date,
+                available_slots: availableSlots,
+                free_delivery: cartCoupon.type_meta?.free_delivery === true,
+              };
+
+              this.logger.log(
+                `✅ Added preorder info to item ${item.item.id} via cart coupon fallback`,
+              );
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Could not check cart coupon for preorder info: ${error.message}`,
+            );
+          }
+        } else {
+          // FALLBACK 2: Check if item has an active preorder campaign (even if not applied to cart)
+          // This handles cases where item was added before preorder campaign was created
+          try {
+            this.logger.debug(
+              `🔍 FALLBACK 2: Checking for preorder campaign for item ${item.item.id}, store ${cart.store.id}`,
+            );
+            
+            const preorderCoupon = await this.couponRepository
+              .createQueryBuilder("coupon")
+              .where("coupon.type = :type", { type: CouponType.PREORDER })
+              .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.item.id.toString() })
+              .andWhere(
+                "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+                { storeId: cart.store.id }
+              )
+              .getOne();
+
+            if (preorderCoupon) {
+              this.logger.debug(
+                `✅ Found preorder coupon ${preorderCoupon.id} for item ${item.item.id}`,
+              );
+              
+              // Check if campaign is active (time-based)
+              const now = new Date();
+              const isActive = 
+                (!preorderCoupon.start_at || now >= preorderCoupon.start_at) &&
+                (!preorderCoupon.end_at || now <= preorderCoupon.end_at);
+
+              this.logger.debug(
+                `⏰ Campaign time check: start_at=${preorderCoupon.start_at}, end_at=${preorderCoupon.end_at}, now=${now}, isActive=${isActive}`,
+              );
+
+              if (isActive) {
+                // Get available slots
+                let availableSlots = 0;
+                try {
+                  const quota = await this.redisCouponService.getQuota(preorderCoupon.id);
+                  availableSlots = quota !== null ? quota : (preorderCoupon.global_usage_limit ? Number(preorderCoupon.global_usage_limit) : 0);
+                  this.logger.debug(
+                    `📊 Available slots for coupon ${preorderCoupon.id}: ${availableSlots}`,
+                  );
+                } catch (error) {
+                  this.logger.warn(
+                    `Could not fetch quota for coupon ${preorderCoupon.id}: ${error.message}`,
+                  );
+                  // Fallback to global_usage_limit if quota fetch fails
+                  availableSlots = preorderCoupon.global_usage_limit ? Number(preorderCoupon.global_usage_limit) : 0;
+                }
+
+                // Show preorder info regardless of available slots (even if 0, user should know it's a preorder)
+                itemPayload.is_preorder = true;
+                itemPayload.preorder_campaign = {
+                  id: preorderCoupon.campaign_id || preorderCoupon.id,
+                  title: preorderCoupon.type_meta?.title || "Preorder",
+                  delivery_date: preorderCoupon.type_meta?.delivery_date,
+                  available_slots: availableSlots,
+                  free_delivery: preorderCoupon.type_meta?.free_delivery === true,
+                };
+
+                this.logger.log(
+                  `✅ Added preorder info to item ${item.item.id} via active campaign fallback (coupon not applied to cart, slots: ${availableSlots})`,
+                );
+              } else {
+                this.logger.debug(
+                  `⏰ Preorder campaign ${preorderCoupon.id} is not active (time-based check failed)`,
+                );
+              }
+            } else {
+              this.logger.debug(
+                `❌ No preorder coupon found for item ${item.item.id}, store ${cart.store.id}`,
+              );
+            }
+          } catch (error) {
+            this.logger.warn(
+              `Could not check for active preorder campaign for item ${item.item.id}: ${error.message}`,
+              error.stack,
             );
           }
         }
