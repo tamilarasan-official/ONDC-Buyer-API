@@ -425,17 +425,21 @@ export class BuyerService {
         }),
       );
 
-      // Sort ALL restaurants by distance, then rating (highest first), then name
+      // Sort ALL restaurants: open first, then closed; within each group by distance, then rating, then name
       allStoresWithRatings.sort((a, b) => {
-        // Sort by distance
+        // First priority: Sort by open status (open restaurants first)
+        if (a.is_open !== b.is_open) {
+          return a.is_open ? -1 : 1; // Open restaurants come first
+        }
+        // Second priority: Sort by distance
         if (a.distance !== b.distance) {
           return a.distance - b.distance;
         }
-        // Then by rating (highest first)
+        // Third priority: Sort by rating (highest first)
         if (a.rating !== b.rating) {
           return b.rating - a.rating;
         }
-        // Finally by name
+        // Finally: Sort by name
         return a.name.localeCompare(b.name);
       });
 
