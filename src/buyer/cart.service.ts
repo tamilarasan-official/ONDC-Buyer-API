@@ -1375,7 +1375,7 @@ export class CartService {
    * Always returns the platform fee amount for display purposes
    * isEnabled indicates whether to include it in final_amount calculation
    */
-  private getPlatformFee(): {
+  public getPlatformFeeConfig(): {
     amount: number;
     isEnabled: boolean;
   } {
@@ -1389,6 +1389,17 @@ export class CartService {
       amount: Number(platformFeeAmount.toFixed(2)),
       isEnabled: includeFee, // This determines if it's included in final_amount
     };
+  }
+
+  /**
+   * DEPRECATED: Use getPlatformFeeConfig() instead
+   * Kept for backward compatibility
+   */
+  private getPlatformFee(): {
+    amount: number;
+    isEnabled: boolean;
+  } {
+    return this.getPlatformFeeConfig();
   }
 
   /**

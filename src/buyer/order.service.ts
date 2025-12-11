@@ -252,6 +252,23 @@ export class OrderService {
       }
 
       // FIX: Log cart values before creating order to debug payment amount mismatch
+      // NEW: For preorders, explicitly log platform fee handling
+      if (preorderCartItems.length > 0) {
+        const platformFeeConfig = await this.cartService.getPlatformFeeConfig();
+        this.logger.log(
+          `🛒 PREORDER - Platform Fee Config: amount=${platformFeeConfig.amount}, include_platform_fee=${platformFeeConfig.isEnabled}`,
+        );
+        if (!platformFeeConfig.isEnabled) {
+          this.logger.log(
+            `✅ PREORDER - Platform fee (₹${platformFeeConfig.amount}) is EXCLUDED from order total as per configuration`,
+          );
+        } else {
+          this.logger.log(
+            `💰 PREORDER - Platform fee (₹${platformFeeConfig.amount}) is INCLUDED in order total`,
+          );
+        }
+      }
+      
       this.logger.log(
         `💰 Cart totals before order creation: subtotal=${cart.total_amount}, delivery_fee=${cart.delivery_fee}, tax=${cart.tax_amount}, discount=${cart.discount_amount}, tip=${cart.tip_amount || 0}, final_amount=${cart.final_amount}`,
       );
