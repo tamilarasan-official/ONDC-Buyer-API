@@ -1,7 +1,7 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class AddParentItemId1700000000000 implements MigrationInterface {
-  name = "AddParentItemId1700000000000";
+export class AddParentItemId1765300000000 implements MigrationInterface {
+  name = "AddParentItemId1765300000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Add parent_item_id column to item table
