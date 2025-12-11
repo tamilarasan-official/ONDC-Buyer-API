@@ -1,6 +1,12 @@
-import { Injectable, CanActivate, ExecutionContext, BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { Request } from 'express';
-import { verifyAccessToken } from '../shared/utils/jwt';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  BadRequestException,
+  UnauthorizedException,
+} from "@nestjs/common";
+import { Request } from "express";
+import { verifyAccessToken } from "../shared/utils/jwt";
 
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
@@ -9,7 +15,7 @@ export class JwtAuthGuard implements CanActivate {
     const openRoutes = [
       /^\/authentication(\/|$)/,
       /^\/public(\/|$)/,
-      { method: 'GET', pattern: /^\/roles(\/|$)/ },
+      { method: "GET", pattern: /^\/roles(\/|$)/ },
     ];
     if (
       openRoutes.some((route) => {
@@ -17,7 +23,7 @@ export class JwtAuthGuard implements CanActivate {
           return route.test(request.path);
         }
         if (
-          typeof route === 'object' &&
+          typeof route === "object" &&
           route.method &&
           route.pattern instanceof RegExp
         ) {
@@ -31,20 +37,19 @@ export class JwtAuthGuard implements CanActivate {
       return true;
     }
 
-    const authHeader = request.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
-    if (!token)
-      throw new UnauthorizedException('No token provided');
+    const authHeader = request.headers["authorization"];
+    const token = authHeader && authHeader.split(" ")[1];
+    if (!token) throw new UnauthorizedException("No token provided");
 
     try {
       const user = verifyAccessToken(token);
       (request as any).user = user;
       return true;
     } catch (error) {
-      if(error instanceof BadRequestException) {
+      if (error instanceof BadRequestException) {
         throw error;
       }
-      throw new UnauthorizedException('Invalid token');
+      throw new UnauthorizedException("Invalid token");
     }
   }
 }

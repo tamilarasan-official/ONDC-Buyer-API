@@ -1,0 +1,33 @@
+name: Deploy to Staging Server Environment
+
+on:
+  push:
+    branches:
+      - development
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: staging
+
+    concurrency:
+      group: staging-deploy
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEV_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.DEV_SERVER_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Deploy to Staging Server
+        run: |
+          ssh ${{ secrets.DEV_SERVER_USER }}@${{ secrets.DEV_SERVER_HOST }} "bash ~/deployments/staging/tazty-buyer-api.sh"
+          echo "✅ Tazty Buyer API - Staging deployment complete!"

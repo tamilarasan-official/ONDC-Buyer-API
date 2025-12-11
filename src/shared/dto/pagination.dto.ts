@@ -1,19 +1,19 @@
-import { IsOptional, IsPositive, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { IsOptional, IsPositive, Min, Max } from "class-validator";
+import { Type } from "class-transformer";
 
 export class PaginationDto {
   @IsOptional()
   @Type(() => Number)
   @IsPositive()
   @Min(1)
-  page?: number = 1;
+  page?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsPositive()
   @Min(1)
   @Max(100)
-  limit?: number = 10;
+  limit?: number;
 
   @IsOptional()
   search?: string;
@@ -22,10 +22,13 @@ export class PaginationDto {
   sortBy?: string;
 
   @IsOptional()
-  sortOrder?: 'ASC' | 'DESC' = 'DESC';
+  sortOrder?: "ASC" | "DESC" = "DESC";
 
   @IsOptional()
   status?: boolean;
+
+  @IsOptional()
+  food_type?: string;
 
   @IsOptional()
   relations?: string;
@@ -37,7 +40,7 @@ export interface PaginationOptions {
   skip: number;
   search?: string;
   sortBy?: string;
-  sortOrder: 'ASC' | 'DESC';
+  sortOrder: "ASC" | "DESC";
   status?: boolean;
   relations?: string[];
 }
@@ -52,4 +55,4 @@ export interface PaginatedResponse<T> {
     hasNext: boolean;
     hasPrev: boolean;
   };
-} 
+}
