@@ -78,6 +78,11 @@ import Redis from "ioredis";
         synchronize: false,
         logging: configService.get<boolean>("DB_LOGGING"),
         ssl: { rejectUnauthorized: false },
+        extra: {
+          ssl: { rejectUnauthorized: false },
+          max: 10,
+          min: 2,
+        },
       }),
     }),
     UserModule,
