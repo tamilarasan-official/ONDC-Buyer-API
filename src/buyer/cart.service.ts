@@ -1349,36 +1349,18 @@ export class CartService {
     const discountAmount = Number(currentCart?.discount_amount || 0);
 
     // Calculate tax based on item's tax rate and type
-    // IMPORTANT: GST should be calculated on the transaction value (discounted price), not original price
-    // As per GST guidelines, tax is calculated on the amount actually charged to the customer
+    // IMPORTANT: For GST Exclusive pricing (food items), tax is calculated on SUBTOTAL (before discount)
+    // As per GST guidelines for promotional discounts/coupons, the taxable value is the original price
+    // The discount is applied AFTER tax calculation
     let taxAmount = 0;
     
-    // Calculate discounted subtotal (transaction value)
-    const discountedSubtotal = Math.max(0, subtotal - discountAmount);
-    
-    // Calculate tax proportionally based on each item's contribution to the discounted subtotal
-    // This ensures tax is calculated on the actual amount charged, not the original price
-    if (discountedSubtotal > 0 && subtotal > 0) {
-      for (const cartItem of cartItems) {
-        if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
-          // Calculate item's share of the discount proportionally
-          const itemPrice = Number(cartItem.total_price);
-          const itemDiscountShare = (itemPrice / subtotal) * discountAmount;
-          const discountedItemPrice = Math.max(0, itemPrice - itemDiscountShare);
-          
-          // Calculate tax on the discounted price (transaction value)
-          const itemTax = (discountedItemPrice * cartItem.item.tax_rate) / 100;
-          taxAmount += itemTax;
-        }
-      }
-    } else {
-      // Fallback: if no discount, calculate tax on original price
-      for (const cartItem of cartItems) {
-        if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
-          const itemTax =
-            (Number(cartItem.total_price) * cartItem.item.tax_rate) / 100;
-          taxAmount += itemTax;
-        }
+    // Calculate tax on the original subtotal (before any discount)
+    // This is the correct approach for GST exclusive items with promotional discounts
+    for (const cartItem of cartItems) {
+      if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
+        const itemPrice = Number(cartItem.total_price);
+        const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
+        taxAmount += itemTax;
       }
     }
     taxAmount = Number(taxAmount.toFixed(2));
