@@ -485,7 +485,7 @@ export class OrderService {
       });
 
       // Return order with payment details
-      // FIX: Use cart.store.name instead of savedOrder.store.name since store relation is not loaded
+      // FIX: Use cartToUse.store.name instead of cart.store.name since cart is not recalculated
       const response = {
         success: true,
         message: "Order created successfully - Payment required",
@@ -498,7 +498,7 @@ export class OrderService {
           amount: paymentAmountInPaise,
           currency: "INR",
           key: this.razorpayService.getRazorpayKey(),
-          name: cart.store.name,
+          name: cartToUse.store.name,
           description: `Order #${savedOrder.order_number}`,
           prefill: {
             name: user?.name || "User",
