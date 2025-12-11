@@ -1223,6 +1223,15 @@ export class CartService {
   }
 
   /**
+   * Public method to recalculate cart totals
+   * Used before order creation to ensure latest pricing
+   */
+  async recalculateCartTotals(cartId: number): Promise<void> {
+    this.logger.log(`🔄 Recalculating totals for cart ${cartId}`);
+    await this.updateCartTotals(cartId);
+  }
+
+  /**
    * Update cart totals
    */
   private async updateCartTotals(cartId: number): Promise<void> {
@@ -1351,14 +1360,16 @@ export class CartService {
       ).toFixed(2),
     );
 
-    this.logger.log(`subtotal: ${Number(subtotal)}`);
-    this.logger.log(`deliveryFee: ${Number(deliveryFee)}`);
-    this.logger.log(`taxAmount: ${Number(taxAmount)}`);
-    this.logger.log(`tipAmount: ${Number(tipAmount)}`);
-    this.logger.log(`platformFee (display): ${platformFeeConfig.amount}`);
-    this.logger.log(`platformFee (included in total): ${platformFeeForCalculation}`);
-    this.logger.log(`discountAmount: ${Number(discountAmount)}`);
-    this.logger.log(`finalAmount: ${Number(finalAmount)}`);
+    this.logger.log(`💰 Cart Calculation Breakdown:`);
+    this.logger.log(`  subtotal: ${Number(subtotal)}`);
+    this.logger.log(`  deliveryFee: ${Number(deliveryFee)}`);
+    this.logger.log(`  taxAmount: ${Number(taxAmount)}`);
+    this.logger.log(`  tipAmount: ${Number(tipAmount)}`);
+    this.logger.log(`  platformFee (display): ${platformFeeConfig.amount}`);
+    this.logger.log(`  platformFee (included in total): ${platformFeeForCalculation}`);
+    this.logger.log(`  discountAmount: ${Number(discountAmount)}`);
+    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} - ${discountAmount} = ${finalAmount}`);
+    this.logger.log(`  finalAmount: ${Number(finalAmount)}`);
 
     await this.cartRepository.update(cartId, {
       total_amount: subtotal,

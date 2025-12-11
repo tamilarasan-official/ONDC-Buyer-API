@@ -104,6 +104,27 @@ export class OrderService {
         throw new BadRequestException("Cart is empty");
       }
 
+      // CRITICAL: Recalculate cart totals before creating order to ensure latest pricing
+      // This ensures platform fee setting changes are reflected immediately
+      await this.cartService.recalculateCartTotals(cart.id);
+      
+      // Reload cart after recalculation to get updated totals
+      const updatedCart = await this.cartRepository
+        .createQueryBuilder("c")
+        .leftJoinAndSelect("c.store", "s")
+        .leftJoinAndSelect("c.cart_items", "ci")
+        .leftJoinAndSelect("ci.item", "i")
+        .leftJoin("c.user", "u")
+        .where("c.id = :cartId", { cartId: cart.id })
+        .getOne();
+      
+      if (!updatedCart) {
+        throw new BadRequestException("Cart not found after recalculation");
+      }
+      
+      // Use updated cart for order creation
+      const cartToUse = updatedCart;
+
       // NEW: Validate app operation hours before allowing order creation
       // This is separate from restaurant timings - it's a global app-level control
       this.appOperationHoursService.validateAppIsOpen();
@@ -118,7 +139,7 @@ export class OrderService {
       }
 
       // NEW: Re-validate preorder campaigns before checkout
-      const preorderCartItems = cart.cart_items.filter(ci => ci.is_preorder);
+      const preorderCartItems = cartToUse.cart_items.filter(ci => ci.is_preorder);
       
       if (preorderCartItems.length > 0) {
         if (preorderCartItems.length > 1) {
@@ -163,7 +184,7 @@ export class OrderService {
           userId,
           cartItem,
           deliveryAddress.pincode,
-          cart.store.id, // Pass store_id directly
+          cartToUse.store.id, // Pass store_id directly
         );
         
         // Update cart item with reservation token
@@ -270,13 +291,13 @@ export class OrderService {
       }
       
       this.logger.log(
-        `💰 Cart totals before order creation: subtotal=${cart.total_amount}, delivery_fee=${cart.delivery_fee}, tax=${cart.tax_amount}, discount=${cart.discount_amount}, tip=${cart.tip_amount || 0}, final_amount=${cart.final_amount}`,
+        `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
       );
 
       const order = this.orderRepository.create({
         order_number: orderNumber,
         user: { id: userId },
-        store: { id: cart.store.id },
+        store: { id: cartToUse.store.id },
         // Copy address data for historical record keeping
         delivery_address_line1: deliveryAddress.address1,
         delivery_address_line2: deliveryAddress.address2,
@@ -289,12 +310,12 @@ export class OrderService {
         delivery_address_type: deliveryAddress.type,
         delivery_alternate_phone: deliveryAddress.alternate_phone_number,
         status: orderStatus,
-        subtotal: cart.total_amount,
-        delivery_fee: cart.delivery_fee,
-        tax_amount: cart.tax_amount,
-        discount_amount: cart.discount_amount,
-        tip_amount: cart.tip_amount || 0,
-        total_amount: cart.final_amount,
+        subtotal: cartToUse.total_amount,
+        delivery_fee: cartToUse.delivery_fee,
+        tax_amount: cartToUse.tax_amount,
+        discount_amount: cartToUse.discount_amount,
+        tip_amount: cartToUse.tip_amount || 0,
+        total_amount: cartToUse.final_amount,
         payment_method: createOrderDto.payment_method,
         payment_status: paymentStatus,
         notes: createOrderDto.notes,
@@ -309,7 +330,7 @@ export class OrderService {
       );
 
       // Create order items from cart items
-      const orderItems = cart.cart_items.map((cartItem) =>
+      const orderItems = cartToUse.cart_items.map((cartItem) =>
         this.orderItemRepository.create({
           order: { id: savedOrder.id },
           item: { id: cartItem.item.id },
@@ -328,7 +349,7 @@ export class OrderService {
 
       // NEW: If preorder, redeem coupon after order is created
       // FIX: Only redeem for COD orders. Online payment orders will be redeemed on payment success.
-      const preorderCartItemsForRedemption = cart.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
+      const preorderCartItemsForRedemption = cartToUse.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
 
       for (const cartItem of preorderCartItemsForRedemption) {
         if (cartItem.preorder_reservation_token) {
@@ -372,7 +393,7 @@ export class OrderService {
 
       // Note: Cart will be cleared after order confirmation (COD) or payment success (online)
       // For now, just deactivate it to prevent modifications during payment
-      await this.cartRepository.update(cart.id, { is_active: false });
+      await this.cartRepository.update(cartToUse.id, { is_active: false });
 
       // 🚀 PUSH ORDER TO SELLER IMMEDIATELY
       try {
