@@ -69,7 +69,8 @@ async function bootstrap() {
       "JWT-auth",
     )
     .addServer("http://localhost:3008", "Development server")
-    .addServer("https://devapi.tazty.in", "Production server")
+    .addServer("https://devapi.tazty.in", "Staging server")
+    .addServer("https://api.tazty.in", "Production server")
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
