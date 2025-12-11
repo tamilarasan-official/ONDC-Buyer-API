@@ -1,9 +1,9 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class AddOverallRatingToOrder1730073600000
+export class AddOverallRatingToOrder1765310000000
   implements MigrationInterface
 {
-  name = "AddOverallRatingToOrder1730073600000";
+  name = "AddOverallRatingToOrder1765310000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
     // Add overall_rating column to order table

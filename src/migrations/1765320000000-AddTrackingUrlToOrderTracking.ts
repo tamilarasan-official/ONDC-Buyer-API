@@ -1,6 +1,6 @@
 import { MigrationInterface, QueryRunner, TableColumn } from "typeorm";
 
-export class AddTrackingUrlToOrderTracking1733472000000
+export class AddTrackingUrlToOrderTracking1765320000000
   implements MigrationInterface
 {
   public async up(queryRunner: QueryRunner): Promise<void> {
