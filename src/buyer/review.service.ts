@@ -241,8 +241,9 @@ export class ReviewService {
       };
 
       const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3000";
+      process.env.SELLER_API_URL || "http://localhost:3000";
       const endpoint = `${sellerApiUrl}/reviews`;
+      console.log('sellerApiUrl: ', sellerApiUrl);
 
       const response = await firstValueFrom(
         this.httpService.post(endpoint, payload, {
