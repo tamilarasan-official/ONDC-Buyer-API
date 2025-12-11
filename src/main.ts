@@ -42,6 +42,7 @@ async function bootstrap() {
       "Comprehensive F&B Buyer Application API with ONDC Integration",
     )
     .setVersion("1.0.0")
+    .addTag("Health Check", "Service health monitoring endpoints")
     .addTag("Buyer App APIs", "Core buyer application endpoints")
     .addTag("Authentication", "User authentication and authorization")
     .addTag("User Management", "User profile and address management")

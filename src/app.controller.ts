@@ -1,7 +1,11 @@
-import { Controller, Get, Post, Body, Logger } from "@nestjs/common";
+import { Controller, Get, Post, Body, Logger, Inject } from "@nestjs/common";
 import { AppService } from "./app.service";
 import { CatalogIngestionService } from "./catalog-ingestion/catalog-ingestion.service";
 import { ONDCOnSearchResponseDto } from "./ondc-search/dto/ondc-search.dto";
+import { ApiTags, ApiOperation, ApiResponse } from "@nestjs/swagger";
+import { InjectDataSource } from "@nestjs/typeorm";
+import { DataSource } from "typeorm";
+import Redis from "ioredis";
 
 @Controller()
 export class AppController {
@@ -10,11 +14,82 @@ export class AppController {
   constructor(
     private readonly appService: AppService,
     private readonly catalogIngestionService: CatalogIngestionService,
+    @InjectDataSource() private readonly dataSource: DataSource,
+    @Inject('REDIS_CLIENT') private readonly redis: Redis,
   ) {}
 
   @Get()
   getHello(): string {
     return this.appService.getHello();
+  }
+
+  @Get("health")
+  @ApiTags("Health Check")
+  @ApiOperation({ summary: "Health check endpoint with database and Redis status" })
+  @ApiResponse({ 
+    status: 200, 
+    description: "Service is healthy",
+    schema: {
+      type: "object",
+      properties: {
+        status: { type: "string", example: "ok" },
+        timestamp: { type: "string", example: "2025-12-11T04:00:00.000Z" },
+        uptime: { type: "number", example: 12345.678 },
+        environment: { type: "string", example: "production" },
+        database: {
+          type: "object",
+          properties: {
+            status: { type: "string", example: "connected" },
+            type: { type: "string", example: "postgres" }
+          }
+        },
+        redis: {
+          type: "object",
+          properties: {
+            status: { type: "string", example: "connected" }
+          }
+        }
+      }
+    }
+  })
+  async getHealth() {
+    // Check database connection
+    let dbStatus = "disconnected";
+    let dbType = "unknown";
+    try {
+      if (this.dataSource.isInitialized) {
+        await this.dataSource.query("SELECT 1");
+        dbStatus = "connected";
+        dbType = this.dataSource.options.type;
+      }
+    } catch (error) {
+      dbStatus = "error";
+      this.logger.error(`Database health check failed: ${error.message}`);
+    }
+
+    // Check Redis connection
+    let redisStatus = "disconnected";
+    try {
+      await this.redis.ping();
+      redisStatus = "connected";
+    } catch (error) {
+      redisStatus = "error";
+      this.logger.error(`Redis health check failed: ${error.message}`);
+    }
+
+    return {
+      status: dbStatus === "connected" && redisStatus === "connected" ? "ok" : "degraded",
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV || "development",
+      database: {
+        status: dbStatus,
+        type: dbType
+      },
+      redis: {
+        status: redisStatus
+      }
+    };
   }
 
   /**

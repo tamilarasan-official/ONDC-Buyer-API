@@ -26,6 +26,7 @@ import { FavoritesModule } from "./favorites/favorites.module";
 import { BannerModule } from "./banner/banner.module";
 import { CouponModule } from "./coupon/coupon.module";
 import "dotenv/config";
+import Redis from "ioredis";
 
 @Module({
   imports: [
@@ -76,6 +77,12 @@ import "dotenv/config";
         entities: [join(__dirname, "**/*.entity{.ts,.js}")],
         synchronize: false,
         logging: configService.get<boolean>("DB_LOGGING"),
+        ssl: { rejectUnauthorized: false },
+        extra: {
+          ssl: { rejectUnauthorized: false },
+          max: 10,
+          min: 2,
+        },
       }),
     }),
     UserModule,
@@ -96,6 +103,23 @@ import "dotenv/config";
     CouponModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: 'REDIS_CLIENT',
+      useFactory: (configService: ConfigService) => {
+        return new Redis({
+          host: configService.get<string>('REDIS_HOST') || 'localhost',
+          port: configService.get<number>('REDIS_PORT') || 6379,
+          password: configService.get<string>('REDIS_PASSWORD') || undefined,
+          retryStrategy: (times) => {
+            const delay = Math.min(times * 50, 2000);
+            return delay;
+          },
+        });
+      },
+      inject: [ConfigService],
+    },
+  ],
 })
 export class AppModule {}
