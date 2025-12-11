@@ -327,15 +327,22 @@ export class BuyerService {
       // Get user's favorite restaurant IDs
       let favoriteStoreIds: Set<number> = new Set();
       if (userId) {
-        const favorites = await this.favoriteRestaurantRepository.find({
-          where: { user: { id: userId } },
-          select: ["store"],
-          relations: ["store"],
-        });
-        favoriteStoreIds = new Set(favorites.map((f) => f.store.id));
-        this.logger.log(
-          `❤️ User has ${favoriteStoreIds.size} favorite restaurants`,
-        );
+        try {
+          const favorites = await this.favoriteRestaurantRepository.find({
+            where: { user: { id: userId } },
+            select: ["store"],
+            relations: ["store"],
+          });
+          favoriteStoreIds = new Set(favorites.map((f) => f.store.id));
+          this.logger.log(
+            `❤️ User has ${favoriteStoreIds.size} favorite restaurants`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not fetch favorite restaurants (table may not exist): ${error.message}`,
+          );
+          // Continue without favorites
+        }
       }
 
       this.logger.log(`🔍 Processing all ${allStores.length} restaurants...`);
@@ -795,23 +802,30 @@ export class BuyerService {
       let favoriteStoreIds: Set<number> = new Set();
       let favoriteItemIds: Set<number> = new Set();
       if (userId) {
-        const [favoriteStores, favoriteItems] = await Promise.all([
-          this.favoriteRestaurantRepository.find({
-            where: { user: { id: userId } },
-            select: ["store"],
-            relations: ["store"],
-          }),
-          this.favoriteItemRepository.find({
-            where: { user: { id: userId } },
-            select: ["item"],
-            relations: ["item"],
-          }),
-        ]);
-        favoriteStoreIds = new Set(favoriteStores.map((f) => f.store.id));
-        favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
-        this.logger.log(
-          `❤️ User has ${favoriteStoreIds.size} favorite restaurants and ${favoriteItemIds.size} favorite items for search`,
-        );
+        try {
+          const [favoriteStores, favoriteItems] = await Promise.all([
+            this.favoriteRestaurantRepository.find({
+              where: { user: { id: userId } },
+              select: ["store"],
+              relations: ["store"],
+            }),
+            this.favoriteItemRepository.find({
+              where: { user: { id: userId } },
+              select: ["item"],
+              relations: ["item"],
+            }),
+          ]);
+          favoriteStoreIds = new Set(favoriteStores.map((f) => f.store.id));
+          favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
+          this.logger.log(
+            `❤️ User has ${favoriteStoreIds.size} favorite restaurants and ${favoriteItemIds.size} favorite items for search`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not fetch favorites (table may not exist): ${error.message}`,
+          );
+          // Continue without favorites
+        }
       }
 
       const results = {
@@ -1647,15 +1661,22 @@ export class BuyerService {
         // Fetch user's favorite items if userId is provided
         let favoriteItemIds: Set<number> = new Set();
         if (userId) {
-          const favoriteItems = await this.favoriteItemRepository.find({
-            where: { user: { id: userId } },
-            select: ["item"],
-            relations: ["item"],
-          });
-          favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
-          this.logger.log(
-            `❤️ User has ${favoriteItemIds.size} favorite items for restaurant detail`,
-          );
+          try {
+            const favoriteItems = await this.favoriteItemRepository.find({
+              where: { user: { id: userId } },
+              select: ["item"],
+              relations: ["item"],
+            });
+            favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
+            this.logger.log(
+              `❤️ User has ${favoriteItemIds.size} favorite items for restaurant detail`,
+            );
+          } catch (error) {
+            this.logger.warn(
+              `⚠️ Could not fetch favorite items (table may not exist): ${error.message}`,
+            );
+            // Continue without favorite items
+          }
         }
 
         const categorizedItems = await this.getCategorizedItems(
@@ -2215,16 +2236,23 @@ export class BuyerService {
       // Fetch user's favorite items if userId is provided
       let favoriteItemIds: Set<number> = new Set();
       if (userId) {
-        const favoriteItems = await this.favoriteItemRepository.find({
-          where: { user: { id: userId } },
-          select: ["item"],
-          relations: ["item"],
-        });
-        console.log('favoriteItems: ', favoriteItems.map((item) => item.item.quantities.map((quantity) => quantity.maximum_count)));
-        favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
-        this.logger.log(
-          `❤️ User has ${favoriteItemIds.size} favorite items for menu`,
-        );
+        try {
+          const favoriteItems = await this.favoriteItemRepository.find({
+            where: { user: { id: userId } },
+            select: ["item"],
+            relations: ["item"],
+          });
+          console.log('favoriteItems: ', favoriteItems.map((item) => item.item.quantities.map((quantity) => quantity.maximum_count)));
+          favoriteItemIds = new Set(favoriteItems.map((f) => f.item.id));
+          this.logger.log(
+            `❤️ User has ${favoriteItemIds.size} favorite items for menu`,
+          );
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not fetch favorite items (table may not exist): ${error.message}`,
+          );
+          // Continue without favorite items
+        }
       }
 
       // Get menu categories with items
