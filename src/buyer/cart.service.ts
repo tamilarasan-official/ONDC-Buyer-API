@@ -1300,6 +1300,47 @@ export class CartService {
       deliveryFee = 0;
     }
 
+    // NEW: Check for preorder free delivery BEFORE saving
+    // This ensures free delivery is applied during recalculation
+    const hasPreorderItems = cartItems.some((item) => item.is_preorder === true);
+    
+    if (hasPreorderItems) {
+      this.logger.log(`🛒 Cart has preorder items, checking for free_delivery...`);
+      
+      // Check cart for preorder coupon
+      const currentCart = await this.cartRepository.findOne({
+        where: { id: cartId },
+      });
+      
+      if (currentCart?.coupon_id) {
+        const coupon = await this.couponRepository.findOne({
+          where: { id: currentCart.coupon_id },
+        });
+
+        if (coupon && coupon.type === CouponType.PREORDER && coupon.type_meta?.free_delivery === true) {
+          this.logger.log(
+            `✅ Preorder has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
+          );
+          deliveryFee = 0;
+        }
+      } else {
+        // FALLBACK: Check preorder item's campaign directly
+        const preorderCartItem = cartItems.find((item) => item.is_preorder === true && item.preorder_campaign_id);
+        if (preorderCartItem?.preorder_campaign_id) {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: preorderCartItem.preorder_campaign_id },
+          });
+          
+          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
+            this.logger.log(
+              `✅ Preorder campaign has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
+            );
+            deliveryFee = 0;
+          }
+        }
+      }
+    }
+
     // Get current tip amount and discount (preserve existing tip)
     const currentCart = await this.cartRepository.findOne({
       where: { id: cartId },
