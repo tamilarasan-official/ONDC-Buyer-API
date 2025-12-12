@@ -23,8 +23,6 @@ import {
   FavoriteRestaurantDto,
   FavoriteStatusDto,
   ToggleFavoriteResponseDto,
-  FavoriteItemsResponseDto,
-  FavoriteRestaurantsResponseDto,
 } from "./dto/favorites.dto";
 
 @ApiTags("Favorites")
@@ -93,7 +91,20 @@ export class FavoritesController {
   @ApiResponse({
     status: 200,
     description: "Favorite items retrieved successfully",
-    type: FavoriteItemsResponseDto,
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: {
+          type: "string",
+          example: "Favorite items retrieved successfully",
+        },
+        data: {
+          type: "array",
+          items: { $ref: "#/components/schemas/FavoriteItemDto" },
+        },
+      },
+    },
   })
   async getFavoriteItems(
     @Req() req: any,
@@ -205,7 +216,20 @@ export class FavoritesController {
   @ApiResponse({
     status: 200,
     description: "Favorite restaurants retrieved successfully",
-    type: FavoriteRestaurantsResponseDto,
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: {
+          type: "string",
+          example: "Favorite restaurants retrieved successfully",
+        },
+        data: {
+          type: "array",
+          items: { $ref: "#/components/schemas/FavoriteRestaurantDto" },
+        },
+      },
+    },
   })
   async getFavoriteRestaurants(
     @Req() req: any,
