@@ -302,20 +302,14 @@ export class CartService {
         }
       }
 
-      // CORRECT CALCULATION: (Item Price × Quantity) + Customization Price
-      const itemTotalPrice = Number(
-        (unitPrice * addToCartDto.quantity).toFixed(2),
-      );
-      const totalPrice = Number(
-        (itemTotalPrice + customizationPrice).toFixed(2),
-      );
-
-      // NEW: Preorder validation and auto-apply coupon
-      // Calculate this AFTER we know the item price, so we can pass correct cart_total
+      // NEW: Preorder validation and get coupon BEFORE calculating price
+      // For preorder items, we need to use final_order_price instead of base_price
       let preorderCoupon: Coupon | null = null;
+      let finalOrderPrice = unitPrice; // Default to base price for regular items
+      
       if (addToCartDto.is_preorder) {
         this.logger.log(
-          `🛒 Preorder item detected: item_id=${addToCartDto.item_id}, validating and auto-applying coupon...`,
+          `🛒 Preorder item detected: item_id=${addToCartDto.item_id}, validating and getting final_order_price...`,
         );
         
         // Validate preorder requirements
@@ -330,6 +324,29 @@ export class CartService {
         this.logger.log(
           `✅ Preorder validation passed: coupon_id=${preorderCoupon.id}, code=${preorderCoupon.code}`,
         );
+
+        // For preorder items, use final_order_price (₹12) instead of base_price
+        // This is the price after discount, which should be stored in coupon type_meta or calculated
+        // For now, using the same logic as buyer.service.ts: final_order_price = 12.0
+        // TODO: Consider storing final_order_price in coupon type_meta for flexibility
+        finalOrderPrice = 12.0;
+        
+        this.logger.log(
+          `💰 Preorder item pricing: base_price=₹${unitPrice}, final_order_price=₹${finalOrderPrice}`,
+        );
+      }
+
+      // CORRECT CALCULATION: (Item Price × Quantity) + Customization Price
+      // For preorder items, use final_order_price; for regular items, use base_price
+      const itemTotalPrice = Number(
+        (finalOrderPrice * addToCartDto.quantity).toFixed(2),
+      );
+      const totalPrice = Number(
+        (itemTotalPrice + customizationPrice).toFixed(2),
+      );
+
+      // Auto-apply preorder coupon if needed
+      if (addToCartDto.is_preorder && preorderCoupon) {
 
         // Auto-apply preorder coupon to cart
         // IMPORTANT: Calculate cart total including the new item price for validation
@@ -424,22 +441,28 @@ export class CartService {
 
         existingCartItem.quantity = newTotalQty;
 
+        // Use finalOrderPrice for preorder items, unitPrice for regular items
+        const priceToUse = existingCartItem.is_preorder ? finalOrderPrice : unitPrice;
         const newItemTotalPrice = Number(
-          (unitPrice * newTotalQty).toFixed(2)
+          (priceToUse * newTotalQty).toFixed(2)
         );
 
         existingCartItem.total_price = Number(
           (newItemTotalPrice + customizationPrice).toFixed(2)
         );
+        // Update unit_price to reflect the price used
+        existingCartItem.unit_price = priceToUse;
 
         cartItem = await this.cartItemRepository.save(existingCartItem);
       } else {
         // Create new cart item
+        // For preorder items, use finalOrderPrice; for regular items, use unitPrice
+        const unitPriceToStore = addToCartDto.is_preorder ? finalOrderPrice : unitPrice;
         cartItem = this.cartItemRepository.create({
           cart,
           item,
           quantity: addToCartDto.quantity,
-          unit_price: unitPrice, // Store base unit price only
+          unit_price: unitPriceToStore, // Store final_order_price for preorder, base_price for regular
           total_price: totalPrice,
           customizations: addToCartDto.customizations || [],
           variants: addToCartDto.variants || [],
@@ -2230,7 +2253,17 @@ export class CartService {
       cart.coupon_code = applyCouponDto.coupon_code;
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = coupon?.id;
-      cart.discount_amount = validation.discount_amount || 0;
+      
+      // For preorder coupons, discount is already reflected in the item price (final_order_price)
+      // So we set discount_amount to 0 to avoid double discounting
+      if (coupon?.type === CouponType.PREORDER) {
+        cart.discount_amount = 0;
+        this.logger.log(
+          `💰 Preorder coupon: Discount already applied in item price (final_order_price), setting cart discount_amount to 0`,
+        );
+      } else {
+        cart.discount_amount = validation.discount_amount || 0;
+      }
 
       // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
@@ -2240,7 +2273,7 @@ export class CartService {
       await this.cartRepository.save(cart);
 
       this.logger.log(
-        `✅ Preorder coupon applied successfully. Discount: ₹${validation.discount_amount}`,
+        `✅ Preorder coupon applied successfully. Discount: ₹${cart.discount_amount} (${coupon?.type === CouponType.PREORDER ? 'already in item price' : validation.discount_amount})`,
       );
     } catch (error) {
       this.logger.error(
