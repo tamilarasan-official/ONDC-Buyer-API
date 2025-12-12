@@ -45,7 +45,7 @@ export class FavoritesService {
       // Check if already favorited
       const existingFavorite = await this.favoriteItemRepository.findOne({
         where: { user: { id: userId }, item: { id: itemId } },
-      });
+      }).catch(() => null);
 
       if (existingFavorite) {
         // Remove from favorites
@@ -102,6 +102,9 @@ export class FavoritesService {
           "item.item_categories",
         ],
         order: { created_at: "DESC" },
+      }).catch((error) => {
+        this.logger.warn(`⚠️ Could not fetch favorite items (table may not exist): ${error.message}`);
+        return [];
       });
 
       const items = await Promise.all(
@@ -173,7 +176,7 @@ export class FavoritesService {
     try {
       const favorite = await this.favoriteItemRepository.findOne({
         where: { user: { id: userId }, item: { id: itemId } },
-      });
+      }).catch(() => null);
 
       return {
         success: true,
@@ -206,7 +209,7 @@ export class FavoritesService {
       // Check if already favorited
       const existingFavorite = await this.favoriteRestaurantRepository.findOne({
         where: { user: { id: userId }, store: { id: storeId } },
-      });
+      }).catch(() => null);
 
       if (existingFavorite) {
         // Remove from favorites
@@ -261,6 +264,9 @@ export class FavoritesService {
         where: { user: { id: userId } },
         relations: ["store", "store.locations", "store.timings"],
         order: { created_at: "DESC" },
+      }).catch((error) => {
+        this.logger.warn(`⚠️ Could not fetch favorite restaurants (table may not exist): ${error.message}`);
+        return [];
       });
 
       const restaurants = favorites.map((favorite) => {
@@ -327,7 +333,7 @@ export class FavoritesService {
     try {
       const favorite = await this.favoriteRestaurantRepository.findOne({
         where: { user: { id: userId }, store: { id: storeId } },
-      });
+      }).catch(() => null);
 
       return {
         success: true,

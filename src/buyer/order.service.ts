@@ -40,6 +40,7 @@ import { CouponService } from "../coupon/services/coupon.service";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType } from "../coupon/entities/coupon.entity";
 import { PaymentStatus } from "../coupon/dto/redeem-coupon.dto";
+import { TimezoneUtil } from "../shared/utils/timezone.util";
 
 @Injectable()
 export class OrderService {
@@ -164,7 +165,8 @@ export class OrderService {
         }
 
         // Re-validate campaign is active (time-based)
-        const now = new Date();
+        // Use IST time to ensure consistent timezone comparison with database timestamps
+        const now = TimezoneUtil.getCurrentISTTime();
         if (coupon.start_at && now < coupon.start_at) {
           throw new BadRequestException("Preorder campaign has not started yet");
         }

@@ -40,6 +40,7 @@ import { VegMode } from "../shared/enums/veg-mode.enum";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
+import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 
 @Injectable()
@@ -1355,27 +1356,73 @@ export class BuyerService {
     storeId: number
   ): Promise<void> {
     try {
+      this.logger.debug(
+        `🔍 Checking preorder campaign for item_id=${item.id}, store_id=${storeId}`
+      );
+
       // Find active PREORDER coupon for this item
-      const preorderCoupon = await this.couponRepository
+      // IMPORTANT: Must check both coupon status AND campaign status
+      // If multiple coupons match, select by priority (higher first), then by creation date (newest first)
+      const preorderCoupons = await this.couponRepository
         .createQueryBuilder("coupon")
+        .leftJoinAndSelect("coupon.campaign", "campaign")
         .where("coupon.type = :type", { type: CouponType.PREORDER })
         .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+        .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
         .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.id.toString() })
         .andWhere(
           "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
           { storeId }
         )
-        .getOne();
+        .orderBy("coupon.priority", "DESC", "NULLS LAST") // Higher priority first, nulls last
+        .addOrderBy("coupon.created_at", "DESC") // Newest first if same priority
+        .getMany();
 
-      if (!preorderCoupon) return;
+      // Log warning if multiple coupons match
+      if (preorderCoupons.length > 1) {
+        this.logger.warn(
+          `⚠️ Multiple preorder coupons found for item_id=${item.id}, store_id=${storeId}. ` +
+          `Found ${preorderCoupons.length} coupons: ${preorderCoupons.map(c => `coupon_id=${c.id}, priority=${c.priority || 'null'}`).join(', ')}. ` +
+          `Selecting coupon_id=${preorderCoupons[0].id} (highest priority/newest)`
+        );
+      }
+
+      const preorderCoupon = preorderCoupons.length > 0 ? preorderCoupons[0] : null;
+
+      if (!preorderCoupon) {
+        this.logger.debug(
+          `❌ No preorder coupon found for item_id=${item.id}, store_id=${storeId} ` +
+          `(checked: coupon.status=ACTIVE AND campaign.status=ACTIVE)`
+        );
+        return;
+      }
+
+      this.logger.log(
+        `✅ Found preorder coupon: coupon_id=${preorderCoupon.id}, campaign_id=${preorderCoupon.campaign_id}, ` +
+        `campaign_status=${preorderCoupon.campaign?.status || 'unknown'}, code=${preorderCoupon.code}, ` +
+        `item_id=${item.id}, store_id=${storeId}`
+      );
 
       // Check if campaign is active (time-based)
-      const now = new Date();
+      // Use IST time to ensure consistent timezone comparison with database timestamps
+      const now = TimezoneUtil.getCurrentISTTime();
       const isActive = 
         (!preorderCoupon.start_at || now >= preorderCoupon.start_at) &&
         (!preorderCoupon.end_at || now <= preorderCoupon.end_at);
 
-      if (!isActive) return;
+      this.logger.debug(
+        `⏰ Preorder campaign time check: coupon_id=${preorderCoupon.id}, ` +
+        `start_at=${preorderCoupon.start_at ? preorderCoupon.start_at.toISOString() : 'null'}, ` +
+        `end_at=${preorderCoupon.end_at ? preorderCoupon.end_at.toISOString() : 'null'}, ` +
+        `now_IST=${now.toISOString()}, isActive=${isActive}`
+      );
+
+      if (!isActive) {
+        this.logger.debug(
+          `⏰ Preorder campaign ${preorderCoupon.id} is not active (time-based check failed) for item_id=${item.id}`
+        );
+        return;
+      }
 
       // Get available slots
       let availableSlots = 0;
@@ -1392,6 +1439,10 @@ export class BuyerService {
 
       // Show preorder info regardless of available slots (even if 0, user should know it's a preorder)
       item.is_preorder_available = true;
+      
+      this.logger.log(
+        `✅ Setting is_preorder_available=true for item_id=${item.id}, store_id=${storeId}, coupon_id=${preorderCoupon.id}`
+      );
       
       // Calculate discount_amount so that: slashed_price = base_price - discount_amount = final_order_total
       // Handle both number and string formats for base_price
@@ -1430,11 +1481,30 @@ export class BuyerService {
         discount_amount: discountAmountString, // String format with 2 decimal places
         free_delivery: preorderCoupon.type_meta?.free_delivery === true,
       };
+
+      this.logger.log(
+        `📦 Preorder campaign attached to item_id=${item.id}: ` +
+        `campaign_id=${item.preorder_campaign.id}, ` +
+        `title="${item.preorder_campaign.title}", ` +
+        `available_slots=${item.preorder_campaign.available_slots}, ` +
+        `delivery_date=${item.preorder_campaign.delivery_date || 'null'}, ` +
+        `discount_amount=${item.preorder_campaign.discount_amount}, ` +
+        `free_delivery=${item.preorder_campaign.free_delivery}, ` +
+        `is_preorder_available=${item.is_preorder_available}`
+      );
     } catch (error) {
       // Log error but don't fail the request
       this.logger.warn(
-        `Failed to enrich item ${item.id} with preorder info: ${error.message}`,
+        `❌ Failed to enrich item ${item.id} with preorder info: ${error.message}`,
+        error.stack
       );
+    } finally {
+      // Log final state for debugging
+      if (!item.is_preorder_available) {
+        this.logger.debug(
+          `ℹ️ Item ${item.id} does not have is_preorder_available set (no active preorder campaign found)`
+        );
+      }
     }
   }
 

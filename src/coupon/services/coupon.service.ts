@@ -30,6 +30,7 @@ import { ValidateCouponDto } from "../dto/validate-coupon.dto";
 import { ReserveCouponDto } from "../dto/reserve-coupon.dto";
 import { RedeemCouponDto, PaymentStatus } from "../dto/redeem-coupon.dto";
 import { RollbackCouponDto } from "../dto/rollback-coupon.dto";
+import { TimezoneUtil } from "../../shared/utils/timezone.util";
 
 // Code generation charset (no ambiguous chars: 0, O, I, 1)
 const CODE_CHARSET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -248,6 +249,9 @@ export class CouponService {
     }
 
     // Create coupon records
+    // Default priority is 0 if not provided (lower priority = selected last when multiple coupons match)
+    const defaultPriority = dto.priority !== undefined && dto.priority !== null ? dto.priority : 0;
+    
     const coupons = codes.map((code) => {
       const coupon = this.couponRepository.create({
         campaign_id: campaignId,
@@ -260,6 +264,7 @@ export class CouponService {
         min_cart_value: dto.min_cart_value || 0,
         user_usage_limit: dto.user_usage_limit || 1,
         global_usage_limit: dto.global_usage_limit,
+        priority: defaultPriority,
         status: CouponStatus.ACTIVE,
         start_at: dto.start_at ? new Date(dto.start_at) : undefined,
         end_at: dto.expires_at ? new Date(dto.expires_at) : undefined,
@@ -430,7 +435,8 @@ export class CouponService {
     }
 
     // Check time window
-    const now = new Date();
+    // Use IST time to ensure consistent timezone comparison with database timestamps
+    const now = TimezoneUtil.getCurrentISTTime();
     if (coupon.start_at && now < coupon.start_at) {
       return {
         valid: false,
@@ -1018,7 +1024,8 @@ export class CouponService {
       };
     }
 
-    const now = new Date();
+    // Use IST time to ensure consistent timezone comparison with database timestamps
+    const now = TimezoneUtil.getCurrentISTTime();
     let valid = coupon.status === CouponStatus.ACTIVE;
     let message = "";
 

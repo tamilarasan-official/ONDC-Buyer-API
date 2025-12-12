@@ -331,6 +331,7 @@ export class AdminCouponController {
           start_at: "2025-01-01T00:00:00Z",
           user_usage_limit: 1,
           global_usage_limit: 200,
+          priority: 5,
           preview: false,
           type_meta: {
             item_id: 123,
