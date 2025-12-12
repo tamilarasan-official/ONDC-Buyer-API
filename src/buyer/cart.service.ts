@@ -30,9 +30,11 @@ import { CouponService } from "../coupon/services/coupon.service";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
+import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { TimezoneUtil } from "../shared/utils/timezone.util";
 
 @Injectable()
 export class CartService {
@@ -514,22 +516,38 @@ export class CartService {
     );
 
     // Find active PREORDER coupon for this item
+    // IMPORTANT: Must check both coupon status AND campaign status
+    // If multiple coupons match, select by priority (higher first), then by creation date (newest first)
     const queryBuilder = this.couponRepository
       .createQueryBuilder("coupon")
       .leftJoinAndSelect("coupon.campaign", "campaign")
       .where("coupon.type = :type", { type: CouponType.PREORDER })
       .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+      .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
       .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: itemId.toString() })
       .andWhere(
         "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
         { storeId }
-      );
+      )
+      .orderBy("coupon.priority", "DESC", "NULLS LAST") // Higher priority first, nulls last
+      .addOrderBy("coupon.created_at", "DESC"); // Newest first if same priority
 
     if (numericCampaignId) {
       queryBuilder.andWhere("coupon.campaign_id = :campaignId", { campaignId: numericCampaignId });
     }
 
-    const coupon = await queryBuilder.getOne();
+    const coupons = await queryBuilder.getMany();
+
+    // Log warning if multiple coupons match
+    if (coupons.length > 1) {
+      this.logger.warn(
+        `⚠️ Multiple preorder coupons found for item_id=${itemId}, store_id=${storeId}, campaign_id=${numericCampaignId || 'any'}. ` +
+        `Found ${coupons.length} coupons: ${coupons.map(c => `coupon_id=${c.id}, priority=${c.priority || 'null'}`).join(', ')}. ` +
+        `Selecting coupon_id=${coupons[0].id} (highest priority/newest)`
+      );
+    }
+
+    const coupon = coupons.length > 0 ? coupons[0] : null;
 
     if (!coupon) {
       this.logger.error(
@@ -545,7 +563,8 @@ export class CartService {
     );
 
     // Check campaign is active (time-based)
-    const now = new Date();
+    // Use IST time to ensure consistent timezone comparison with database timestamps
+    const now = TimezoneUtil.getCurrentISTTime();
     if (coupon.start_at && now < coupon.start_at) {
       throw new BadRequestException("Preorder campaign has not started yet");
     }
@@ -1694,6 +1713,10 @@ export class CartService {
         // First check if item has preorder flag set
         if (item.is_preorder && item.preorder_campaign_id) {
           try {
+            this.logger.debug(
+              `🔍 Checking preorder campaign for cart item: item_id=${item.item.id}, preorder_campaign_id=${item.preorder_campaign_id}`
+            );
+
             const preorderCoupon = await this.couponRepository.findOne({
               where: { id: item.preorder_campaign_id },
             });
@@ -1720,6 +1743,20 @@ export class CartService {
                 available_slots: availableSlots,
                 free_delivery: preorderCoupon.type_meta?.free_delivery === true,
               };
+
+              this.logger.log(
+                `📦 Preorder campaign attached to cart item: item_id=${item.item.id}, ` +
+                `is_preorder=${itemPayload.is_preorder}, ` +
+                `campaign_id=${itemPayload.preorder_campaign.id}, ` +
+                `title="${itemPayload.preorder_campaign.title}", ` +
+                `available_slots=${itemPayload.preorder_campaign.available_slots}, ` +
+                `delivery_date=${itemPayload.preorder_campaign.delivery_date || 'null'}, ` +
+                `free_delivery=${itemPayload.preorder_campaign.free_delivery}`
+              );
+            } else {
+              this.logger.warn(
+                `⚠️ Preorder coupon ${item.preorder_campaign_id} not found or missing type_meta for item_id=${item.item.id}`
+              );
             }
           } catch (error) {
             this.logger.warn(
@@ -1764,7 +1801,13 @@ export class CartService {
               };
 
               this.logger.log(
-                `✅ Added preorder info to item ${item.item.id} via cart coupon fallback`,
+                `📦 Preorder campaign attached via cart coupon fallback: item_id=${item.item.id}, ` +
+                `is_preorder=${itemPayload.is_preorder}, ` +
+                `campaign_id=${itemPayload.preorder_campaign.id}, ` +
+                `title="${itemPayload.preorder_campaign.title}", ` +
+                `available_slots=${itemPayload.preorder_campaign.available_slots}, ` +
+                `delivery_date=${itemPayload.preorder_campaign.delivery_date || 'null'}, ` +
+                `free_delivery=${itemPayload.preorder_campaign.free_delivery}`
               );
             }
           } catch (error) {
@@ -1780,16 +1823,33 @@ export class CartService {
               `🔍 FALLBACK 2: Checking for preorder campaign for item ${item.item.id}, store ${cart.store.id}`,
             );
             
-            const preorderCoupon = await this.couponRepository
+            // IMPORTANT: Must check both coupon status AND campaign status
+            // If multiple coupons match, select by priority (higher first), then by creation date (newest first)
+            const preorderCoupons = await this.couponRepository
               .createQueryBuilder("coupon")
+              .leftJoinAndSelect("coupon.campaign", "campaign")
               .where("coupon.type = :type", { type: CouponType.PREORDER })
               .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+              .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
               .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.item.id.toString() })
               .andWhere(
                 "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
                 { storeId: cart.store.id }
               )
-              .getOne();
+              .orderBy("coupon.priority", "DESC", "NULLS LAST") // Higher priority first, nulls last
+              .addOrderBy("coupon.created_at", "DESC") // Newest first if same priority
+              .getMany();
+
+            // Log warning if multiple coupons match
+            if (preorderCoupons.length > 1) {
+              this.logger.warn(
+                `⚠️ Multiple preorder coupons found for item_id=${item.item.id}, store_id=${cart.store.id} (FALLBACK 2). ` +
+                `Found ${preorderCoupons.length} coupons: ${preorderCoupons.map(c => `coupon_id=${c.id}, priority=${c.priority || 'null'}`).join(', ')}. ` +
+                `Selecting coupon_id=${preorderCoupons[0].id} (highest priority/newest)`
+              );
+            }
+
+            const preorderCoupon = preorderCoupons.length > 0 ? preorderCoupons[0] : null;
 
             if (preorderCoupon) {
               this.logger.debug(
@@ -1797,7 +1857,8 @@ export class CartService {
               );
               
               // Check if campaign is active (time-based)
-              const now = new Date();
+              // Use IST time to ensure consistent timezone comparison with database timestamps
+              const now = TimezoneUtil.getCurrentISTTime();
               const isActive = 
                 (!preorderCoupon.start_at || now >= preorderCoupon.start_at) &&
                 (!preorderCoupon.end_at || now <= preorderCoupon.end_at);
@@ -1834,7 +1895,14 @@ export class CartService {
                 };
 
                 this.logger.log(
-                  `✅ Added preorder info to item ${item.item.id} via active campaign fallback (coupon not applied to cart, slots: ${availableSlots})`,
+                  `📦 Preorder campaign attached via active campaign fallback: item_id=${item.item.id}, ` +
+                  `is_preorder=${itemPayload.is_preorder}, ` +
+                  `campaign_id=${itemPayload.preorder_campaign.id}, ` +
+                  `title="${itemPayload.preorder_campaign.title}", ` +
+                  `available_slots=${itemPayload.preorder_campaign.available_slots}, ` +
+                  `delivery_date=${itemPayload.preorder_campaign.delivery_date || 'null'}, ` +
+                  `free_delivery=${itemPayload.preorder_campaign.free_delivery}, ` +
+                  `coupon_id=${preorderCoupon.id} (not applied to cart)`
                 );
               } else {
                 this.logger.debug(

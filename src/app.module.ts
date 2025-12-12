@@ -80,8 +80,6 @@ import Redis from "ioredis";
         ssl: { rejectUnauthorized: false },
         extra: {
           ssl: { rejectUnauthorized: false },
-          max: 10,
-          min: 2,
         },
       }),
     }),

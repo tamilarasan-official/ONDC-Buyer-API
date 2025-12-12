@@ -23,6 +23,8 @@ import {
   FavoriteRestaurantDto,
   FavoriteStatusDto,
   ToggleFavoriteResponseDto,
+  FavoriteItemsResponseDto,
+  FavoriteRestaurantsResponseDto,
 } from "./dto/favorites.dto";
 
 @ApiTags("Favorites")
@@ -72,7 +74,7 @@ export class FavoritesController {
   @ApiOperation({
     summary: "Get all favorite items",
     description:
-      "Retrieve all items favorited by the authenticated user, with optional location for distance calculation.",
+      "Retrieve all items favorited by the authenticated user, with optional location for distance calculation. Returns empty array if favorites feature is not available.",
   })
   @ApiQuery({
     name: "lat",
@@ -91,20 +93,7 @@ export class FavoritesController {
   @ApiResponse({
     status: 200,
     description: "Favorite items retrieved successfully",
-    schema: {
-      type: "object",
-      properties: {
-        success: { type: "boolean", example: true },
-        message: {
-          type: "string",
-          example: "Favorite items retrieved successfully",
-        },
-        data: {
-          type: "array",
-          items: { $ref: "#/components/schemas/FavoriteItemDto" },
-        },
-      },
-    },
+    type: FavoriteItemsResponseDto,
   })
   async getFavoriteItems(
     @Req() req: any,
@@ -120,7 +109,7 @@ export class FavoritesController {
   @Get("items/:itemId/check")
   @ApiOperation({
     summary: "Check if item is favorited",
-    description: "Check if a specific item is in the user favorites.",
+    description: "Check if a specific item is in the user favorites. Returns false if favorites feature is not available.",
   })
   @ApiParam({
     name: "itemId",
@@ -197,7 +186,7 @@ export class FavoritesController {
   @ApiOperation({
     summary: "Get all favorite restaurants",
     description:
-      "Retrieve all restaurants favorited by the authenticated user, with optional location for distance calculation.",
+      "Retrieve all restaurants favorited by the authenticated user, with optional location for distance calculation. Returns empty array if favorites feature is not available.",
   })
   @ApiQuery({
     name: "lat",
@@ -216,20 +205,7 @@ export class FavoritesController {
   @ApiResponse({
     status: 200,
     description: "Favorite restaurants retrieved successfully",
-    schema: {
-      type: "object",
-      properties: {
-        success: { type: "boolean", example: true },
-        message: {
-          type: "string",
-          example: "Favorite restaurants retrieved successfully",
-        },
-        data: {
-          type: "array",
-          items: { $ref: "#/components/schemas/FavoriteRestaurantDto" },
-        },
-      },
-    },
+    type: FavoriteRestaurantsResponseDto,
   })
   async getFavoriteRestaurants(
     @Req() req: any,
@@ -249,7 +225,7 @@ export class FavoritesController {
   @Get("restaurants/:storeId/check")
   @ApiOperation({
     summary: "Check if restaurant is favorited",
-    description: "Check if a specific restaurant is in the user favorites.",
+    description: "Check if a specific restaurant is in the user favorites. Returns false if favorites feature is not available.",
   })
   @ApiParam({
     name: "storeId",
@@ -292,7 +268,7 @@ export class FavoritesController {
   @ApiOperation({
     summary: "Get all favorites",
     description:
-      "Retrieve all favorites (both items and restaurants) for the authenticated user in a single response, grouped by type.",
+      "Retrieve all favorites (both items and restaurants) for the authenticated user in a single response, grouped by type. Returns empty arrays if favorites feature is not available.",
   })
   @ApiQuery({
     name: "lat",

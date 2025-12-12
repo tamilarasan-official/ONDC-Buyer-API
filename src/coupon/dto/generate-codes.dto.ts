@@ -152,6 +152,18 @@ export class GenerateCodesDto {
   global_usage_limit?: number;
 
   @ApiProperty({
+    description: "Priority for coupon selection when multiple coupons match (higher number = higher priority). Default: 0. Used when multiple preorder coupons exist for the same item - the one with highest priority is selected.",
+    example: 5,
+    default: 0,
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  priority?: number;
+
+  @ApiProperty({
     description: "Preview mode (return first 10 codes only)",
     example: false,
     default: false,

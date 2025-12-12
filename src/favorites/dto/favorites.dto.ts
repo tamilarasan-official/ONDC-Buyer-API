@@ -127,47 +127,52 @@ export class FavoriteRestaurantDto {
   is_favorite: boolean;
 }
 
+export class AllFavoritesSummaryDto {
+  @ApiProperty({ description: "Total number of favorites", example: 15 })
+  total_favorites: number;
+
+  @ApiProperty({ description: "Number of favorite restaurants", example: 5 })
+  favorite_restaurants: number;
+
+  @ApiProperty({ description: "Number of favorite items", example: 10 })
+  favorite_items: number;
+}
+
+export class AllFavoritesDataDto {
+  @ApiProperty({
+    description: "List of favorite restaurants",
+    type: [FavoriteRestaurantDto],
+  })
+  restaurants: FavoriteRestaurantDto[];
+
+  @ApiProperty({
+    description: "List of favorite items",
+    type: [FavoriteItemDto],
+  })
+  items: FavoriteItemDto[];
+
+  @ApiProperty({
+    description: "Summary of favorites",
+    type: AllFavoritesSummaryDto,
+  })
+  summary: AllFavoritesSummaryDto;
+}
+
 export class AllFavoritesResponseDto {
   @ApiProperty({ description: "Success status", example: true })
   success: boolean;
 
   @ApiProperty({
     description: "Response message",
-    example: "Favorites retrieved successfully",
+    example: "All favorites retrieved successfully",
   })
   message: string;
 
   @ApiProperty({
     description: "Favorites data",
-    type: "object",
-    properties: {
-      restaurants: {
-        type: "array",
-        items: { $ref: "#/components/schemas/FavoriteRestaurantDto" },
-      },
-      items: {
-        type: "array",
-        items: { $ref: "#/components/schemas/FavoriteItemDto" },
-      },
-      summary: {
-        type: "object",
-        properties: {
-          total_favorites: { type: "number", example: 15 },
-          favorite_restaurants: { type: "number", example: 5 },
-          favorite_items: { type: "number", example: 10 },
-        },
-      },
-    },
+    type: AllFavoritesDataDto,
   })
-  data: {
-    restaurants: FavoriteRestaurantDto[];
-    items: FavoriteItemDto[];
-    summary: {
-      total_favorites: number;
-      favorite_restaurants: number;
-      favorite_items: number;
-    };
-  };
+  data: AllFavoritesDataDto;
 }
 
 export class FavoriteStatusDto {
@@ -204,4 +209,38 @@ export class ToggleFavoriteResponseDto {
     type: FavoriteStatusDto,
   })
   data: FavoriteStatusDto;
+}
+
+export class FavoriteItemsResponseDto {
+  @ApiProperty({ description: "Success status", example: true })
+  success: boolean;
+
+  @ApiProperty({
+    description: "Response message",
+    example: "Favorite items retrieved successfully",
+  })
+  message: string;
+
+  @ApiProperty({
+    description: "List of favorite items",
+    type: [FavoriteItemDto],
+  })
+  data: FavoriteItemDto[];
+}
+
+export class FavoriteRestaurantsResponseDto {
+  @ApiProperty({ description: "Success status", example: true })
+  success: boolean;
+
+  @ApiProperty({
+    description: "Response message",
+    example: "Favorite restaurants retrieved successfully",
+  })
+  message: string;
+
+  @ApiProperty({
+    description: "List of favorite restaurants",
+    type: [FavoriteRestaurantDto],
+  })
+  data: FavoriteRestaurantDto[];
 }
