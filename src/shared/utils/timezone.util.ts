@@ -84,10 +84,13 @@ export class TimezoneUtil {
   /**
    * Get current day of week in IST timezone
    * @returns Day number (1=Monday, 2=Tuesday, ..., 6=Saturday, 7=Sunday)
+   * 
+   * IMPORTANT: Since getCurrentISTTime() stores IST time as UTC internally,
+   * we must use getUTCDay() to get the correct day of week.
    */
   public static getCurrentISTDay(): number {
     const istTime = this.getCurrentISTTime();
-    const jsDay = istTime.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+    const jsDay = istTime.getUTCDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
     // Convert JavaScript's getDay() (0=Sunday, 6=Saturday) to database format (1=Monday, 7=Sunday)
     return jsDay === 0 ? 7 : jsDay;
   }
@@ -95,10 +98,14 @@ export class TimezoneUtil {
   /**
    * Get current time in HHMM format (IST timezone)
    * @returns Time as number in HHMM format (e.g., 1430 for 2:30 PM)
+   * 
+   * IMPORTANT: Since getCurrentISTTime() stores IST time as UTC internally,
+   * we must use getUTCHours() and getUTCMinutes() to get the correct IST time.
    */
   public static getCurrentISTTimeHHMM(): number {
     const istTime = this.getCurrentISTTime();
-    return istTime.getHours() * 100 + istTime.getMinutes();
+    // Use UTC methods because getCurrentISTTime() stores IST time as UTC
+    return istTime.getUTCHours() * 100 + istTime.getUTCMinutes();
   }
 
   /**
@@ -132,16 +139,22 @@ export class TimezoneUtil {
     const istDate = date ? this.toIST(date) : this.getCurrentISTTime();
     const jsDay = istDate.getDay();
 
+    // IMPORTANT: Since getCurrentISTTime() stores IST time as UTC internally,
+    // we must use UTC methods to get the correct IST time components
+    const hours = istDate.getUTCHours();
+    const minutes = istDate.getUTCMinutes();
+    const seconds = istDate.getUTCSeconds();
+
     return {
       date: istDate,
-      year: istDate.getFullYear(),
-      month: istDate.getMonth() + 1, // 1-12
-      day: istDate.getDate(),
-      hours: istDate.getHours(),
-      minutes: istDate.getMinutes(),
-      seconds: istDate.getSeconds(),
+      year: istDate.getUTCFullYear(),
+      month: istDate.getUTCMonth() + 1, // 1-12
+      day: istDate.getUTCDate(),
+      hours: hours,
+      minutes: minutes,
+      seconds: seconds,
       dayOfWeek: jsDay === 0 ? 7 : jsDay,
-      timeHHMM: istDate.getHours() * 100 + istDate.getMinutes(),
+      timeHHMM: hours * 100 + minutes,
     };
   }
 
