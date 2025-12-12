@@ -1392,12 +1392,42 @@ export class BuyerService {
 
       // Show preorder info regardless of available slots (even if 0, user should know it's a preorder)
       item.is_preorder_available = true;
+      
+      // Calculate discount_amount so that: slashed_price = base_price - discount_amount = final_order_total
+      // Handle both number and string formats for base_price
+      const basePrice = item.price?.base_price 
+        ? (typeof item.price.base_price === 'string' 
+            ? parseFloat(item.price.base_price) 
+            : parseFloat(item.price.base_price.toString()))
+        : 0;
+      
+      // Final order price to show (12 as per requirement)
+      // This is the price after discount, which should equal: base_price - discount_amount
+      const finalOrderPrice = 12.0;
+      
+      let discountAmount = 0;
+      let discountAmountString = "0.00";
+      
+      if (basePrice > 0) {
+        // Calculate discount_amount so that: base_price - discount_amount = final_order_price
+        // Therefore: discount_amount = base_price - final_order_price
+        discountAmount = parseFloat((basePrice - finalOrderPrice).toFixed(2));
+        discountAmountString = discountAmount.toFixed(2); // Convert to string with 2 decimal places
+        
+        // Verify: slashed_price = base_price - discount_amount should equal final_order_price
+        const slashedPrice = basePrice - discountAmount;
+        
+        this.logger.log(
+          `💰 Preorder item ${item.id}: base_price=${basePrice}, final_order_price=${finalOrderPrice}, discount_amount=${discountAmountString}, slashed_price=${slashedPrice}`
+        );
+      }
+      
       item.preorder_campaign = {
         id: preorderCoupon.campaign_id || preorderCoupon.id,
         title: preorderCoupon.type_meta?.title || "Preorder",
         available_slots: availableSlots,
         delivery_date: preorderCoupon.type_meta?.delivery_date,
-        discount_amount: preorderCoupon.value || 0,
+        discount_amount: discountAmountString, // String format with 2 decimal places
         free_delivery: preorderCoupon.type_meta?.free_delivery === true,
       };
     } catch (error) {
@@ -2484,7 +2514,7 @@ export class BuyerService {
           rating: ratingData.rating,
           is_available: (item.quantities?.[0]?.available_count || 0) > 0,
           is_recommended: item.is_recommended || false,
-          tax_rate: item.tax_rate || null,
+          tax_rate: item.tax_rate !== null && item.tax_rate !== undefined ? parseFloat(item.tax_rate.toString()) : null,
           tax_type: item.tax_type || null,
           hsn_code: item.hsn_code || null,
           is_favorite: favoriteItemIds.has(item.id),
@@ -2620,7 +2650,7 @@ export class BuyerService {
           rating: ratingData.rating,
           is_available: variants.some((v) => v.is_available),
           is_recommended: baseItem.is_recommended || false,
-          tax_rate: baseItem.tax_rate || null,
+          tax_rate: baseItem.tax_rate !== null && baseItem.tax_rate !== undefined ? parseFloat(baseItem.tax_rate.toString()) : null,
           tax_type: baseItem.tax_type || null,
           hsn_code: baseItem.hsn_code || null,
           is_favorite: favoriteItemIds.has(baseItem.id),

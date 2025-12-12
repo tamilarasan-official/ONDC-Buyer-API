@@ -399,7 +399,7 @@ export class RestaurantItemDto {
   is_preorder_available?: boolean;
 
   @ApiProperty({ 
-    description: "Preorder campaign info (if available)", 
+    description: "Preorder campaign info (if available). The discount_amount is calculated as base_price - final_order_price (12) so that slashed_price = base_price - discount_amount equals the final order total. This allows showing the slashed base price and the final order price.", 
     required: false 
   })
   preorder_campaign?: {
@@ -407,9 +407,25 @@ export class RestaurantItemDto {
     title: string;
     available_slots: number;
     delivery_date: string;
-    discount_amount: number;
+    discount_amount: string;
     free_delivery: boolean;
   };
+
+  @ApiProperty({
+    description: "Tax rate percentage",
+    example: 18.0,
+    type: "number",
+    required: false,
+  })
+  tax_rate?: number;
+
+  @ApiProperty({
+    description: "Tax type (e.g., GST, CGST+SGST, IGST, VAT)",
+    example: "GST",
+    type: "string",
+    required: false,
+  })
+  tax_type?: string;
 }
 
 export class RestaurantCategoryDto {
