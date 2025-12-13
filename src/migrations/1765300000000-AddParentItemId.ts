@@ -4,18 +4,24 @@ export class AddParentItemId1765300000000 implements MigrationInterface {
   name = "AddParentItemId1765300000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Add parent_item_id column to item table
-    await queryRunner.query(`ALTER TABLE "item" ADD "parent_item_id" integer`);
+    // Check if parent_item_id column exists
+    const table = await queryRunner.getTable("item");
+    const column = table?.findColumnByName("parent_item_id");
 
-    // Add foreign key constraint
-    await queryRunner.query(
-      `ALTER TABLE "item" ADD CONSTRAINT "FK_item_parent_item_id" FOREIGN KEY ("parent_item_id") REFERENCES "item"("id") ON DELETE CASCADE`,
-    );
+    if (!column) {
+      // Add parent_item_id column to item table
+      await queryRunner.query(`ALTER TABLE "item" ADD "parent_item_id" integer`);
 
-    // Add index for better performance
-    await queryRunner.query(
-      `CREATE INDEX "IDX_item_parent_item_id" ON "item" ("parent_item_id")`,
-    );
+      // Add foreign key constraint
+      await queryRunner.query(
+        `ALTER TABLE "item" ADD CONSTRAINT "FK_item_parent_item_id" FOREIGN KEY ("parent_item_id") REFERENCES "item"("id") ON DELETE CASCADE`,
+      );
+
+      // Add index for better performance
+      await queryRunner.query(
+        `CREATE INDEX "IDX_item_parent_item_id" ON "item" ("parent_item_id")`,
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

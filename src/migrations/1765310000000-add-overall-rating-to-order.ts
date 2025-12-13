@@ -6,10 +6,16 @@ export class AddOverallRatingToOrder1765310000000
   name = "AddOverallRatingToOrder1765310000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // Add overall_rating column to order table
-    await queryRunner.query(
-      `ALTER TABLE "order" ADD "overall_rating" numeric(3,2)`,
-    );
+    // Check if overall_rating column exists
+    const table = await queryRunner.getTable("order");
+    const column = table?.findColumnByName("overall_rating");
+
+    if (!column) {
+      // Add overall_rating column to order table
+      await queryRunner.query(
+        `ALTER TABLE "order" ADD "overall_rating" numeric(3,2)`,
+      );
+    }
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {

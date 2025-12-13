@@ -20,6 +20,7 @@ import { InvoiceController } from "./invoice.controller";
 import { SharedNotificationModule } from "../shared/notification.module";
 import { StoreModule } from "../store/store.module";
 import { CouponModule } from "../coupon/coupon.module";
+import { AppSettingsModule } from "../shared/app-settings.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -62,6 +63,7 @@ import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
     ConfigModule,
     StoreModule,
     CouponModule,
+    AppSettingsModule,
     TypeOrmModule.forFeature([
       Store,
       StoreLocation,

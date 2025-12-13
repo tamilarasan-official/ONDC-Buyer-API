@@ -165,7 +165,7 @@ export class BuyerService {
           ),
           this.getWhatsOnYourMind(vegMode),
           this.getPromotionalBanner(),
-          Promise.resolve(this.appOperationHoursService.checkAppOperationStatus()),
+          this.appOperationHoursService.checkAppOperationStatus(),
         ]);
 
       this.logger.log(
@@ -901,7 +901,7 @@ export class BuyerService {
       const totalPages = Math.ceil(totalResults / limit);
 
       // Get app operation status
-      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+      const appOperationStatus = await this.appOperationHoursService.checkAppOperationStatus();
 
       return {
         success: true,
@@ -1797,7 +1797,7 @@ export class BuyerService {
       this.logger.log(`✅ Restaurant details retrieved successfully`);
 
       // Get app operation status
-      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+      const appOperationStatus = await this.appOperationHoursService.checkAppOperationStatus();
       restaurantDetails.app_operation_status = {
         is_open: appOperationStatus.isOpen,
         reason: appOperationStatus.reason,
@@ -2370,7 +2370,7 @@ export class BuyerService {
       const totalCategories = categories.length;
 
       // Get app operation status
-      const appOperationStatus = this.appOperationHoursService.checkAppOperationStatus();
+      const appOperationStatus = await this.appOperationHoursService.checkAppOperationStatus();
 
       const menuData = {
         restaurant_id: restaurant.id,

@@ -450,6 +450,253 @@ The buyer app provides a complete food delivery experience with:
 }
 ```
 
+### **❤️ Favorites APIs**
+
+#### **POST /api/buyer/favorites/items/:itemId**
+**Description**: Toggle item favorite (add if not favorited, remove if already favorited)
+
+**Authentication**: Required (JWT token)
+
+**Path Parameters**:
+- `itemId` (number, required): Item ID to toggle favorite
+
+**Response**:
+```json
+{
+  "success": true,
+  "action": "added",
+  "message": "Item added to favorites",
+  "data": {
+    "is_favorite": true,
+    "favorited_at": "2025-12-12T20:30:00.000Z"
+  }
+}
+```
+
+**Example - Remove from favorites**:
+```json
+{
+  "success": true,
+  "action": "removed",
+  "message": "Item removed from favorites",
+  "data": {
+    "is_favorite": false,
+    "favorited_at": null
+  }
+}
+```
+
+---
+
+#### **GET /api/buyer/favorites/items**
+**Description**: Get all favorite items for the authenticated user
+
+**Authentication**: Required (JWT token)
+
+**Query Parameters**:
+- `lat` (optional, number): User latitude for distance calculation
+- `lng` (optional, number): User longitude for distance calculation
+
+**Response**:
+```json
+{
+  "success": true,
+  "message": "Favorite items retrieved successfully",
+  "data": [
+    {
+      "id": 123,
+      "name": "Margherita Pizza",
+      "description": "Classic margherita with fresh mozzarella",
+      "images": ["https://example.com/pizza.jpg"],
+      "price": {
+        "base_price": 299.00,
+        "currency": "INR"
+      },
+      "restaurant": {
+        "id": 1,
+        "name": "Pizza Palace",
+        "logo_url": "https://example.com/logo.jpg"
+      },
+      "distance": 2.5,
+      "favorited_at": "2025-12-10T15:30:00.000Z",
+      "is_favorite": true
+    }
+  ]
+}
+```
+
+---
+
+#### **GET /api/buyer/favorites/items/:itemId/check**
+**Description**: Check if a specific item is favorited by the user
+
+**Authentication**: Required (JWT token)
+
+**Path Parameters**:
+- `itemId` (number, required): Item ID to check
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "is_favorite": true,
+    "favorited_at": "2025-12-10T15:30:00.000Z"
+  }
+}
+```
+
+---
+
+#### **POST /api/buyer/favorites/restaurants/:storeId**
+**Description**: Toggle restaurant favorite (add if not favorited, remove if already favorited)
+
+**Authentication**: Required (JWT token)
+
+**Path Parameters**:
+- `storeId` (number, required): Restaurant/Store ID to toggle favorite
+
+**Response**:
+```json
+{
+  "success": true,
+  "action": "added",
+  "message": "Restaurant added to favorites",
+  "data": {
+    "is_favorite": true,
+    "favorited_at": "2025-12-12T20:30:00.000Z"
+  }
+}
+```
+
+---
+
+#### **GET /api/buyer/favorites/restaurants**
+**Description**: Get all favorite restaurants for the authenticated user
+
+**Authentication**: Required (JWT token)
+
+**Query Parameters**:
+- `lat` (optional, number): User latitude for distance calculation
+- `lng` (optional, number): User longitude for distance calculation
+
+**Response**:
+```json
+{
+  "success": true,
+  "message": "Favorite restaurants retrieved successfully",
+  "data": [
+    {
+      "id": 1,
+      "name": "Pizza Palace",
+      "description": "Authentic Italian pizzas",
+      "logo_url": "https://example.com/logo.jpg",
+      "fssai_license": "12345678901234",
+      "location": {
+        "lat": 12.9716,
+        "lng": 77.5946,
+        "city": "Bangalore",
+        "locality": "Koramangala"
+      },
+      "distance": 2.5,
+      "rating": 4.5,
+      "delivery_time": "25-30 mins",
+      "favorited_at": "2025-12-10T15:30:00.000Z",
+      "is_favorite": true
+    }
+  ]
+}
+```
+
+---
+
+#### **GET /api/buyer/favorites/restaurants/:storeId/check**
+**Description**: Check if a specific restaurant is favorited by the user
+
+**Authentication**: Required (JWT token)
+
+**Path Parameters**:
+- `storeId` (number, required): Restaurant/Store ID to check
+
+**Response**:
+```json
+{
+  "success": true,
+  "data": {
+    "is_favorite": true,
+    "favorited_at": "2025-12-10T15:30:00.000Z"
+  }
+}
+```
+
+---
+
+#### **GET /api/buyer/favorites/all**
+**Description**: Get all favorites (both items and restaurants) in a single response
+
+**Authentication**: Required (JWT token)
+
+**Query Parameters**:
+- `lat` (optional, number): User latitude for distance calculation
+- `lng` (optional, number): User longitude for distance calculation
+
+**Response**:
+```json
+{
+  "success": true,
+  "message": "All favorites retrieved successfully",
+  "data": {
+    "items": [
+      {
+        "id": 123,
+        "name": "Margherita Pizza",
+        "description": "Classic margherita with fresh mozzarella",
+        "images": ["https://example.com/pizza.jpg"],
+        "price": {
+          "base_price": 299.00,
+          "currency": "INR"
+        },
+        "restaurant": {
+          "id": 1,
+          "name": "Pizza Palace",
+          "logo_url": "https://example.com/logo.jpg"
+        },
+        "distance": 2.5,
+        "favorited_at": "2025-12-10T15:30:00.000Z",
+        "is_favorite": true
+      }
+    ],
+    "restaurants": [
+      {
+        "id": 1,
+        "name": "Pizza Palace",
+        "description": "Authentic Italian pizzas",
+        "logo_url": "https://example.com/logo.jpg",
+        "location": {
+          "lat": 12.9716,
+          "lng": 77.5946,
+          "city": "Bangalore",
+          "locality": "Koramangala"
+        },
+        "distance": 2.5,
+        "rating": 4.5,
+        "delivery_time": "25-30 mins",
+        "favorited_at": "2025-12-10T15:30:00.000Z",
+        "is_favorite": true
+      }
+    ]
+  }
+}
+```
+
+**Notes**:
+- All favorites endpoints require JWT authentication
+- `is_favorite` field is automatically included in search, restaurant details, and menu responses when user is authenticated
+- Distance calculation is optional and requires `lat` and `lng` query parameters
+- Returns empty arrays if favorites feature is not available (graceful degradation)
+
+---
+
 ### **🛒 Cart Management APIs**
 
 #### **GET /api/buyer/cart**
@@ -1404,6 +1651,7 @@ Authorization: Bearer <jwt_token>
 - ✅ **Search API** (`GET /api/buyer/search`)
 - ✅ **Restaurant Details** (`GET /api/buyer/restaurants/:id`)
 - ✅ **Menu API** (`GET /api/buyer/restaurants/:id/menu`)
+- ✅ **Favorites APIs** (`GET/POST /api/buyer/favorites/*`) - Items and Restaurants
 - ✅ **Cart Management APIs** (`GET/POST/PUT/DELETE /api/buyer/cart/*`)
 - ✅ **Order Management APIs** (`POST/GET /api/buyer/orders/*`)
 - ✅ **Payment Integration** (`POST /api/buyer/payments/*`)
