@@ -115,6 +115,7 @@ Content-Type: application/json
   "expires_at": "2025-12-31T23:59:59Z",
   "user_usage_limit": 1,
   "global_usage_limit": 1000,
+  "priority": 5,
   "preview": false
 }
 ```

@@ -72,6 +72,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 | `expires_at` | datetime | Expiration date/time | ❌ | `"2025-12-31T23:59:59Z"` |
 | `user_usage_limit` | number | Uses per user | ❌ | `1` (default: 1) |
 | `global_usage_limit` | number | Total uses across all users | ❌ | `1000` (null = unlimited) |
+| `priority` | number | Priority for coupon selection when multiple coupons match (higher = selected first) | ❌ | `0` (default: 0) |
 | `status` | enum | Coupon status | Auto | `"active"`, `"expired"`, `"exhausted"` |
 | `type_meta` | JSON | Type-specific metadata | ❌ | `{"nth": 3}` or `{"delivery_fee_cap": 50}` |
 | `exported` | boolean | Whether codes were exported | Auto | `false` |
@@ -215,8 +216,9 @@ Body: {
   start_at?: string (ISO 8601)
   user_usage_limit?: number (default: 1)
   global_usage_limit?: number (null = unlimited)
+  priority?: number (default: 0, >= 0)
   preview?: boolean (default: false)
-  type_meta?: object (for nth_order, referral, free_delivery)
+  type_meta?: object (for nth_order, referral, free_delivery, preorder)
 }
 Response: {
   codes: string[],
@@ -230,6 +232,7 @@ Response: {
 - `max_discount_amount` is **required** for percent type
 - `type_meta.nth` is required for `nth_order` type
 - `type_meta.delivery_fee_cap` is optional for `free_delivery` type
+- `priority` defaults to `0` if not provided. Higher priority coupons are selected first when multiple coupons match the same item (e.g., multiple preorder coupons for the same item_id)
 
 ---
 

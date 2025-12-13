@@ -4,6 +4,7 @@ import {
   ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { AppSettingsService } from "./app-settings.service";
 import { TimezoneUtil } from "../utils/timezone.util";
 
 export interface AppOperationStatus {
@@ -17,22 +18,25 @@ export interface AppOperationStatus {
 export class AppOperationHoursService {
   private readonly logger = new Logger(AppOperationHoursService.name);
 
-  constructor(private readonly configService: ConfigService) {}
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly appSettingsService: AppSettingsService,
+  ) {}
 
   /**
    * Check if app is currently accepting orders based on app operation hours
    * This is separate from restaurant timings - it's a global app-level control
    * @returns AppOperationStatus with isOpen flag and details
    */
-  checkAppOperationStatus(): AppOperationStatus {
+  async checkAppOperationStatus(): Promise<AppOperationStatus> {
     try {
       // Check if app operation hours are enabled
-      const appHoursEnabled = this.configService.get<string>(
+      const appHoursEnabled = await this.appSettingsService.getBoolean(
         "APP_OPERATION_HOURS_ENABLED",
-        "false",
+        false,
       );
 
-      if (appHoursEnabled !== "true") {
+      if (!appHoursEnabled) {
         // App hours not enabled - app is always open
         return {
           isOpen: true,
@@ -49,10 +53,10 @@ export class AppOperationHoursService {
         `🕐 Checking app operation status - IST Day: ${currentDay}, Time: ${currentTime} (${TimezoneUtil.formatTimeHHMM(currentTime)})`,
       );
 
-      // Get app operation hours from environment variables
+      // Get app operation hours from database
       // Format: "0900-2200" (24-hour format, HHMM-HHMM)
       // Same hours for all days (Mon-Sun)
-      const appHoursConfig = this.configService.get<string>(
+      const appHoursConfig = await this.appSettingsService.get(
         "APP_OPERATION_HOURS",
         "",
       );
@@ -184,8 +188,8 @@ export class AppOperationHoursService {
    * Validate if app is open and throw error if closed
    * @throws ServiceUnavailableException (503) if app is closed
    */
-  validateAppIsOpen(): void {
-    const status = this.checkAppOperationStatus();
+  async validateAppIsOpen(): Promise<void> {
+    const status = await this.checkAppOperationStatus();
     if (!status.isOpen) {
       throw new ServiceUnavailableException(
         status.message ||

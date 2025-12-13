@@ -1,23 +1,33 @@
 import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 import Razorpay from "razorpay";
 import * as crypto from "crypto";
 
 @Injectable()
 export class RazorpayService {
   private readonly logger = new Logger(RazorpayService.name);
-  private readonly razorpay: Razorpay;
-  private readonly keyId: string;
-  private readonly keySecret: string;
+  private razorpay: Razorpay;
+  private keyId: string;
+  private keySecret: string;
 
-  constructor(private readonly configService: ConfigService) {
-    // Get Razorpay credentials from environment or use defaults
-    this.keyId =
-      this.configService.get<string>("RAZORPAY_KEY_ID") ||
-      "rzp_test_1DP5mmOlF5G5ag";
-    this.keySecret =
-      this.configService.get<string>("RAZORPAY_KEY_SECRET") ||
-      "thisisasecretkey";
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly appSettingsService: AppSettingsService,
+  ) {
+    this.initializeRazorpay();
+  }
+
+  private async initializeRazorpay() {
+    // Get Razorpay credentials from database or use defaults
+    this.keyId = (await this.appSettingsService.get(
+      "RAZORPAY_KEY_ID",
+      "rzp_test_1DP5mmOlF5G5ag",
+    )) || "rzp_test_1DP5mmOlF5G5ag";
+    this.keySecret = (await this.appSettingsService.get(
+      "RAZORPAY_KEY_SECRET",
+      "thisisasecretkey",
+    )) || "thisisasecretkey";
 
     // Validate credentials
     if (
@@ -26,7 +36,7 @@ export class RazorpayService {
       this.keyId === "rzp_test_1DP5mmOlF5G5ag"
     ) {
       this.logger.warn(
-        `⚠️ Using default Razorpay test credentials. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET environment variables for production.`,
+        `⚠️ Using default Razorpay test credentials. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in app settings for production.`,
       );
     }
 

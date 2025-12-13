@@ -34,6 +34,7 @@ import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
 
 @Injectable()
@@ -70,6 +71,7 @@ export class CartService {
     private readonly redisCouponService: RedisCouponService,
     private readonly configService: ConfigService,
     private readonly appOperationHoursService: AppOperationHoursService,
+    private readonly appSettingsService: AppSettingsService,
   ) { }
 
   /**
@@ -95,7 +97,7 @@ export class CartService {
 
       if (!cart) {
         // Get platform fee configuration for empty cart
-        const platformFeeConfig = this.getPlatformFee();
+        const platformFeeConfig = await this.getPlatformFee();
 
         return {
           success: true,
@@ -1078,7 +1080,7 @@ export class CartService {
       const taxAmount = Number(cart.tax_amount || 0);
       const tipAmount = Number(cart.tip_amount || 0);
 
-      const platformFeeConfig = this.getPlatformFee();
+      const platformFeeConfig = await this.getPlatformFee();
       // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
@@ -1162,7 +1164,7 @@ export class CartService {
       const discountAmount = Number(cart.discount_amount || 0);
       const tipAmountValue = Number(cart.tip_amount || 0);
 
-      const platformFeeConfig = this.getPlatformFee();
+      const platformFeeConfig = await this.getPlatformFee();
       // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
@@ -1421,7 +1423,7 @@ export class CartService {
     taxAmount = Number(taxAmount.toFixed(2));
 
     // Get platform fee configuration
-    const platformFeeConfig = this.getPlatformFee();
+    const platformFeeConfig = await this.getPlatformFee();
     // Only include platform fee in calculation if enabled
     const platformFeeForCalculation = platformFeeConfig.isEnabled
       ? platformFeeConfig.amount
@@ -1464,18 +1466,22 @@ export class CartService {
    * Always returns the platform fee amount for display purposes
    * isEnabled indicates whether to include it in final_amount calculation
    */
-  public getPlatformFeeConfig(): {
+  public async getPlatformFeeConfig(): Promise<{
     amount: number;
     isEnabled: boolean;
-  } {
-    const includeFee =
-      this.configService.get<string>("INCLUDE_PLATFORM_FEE") === "true";
-    const platformFeeStr = this.configService.get<string>("PLATFORM_FEE") || "0";
+  }> {
+    const includeFee = await this.appSettingsService.getBoolean(
+      "INCLUDE_PLATFORM_FEE",
+      false,
+    );
+    const platformFeeAmount = await this.appSettingsService.getNumber(
+      "PLATFORM_FEE",
+      0,
+    );
     // Always return the platform fee amount (for display), regardless of includeFee
-    const platformFeeAmount = Math.max(0, parseFloat(platformFeeStr) || 0);
 
     return {
-      amount: Number(platformFeeAmount.toFixed(2)),
+      amount: Number((platformFeeAmount || 0).toFixed(2)),
       isEnabled: includeFee, // This determines if it's included in final_amount
     };
   }
@@ -1484,11 +1490,11 @@ export class CartService {
    * DEPRECATED: Use getPlatformFeeConfig() instead
    * Kept for backward compatibility
    */
-  private getPlatformFee(): {
+  private async getPlatformFee(): Promise<{
     amount: number;
     isEnabled: boolean;
-  } {
-    return this.getPlatformFeeConfig();
+  }> {
+    return await this.getPlatformFeeConfig();
   }
 
   /**
@@ -1590,12 +1596,8 @@ export class CartService {
       }
     }
 
-    // Get platform fee configuration
-    const platformFeeConfig = this.getPlatformFee();
-
-    // Recalculate final_amount based on current values and platform fee setting
-    // Only include platform fee in calculation if enabled
-    const platformFeeForCalculation = platformFeeConfig.isEnabled
+      // Get platform fee configuration
+      const platformFeeConfig = await this.getPlatformFee();    const platformFeeForCalculation = platformFeeConfig.isEnabled
       ? platformFeeConfig.amount
       : 0;
 
