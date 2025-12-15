@@ -128,7 +128,7 @@ export class OrderService {
 
       // NEW: Validate app operation hours before allowing order creation
       // This is separate from restaurant timings - it's a global app-level control
-      this.appOperationHoursService.validateAppIsOpen();
+      await this.appOperationHoursService.validateAppIsOpen();
 
       // Get delivery address
       const deliveryAddress = await this.userAddressRepository.findOne({

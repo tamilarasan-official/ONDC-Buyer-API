@@ -170,7 +170,7 @@ export class CartService {
 
       // NEW: Validate app operation hours before allowing cart operations
       // This is separate from restaurant timings - it's a global app-level control
-      this.appOperationHoursService.validateAppIsOpen();
+      await this.appOperationHoursService.validateAppIsOpen();
 
       // if (
       //   !item.quantities?.[0] ||
@@ -399,7 +399,7 @@ export class CartService {
           );
         } else if (!preorderCoupon) {
           this.logger.warn(
-            `⚠️ Preorder item added but no valid coupon found for item_id=${addToCartDto.item_id}`,
+            `⚠️ Preorder item added but no valind coupon found for item_id=${addToCartDto.item_id}`,
           );
         } else if (!cart) {
           this.logger.warn(
