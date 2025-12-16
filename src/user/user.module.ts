@@ -8,16 +8,19 @@ import { UserAddress } from "./entities/user-address.entity";
 import { SharedNotificationModule } from "../shared/notification.module";
 import { OtpModule } from "../otp/otp.module";
 import { BuyerModule } from "../buyer/buyer.module";
+import { AppSettingsModule } from "../shared/app-settings.module";
+import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([User, UserOtp, UserAddress]),
     SharedNotificationModule,
     OtpModule,
+    AppSettingsModule,
     forwardRef(() => BuyerModule),
   ],
   controllers: [UserController],
-  providers: [UserService],
+  providers: [UserService, AppServiceableAreaService],
   exports: [UserService],
 })
 export class UserModule {}

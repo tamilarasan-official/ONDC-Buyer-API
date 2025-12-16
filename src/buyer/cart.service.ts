@@ -34,6 +34,7 @@ import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
 
@@ -72,6 +73,7 @@ export class CartService {
     private readonly configService: ConfigService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly appServiceableAreaService: AppServiceableAreaService,
   ) { }
 
   /**
@@ -171,6 +173,22 @@ export class CartService {
       // NEW: Validate app operation hours before allowing cart operations
       // This is separate from restaurant timings - it's a global app-level control
       await this.appOperationHoursService.validateAppIsOpen();
+
+      // NEW: Validate user location is within app serviceable area
+      // Check user's default/recent address to ensure they're in serviceable area
+      try {
+        const userLocation = await this.locationService.getUserLocation(userId);
+        await this.appServiceableAreaService.validateServiceableArea(
+          userLocation.lat,
+          userLocation.lng,
+        );
+      } catch (error) {
+        // If validation fails, log and rethrow (ServiceUnavailableException)
+        this.logger.warn(
+          `⚠️ User location is outside serviceable area: ${error.message}`,
+        );
+        throw error;
+      }
 
       // if (
       //   !item.quantities?.[0] ||
