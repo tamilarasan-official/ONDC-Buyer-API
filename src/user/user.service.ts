@@ -20,6 +20,7 @@ import { OtpService } from "../otp/otp.service";
 import { OtpPurpose } from "../otp/entities/otp-verification.entity";
 import { ConfigService } from "@nestjs/config";
 import { CartService } from "../buyer/cart.service";
+import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 
 @Injectable()
 export class UserService {
@@ -38,6 +39,7 @@ export class UserService {
     private readonly notificationService: NotificationService,
     private readonly otpService: OtpService,
     private readonly configService: ConfigService,
+    private readonly appServiceableAreaService: AppServiceableAreaService,
 
     @Optional()
     @Inject(forwardRef(() => CartService))
@@ -212,6 +214,13 @@ export class UserService {
         throw new NotFoundException("User profile not found");
       }
 
+      // NEW: Validate address location is within app serviceable area
+      // This is a global app-level control for service availability
+      await this.appServiceableAreaService.validateServiceableArea(
+        createAddressDto.latitude,
+        createAddressDto.longitude,
+      );
+
       if (createAddressDto.is_default) {
         for (const addr of profile.addresses) {
           addr.is_default = false;
@@ -299,6 +308,22 @@ export class UserService {
 
       // Store original address data for comparison
       const originalAddress = { ...address };
+
+      // NEW: Validate address location is within app serviceable area if location is being updated
+      // This is a global app-level control for service availability
+      if (
+        updateAddressDto.latitude !== undefined ||
+        updateAddressDto.longitude !== undefined
+      ) {
+        const latToValidate =
+          updateAddressDto.latitude ?? address.latitude;
+        const lngToValidate =
+          updateAddressDto.longitude ?? address.longitude;
+        await this.appServiceableAreaService.validateServiceableArea(
+          latToValidate,
+          lngToValidate,
+        );
+      }
 
       // If setting this address as default, unset all other addresses first
       if (updateAddressDto.is_default === true) {

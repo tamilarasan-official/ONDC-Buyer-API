@@ -204,6 +204,23 @@ export class UserController {
       },
     },
   })
+  @ApiResponse({
+    status: 503,
+    description: "Service unavailable - Address is outside app serviceable area",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 503 },
+        message: {
+          type: "string",
+          example: "Service is not available at this location. We currently serve within 5km radius. Your location is 7.5km away.",
+        },
+        timestamp: { type: "string", example: "2025-01-15T22:30:00.000Z" },
+        path: { type: "string", example: "/user/address" },
+      },
+    },
+  })
   async addAddress(@Req() req, @Body() createAddressDto: CreateAddressDto) {
     return this.userService.addAddress(req.user, createAddressDto);
   }
@@ -283,6 +300,23 @@ export class UserController {
         success: { type: "boolean", example: false },
         message: { type: "string", example: "Address not found" },
         error: { type: "string", example: "NOT_FOUND" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 503,
+    description: "Service unavailable - Updated address location is outside app serviceable area",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 503 },
+        message: {
+          type: "string",
+          example: "Service is not available at this location. We currently serve within 5km radius. Your location is 7.5km away.",
+        },
+        timestamp: { type: "string", example: "2025-01-15T22:30:00.000Z" },
+        path: { type: "string", example: "/user/address/1" },
       },
     },
   })

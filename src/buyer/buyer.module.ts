@@ -14,6 +14,7 @@ import { SellerStatusService } from "../shared/services/seller-status.service";
 import { LocationService } from "../shared/services/location.service";
 import { DeliveryPricingService } from "../shared/services/delivery-pricing.service";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 import { FCMService } from "./fcm.service";
 import { InvoiceService } from "./invoice.service";
 import { InvoiceController } from "./invoice.controller";
@@ -119,6 +120,7 @@ import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
     LocationService,
     DeliveryPricingService,
     AppOperationHoursService,
+    AppServiceableAreaService,
     FCMService,
     InvoiceService,
   ],

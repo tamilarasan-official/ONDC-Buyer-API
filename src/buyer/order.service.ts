@@ -23,6 +23,7 @@ import { SellerPushService } from "./seller-push.service";
 import { CartService } from "./cart.service";
 import { SellerStatusService } from "../shared/services/seller-status.service";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 import {
   CreateOrderDto,
   CreatePaymentDto,
@@ -81,6 +82,7 @@ export class OrderService {
     private readonly cartService: CartService,
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
+    private readonly appServiceableAreaService: AppServiceableAreaService,
   ) {}
 
   /**
@@ -128,7 +130,7 @@ export class OrderService {
 
       // NEW: Validate app operation hours before allowing order creation
       // This is separate from restaurant timings - it's a global app-level control
-      this.appOperationHoursService.validateAppIsOpen();
+      await this.appOperationHoursService.validateAppIsOpen();
 
       // Get delivery address
       const deliveryAddress = await this.userAddressRepository.findOne({
@@ -138,6 +140,13 @@ export class OrderService {
       if (!deliveryAddress) {
         throw new NotFoundException("Delivery address not found");
       }
+
+      // NEW: Validate delivery address is within app serviceable area
+      // This is a global app-level control for service availability
+      await this.appServiceableAreaService.validateServiceableArea(
+        deliveryAddress.latitude,
+        deliveryAddress.longitude,
+      );
 
       // NEW: Re-validate preorder campaigns before checkout
       const preorderCartItems = cartToUse.cart_items.filter(ci => ci.is_preorder);
