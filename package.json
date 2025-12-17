@@ -23,7 +23,8 @@
     "migration:revert": "npm run typeorm migration:revert -- -d ./data-source.ts",
     "migration:generate": "npm run typeorm migration:generate -- -d ./data-source.ts",
     "migration:create": "npm run typeorm migration:create",
-    "seed:app-settings": "ts-node src/migrations/seeders/seed-app-settings.ts"
+    "seed:app-settings": "ts-node src/migrations/seeders/seed-app-settings.ts",
+    "seed:serviceable-area": "ts-node -r tsconfig-paths/register src/migrations/seeders/seed-serviceable-area-settings.ts"
   },
   "dependencies": {
     "@nestjs-modules/ioredis": "^2.0.2",

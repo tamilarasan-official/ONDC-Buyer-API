@@ -7,6 +7,7 @@ import {
   Optional,
   NotFoundException,
   Logger,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { User } from "./entities/user.entity";
@@ -21,6 +22,7 @@ import { OtpPurpose } from "../otp/entities/otp-verification.entity";
 import { ConfigService } from "@nestjs/config";
 import { CartService } from "../buyer/cart.service";
 import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 @Injectable()
 export class UserService {
@@ -40,6 +42,7 @@ export class UserService {
     private readonly otpService: OtpService,
     private readonly configService: ConfigService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
+    private readonly appSettingsService: AppSettingsService,
 
     @Optional()
     @Inject(forwardRef(() => CartService))
@@ -134,9 +137,9 @@ export class UserService {
 
       profile.phone_number = Number(profile.phone_number);
 
-      // Get support contact information from ConfigService
-      const supportNumber = this.configService.get<string>("SUPPORT_PHONE");
-      const supportEmail = this.configService.get<string>("SUPPORT_EMAIL");
+      // Get support contact information from AppSettingsService
+      const supportNumber = await this.appSettingsService.get("SUPPORT_PHONE");
+      const supportEmail = await this.appSettingsService.get("SUPPORT_EMAIL");
 
       // Convert to plain object and add support contact information
       // Explicitly map all fields to ensure proper serialization
@@ -244,6 +247,10 @@ export class UserService {
       if (error instanceof NotFoundException) {
         throw error;
       }
+      // Preserve the original error message from serviceable area validation
+      if (error instanceof ServiceUnavailableException) {
+        throw new BadRequestException(error.message);
+      }
       throw new BadRequestException("Failed to add address", error);
     }
   }
@@ -348,6 +355,10 @@ export class UserService {
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
+      }
+      // Preserve the original error message from serviceable area validation
+      if (error instanceof ServiceUnavailableException) {
+        throw new BadRequestException(error.message);
       }
       throw new BadRequestException("Failed to update address", error);
     }
