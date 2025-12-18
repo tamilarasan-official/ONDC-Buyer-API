@@ -44,6 +44,10 @@ export class CartService {
 
   // Maximum tip amount constant (fixed amount in INR)
   private readonly MAX_TIP_AMOUNT = 450.0;
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(Cart)
@@ -178,12 +182,26 @@ export class CartService {
       // Check user's default/recent address to ensure they're in serviceable area
       try {
         const userLocation = await this.locationService.getUserLocation(userId);
+        
+        // Validate that coordinates are not the default values (location permissions disabled)
+        if (
+          userLocation.lat === this.DEFAULT_LATITUDE &&
+          userLocation.lng === this.DEFAULT_LONGITUDE
+        ) {
+          throw new BadRequestException(
+            "Please update your address and location details properly to add items to cart. We need your accurate location to provide delivery services.",
+          );
+        }
+        
         await this.appServiceableAreaService.validateServiceableArea(
           userLocation.lat,
           userLocation.lng,
         );
       } catch (error) {
-        // If validation fails, log and rethrow (ServiceUnavailableException)
+        // If validation fails, log and rethrow
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         this.logger.warn(
           `⚠️ User location is outside serviceable area: ${error.message}`,
         );

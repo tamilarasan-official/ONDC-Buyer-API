@@ -28,6 +28,10 @@ import { LocationService } from "../shared/services/location.service";
 @Injectable()
 export class UserService {
   private readonly logger = new Logger(UserService.name);
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(User)
@@ -219,6 +223,16 @@ export class UserService {
         throw new NotFoundException("User profile not found");
       }
 
+      // Validate that coordinates are not the default values (location permissions disabled)
+      if (
+        createAddressDto.latitude === this.DEFAULT_LATITUDE &&
+        createAddressDto.longitude === this.DEFAULT_LONGITUDE
+      ) {
+        throw new BadRequestException(
+          "Please enable location permissions on your device to add an address. We need your current location to provide accurate delivery services.",
+        );
+      }
+
       // NEW: Validate address location is within app serviceable area
       // This is a global app-level control for service availability
       await this.appServiceableAreaService.validateServiceableArea(
@@ -361,6 +375,16 @@ export class UserService {
         updateAddressDto.longitude !== undefined
           ? updateAddressDto.longitude
           : address.longitude;
+
+      // Validate that coordinates are not the default values (location permissions disabled)
+      if (
+        latToValidate === this.DEFAULT_LATITUDE &&
+        lngToValidate === this.DEFAULT_LONGITUDE
+      ) {
+        throw new BadRequestException(
+          "Please enable location permissions on your device to update this address. We need your current location to provide accurate delivery services.",
+        );
+      }
 
       // Get the address fields to validate (use updated or existing)
       const cityToValidate =

@@ -46,6 +46,10 @@ import { TimezoneUtil } from "../shared/utils/timezone.util";
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(Order)
@@ -139,6 +143,16 @@ export class OrderService {
 
       if (!deliveryAddress) {
         throw new NotFoundException("Delivery address not found");
+      }
+
+      // Validate that coordinates are not the default values (location permissions disabled)
+      if (
+        deliveryAddress.latitude === this.DEFAULT_LATITUDE &&
+        deliveryAddress.longitude === this.DEFAULT_LONGITUDE
+      ) {
+        throw new BadRequestException(
+          "Please update your address and location details properly to create an order. We need your accurate location to provide delivery services.",
+        );
       }
 
       // NEW: Validate delivery address is within app serviceable area
