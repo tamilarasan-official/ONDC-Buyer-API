@@ -146,10 +146,15 @@ export class OrderService {
       }
 
       // Validate that coordinates are not the default values (location permissions disabled)
-      if (
-        deliveryAddress.latitude === this.DEFAULT_LATITUDE &&
-        deliveryAddress.longitude === this.DEFAULT_LONGITUDE
-      ) {
+      // Use tolerance-based comparison to handle floating-point precision
+      const latDiff = Math.abs(Number(deliveryAddress.latitude) - this.DEFAULT_LATITUDE);
+      const lngDiff = Math.abs(Number(deliveryAddress.longitude) - this.DEFAULT_LONGITUDE);
+      const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+      
+      if (latDiff < tolerance && lngDiff < tolerance) {
+        this.logger.warn(
+          `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Address ID: ${deliveryAddress.id}, Coordinates: (${deliveryAddress.latitude}, ${deliveryAddress.longitude})`,
+        );
         throw new BadRequestException(
           "Please update your address and location details properly to create an order. We need your accurate location to provide delivery services.",
         );

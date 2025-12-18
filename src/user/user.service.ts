@@ -224,10 +224,15 @@ export class UserService {
       }
 
       // Validate that coordinates are not the default values (location permissions disabled)
-      if (
-        createAddressDto.latitude === this.DEFAULT_LATITUDE &&
-        createAddressDto.longitude === this.DEFAULT_LONGITUDE
-      ) {
+      // Use tolerance-based comparison to handle floating-point precision
+      const latDiff = Math.abs(Number(createAddressDto.latitude) - this.DEFAULT_LATITUDE);
+      const lngDiff = Math.abs(Number(createAddressDto.longitude) - this.DEFAULT_LONGITUDE);
+      const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+      
+      if (latDiff < tolerance && lngDiff < tolerance) {
+        this.logger.warn(
+          `⚠️ Default coordinates detected and blocked. User ID: ${user.id}, Coordinates: (${createAddressDto.latitude}, ${createAddressDto.longitude})`,
+        );
         throw new BadRequestException(
           "Please enable location permissions on your device to add an address. We need your current location to provide accurate delivery services.",
         );
@@ -377,10 +382,15 @@ export class UserService {
           : address.longitude;
 
       // Validate that coordinates are not the default values (location permissions disabled)
-      if (
-        latToValidate === this.DEFAULT_LATITUDE &&
-        lngToValidate === this.DEFAULT_LONGITUDE
-      ) {
+      // Use tolerance-based comparison to handle floating-point precision
+      const latDiff = Math.abs(Number(latToValidate) - this.DEFAULT_LATITUDE);
+      const lngDiff = Math.abs(Number(lngToValidate) - this.DEFAULT_LONGITUDE);
+      const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+      
+      if (latDiff < tolerance && lngDiff < tolerance) {
+        this.logger.warn(
+          `⚠️ Default coordinates detected and blocked. User ID: ${user.id}, Address ID: ${addressId}, Coordinates: (${latToValidate}, ${lngToValidate})`,
+        );
         throw new BadRequestException(
           "Please enable location permissions on your device to update this address. We need your current location to provide accurate delivery services.",
         );

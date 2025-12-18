@@ -184,10 +184,15 @@ export class CartService {
         const userLocation = await this.locationService.getUserLocation(userId);
         
         // Validate that coordinates are not the default values (location permissions disabled)
-        if (
-          userLocation.lat === this.DEFAULT_LATITUDE &&
-          userLocation.lng === this.DEFAULT_LONGITUDE
-        ) {
+        // Use tolerance-based comparison to handle floating-point precision
+        const latDiff = Math.abs(userLocation.lat - this.DEFAULT_LATITUDE);
+        const lngDiff = Math.abs(userLocation.lng - this.DEFAULT_LONGITUDE);
+        const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+        
+        if (latDiff < tolerance && lngDiff < tolerance) {
+          this.logger.warn(
+            `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Coordinates: (${userLocation.lat}, ${userLocation.lng})`,
+          );
           throw new BadRequestException(
             "Please update your address and location details properly to add items to cart. We need your accurate location to provide delivery services.",
           );
