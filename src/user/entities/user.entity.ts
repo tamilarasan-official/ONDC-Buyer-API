@@ -29,12 +29,6 @@ export class User {
   @Column({ type: "boolean", default: true })
   status?: boolean;
 
-  @Column({ type: "varchar", length: 50, default: "1.0.0", nullable: true })
-  app_version?: string;
-
-  @Column({ type: "integer", default: 3, nullable: true })
-  version_code?: number;
-
   @OneToOne(() => UserOtp, (userOtp) => userOtp.user, {
     cascade: true,
     nullable: true,

@@ -1637,7 +1637,7 @@ export class BuyerService {
       let distance = 0;
       if (restaurant.locations && restaurant.locations.length > 0) {
         const storeLocation = restaurant.locations[0];
-        distance = this.locationService.calculateDistance(
+        distance = await this.locationService.calculateDistance(
           userLocation.lat,
           userLocation.lng,
           storeLocation.gps_lat,

@@ -109,7 +109,7 @@ export class AppServiceableAreaService {
       }
 
       // Calculate distance from center point to user location
-      const distance = this.locationService.calculateDistance(
+      const distance = await this.locationService.calculateDistance(
         centerLat,
         centerLng,
         latitude,

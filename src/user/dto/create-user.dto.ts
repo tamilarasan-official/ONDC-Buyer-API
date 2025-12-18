@@ -48,28 +48,6 @@ export class CreateUserDto {
   @IsOptional()
   @IsBoolean()
   status?: boolean;
-
-  @ApiProperty({
-    description: "App version",
-    example: "1.0.0",
-    required: false,
-    default: "1.0.0",
-  })
-  @IsOptional()
-  @IsString()
-  app_version?: string;
-
-  @ApiProperty({
-    description: "Version code",
-    example: 3,
-    required: false,
-    default: 3,
-    type: "number",
-  })
-  @IsOptional()
-  @IsNumber()
-  @Type(() => Number)
-  version_code?: number;
 }
 
 export class CreateAddressDto {

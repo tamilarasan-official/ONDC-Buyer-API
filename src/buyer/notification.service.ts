@@ -489,10 +489,12 @@ export class NotificationService {
     platform: string,
     deviceId?: string,
     appVersion?: string,
+    versionName?: string,
+    versionCode?: number,
   ): Promise<void> {
     try {
       this.logger.log(
-        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${appVersion || "N/A"}`,
+        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${appVersion || "N/A"} | Version Name: ${versionName || "N/A"} | Version Code: ${versionCode || "N/A"}`,
       );
 
       // Validate token with FCM service
@@ -529,11 +531,19 @@ export class NotificationService {
         if (appVersion && appVersion !== existingToken.app_version) {
           changes.push(`Version: ${existingToken.app_version || "null"} → ${appVersion}`);
         }
+        if (versionName && versionName !== existingToken.version_name) {
+          changes.push(`Version Name: ${existingToken.version_name || "null"} → ${versionName}`);
+        }
+        if (versionCode !== undefined && versionCode !== null && versionCode !== existingToken.version_code) {
+          changes.push(`Version Code: ${existingToken.version_code || "null"} → ${versionCode}`);
+        }
 
         existingToken.is_active = true;
         existingToken.platform = platform;
         existingToken.device_id = deviceId || existingToken.device_id;
         existingToken.app_version = appVersion || existingToken.app_version;
+        existingToken.version_name = versionName !== undefined ? versionName : existingToken.version_name;
+        existingToken.version_code = versionCode !== undefined && versionCode !== null ? versionCode : existingToken.version_code;
         existingToken.updated_at = new Date();
 
         await this.userDeviceTokenRepository.save(existingToken);
@@ -550,6 +560,8 @@ export class NotificationService {
           platform,
           device_id: deviceId,
           app_version: appVersion,
+          version_name: versionName,
+          version_code: versionCode,
           is_active: true,
         });
 

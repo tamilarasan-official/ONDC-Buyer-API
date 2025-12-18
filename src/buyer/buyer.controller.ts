@@ -1569,6 +1569,10 @@ export class BuyerController {
     - device_id: Unique device identifier for multi-device tracking
     - app_version: App version for version-specific features
     
+    **Optional Headers** (Recommended):
+    - x-app-version or app-version: Version name (e.g., "1.0.0")
+    - x-app-version-code or app-version-code: Version code (e.g., 3)
+    
     **Token Format**:
     - Android: FCM token from Firebase SDK
     - iOS: FCM token via APNS integration
@@ -1639,6 +1643,8 @@ export class BuyerController {
             platform: { type: "string", example: "android" },
             device_id: { type: "string", example: "A1B2C3D4-E5F6-7890-1234-567890ABCDEF" },
             app_version: { type: "string", example: "1.2.3" },
+            version_name: { type: "string", example: "1.0.0", nullable: true },
+            version_code: { type: "number", example: 3, nullable: true },
             registered_at: { type: "string", example: "2025-12-05T10:30:00Z" },
           },
         },
@@ -1672,8 +1678,20 @@ export class BuyerController {
     }
 
     try {
+      // Extract version_name and version_code from headers
+      // Support both x-app-version/app-version and x-app-version-code/app-version-code
+      const versionName = 
+        req.headers["x-app-version"] || 
+        req.headers["app-version"] || 
+        null;
+      const versionCodeStr = 
+        req.headers["x-app-version-code"] || 
+        req.headers["app-version-code"] || 
+        null;
+      const versionCode = versionCodeStr ? parseInt(versionCodeStr, 10) : null;
+
       this.logger.log(
-        `📱 Registering device token for user ${userId} | Platform: ${tokenData.platform} | Device ID: ${tokenData.device_id || "not provided"} | App Version: ${tokenData.app_version || "not provided"}`,
+        `📱 Registering device token for user ${userId} | Platform: ${tokenData.platform} | Device ID: ${tokenData.device_id || "not provided"} | App Version: ${tokenData.app_version || "not provided"} | Version Name: ${versionName || "not provided"} | Version Code: ${versionCode || "not provided"}`,
       );
 
       // Validate basic token format
@@ -1701,6 +1719,16 @@ export class BuyerController {
           `⚠️  App version not provided for user ${userId} - version tracking will be limited`,
         );
       }
+      if (!versionName) {
+        this.logger.warn(
+          `⚠️  Version name not provided in headers for user ${userId} - version tracking will be limited`,
+        );
+      }
+      if (!versionCode) {
+        this.logger.warn(
+          `⚠️  Version code not provided in headers for user ${userId} - version tracking will be limited`,
+        );
+      }
 
       // Register FCM token in database
       this.logger.log(`🔄 Registering FCM token in database...`);
@@ -1711,10 +1739,12 @@ export class BuyerController {
         tokenData.platform,
         tokenData.device_id,
         tokenData.app_version,
+        versionName,
+        versionCode,
       );
 
       this.logger.log(
-        `✅ FCM token registered successfully | User: ${userId} | Platform: ${tokenData.platform} | Device: ${tokenData.device_id || "untracked"} | Version: ${tokenData.app_version || "unknown"}`,
+        `✅ FCM token registered successfully | User: ${userId} | Platform: ${tokenData.platform} | Device: ${tokenData.device_id || "untracked"} | Version: ${tokenData.app_version || "unknown"} | Version Name: ${versionName || "unknown"} | Version Code: ${versionCode || "unknown"}`,
       );
 
       return {
@@ -1725,6 +1755,8 @@ export class BuyerController {
           platform: tokenData.platform,
           device_id: tokenData.device_id || null,
           app_version: tokenData.app_version || null,
+          version_name: versionName || null,
+          version_code: versionCode || null,
           registered_at: new Date().toISOString(),
         },
       };
