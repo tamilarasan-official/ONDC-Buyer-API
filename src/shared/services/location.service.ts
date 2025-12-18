@@ -1,16 +1,22 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger, BadRequestException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
+import { HttpService } from "@nestjs/axios";
+import { firstValueFrom } from "rxjs";
 import { User } from "../../user/entities/user.entity";
 import { UserAddress } from "../../user/entities/user-address.entity";
 
 @Injectable()
 export class LocationService {
+  private readonly logger = new Logger(LocationService.name);
+  private readonly NOMINATIM_API_URL = "https://nominatim.openstreetmap.org/reverse";
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
     @InjectRepository(UserAddress)
     private readonly userAddressRepository: Repository<UserAddress>,
+    private readonly httpService: HttpService,
   ) {}
 
   /**
@@ -180,5 +186,145 @@ export class LocationService {
         sqrt(1 - ${haversineA})
       )) <= ${radiusKm}
     `;
+  }
+
+  /**
+   * Reverse geocode coordinates to get address components
+   * Uses OpenStreetMap Nominatim API (free, no API key required)
+   * @param latitude Latitude coordinate
+   * @param longitude Longitude coordinate
+   * @returns Address components from reverse geocoding
+   */
+  async reverseGeocode(
+    latitude: number,
+    longitude: number,
+  ): Promise<{
+    city?: string;
+    state?: string;
+    pincode?: string;
+    address?: string;
+  }> {
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get(this.NOMINATIM_API_URL, {
+          params: {
+            lat: latitude,
+            lon: longitude,
+            format: "json",
+            addressdetails: 1,
+            zoom: 18,
+          },
+          headers: {
+            "User-Agent": "ONDC-Buyer-API/1.0", // Required by Nominatim
+          },
+          timeout: 5000, // 5 seconds timeout
+        }),
+      );
+
+      if (!response.data || !response.data.address) {
+        this.logger.warn(
+          `Reverse geocoding returned no address data for coordinates (${latitude}, ${longitude})`,
+        );
+        return {};
+      }
+
+      const address = response.data.address;
+      return {
+        city: address.city || address.town || address.village || address.county,
+        state: address.state,
+        pincode: address.postcode,
+        address: response.data.display_name,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Reverse geocoding failed for coordinates (${latitude}, ${longitude}): ${error.message}`,
+      );
+      // Return empty object on failure - don't block address creation
+      return {};
+    }
+  }
+
+  /**
+   * Validate that latitude and longitude match the provided text address
+   * Compares city, state, and pincode from reverse geocoding with provided address
+   * @param latitude Latitude coordinate
+   * @param longitude Longitude coordinate
+   * @param addressCity City from user-provided address
+   * @param addressState State from user-provided address
+   * @param addressPincode Pincode from user-provided address
+   * @returns true if address matches, false otherwise
+   */
+  async validateCoordinatesMatchAddress(
+    latitude: number,
+    longitude: number,
+    addressCity: string,
+    addressState: string,
+    addressPincode: string,
+  ): Promise<{ isValid: boolean; message?: string; geocodedAddress?: any }> {
+    try {
+      const geocoded = await this.reverseGeocode(latitude, longitude);
+
+      // If reverse geocoding failed, allow the address (don't block on API failure)
+      if (!geocoded.city && !geocoded.state && !geocoded.pincode) {
+        this.logger.warn(
+          `Reverse geocoding failed, allowing address validation to pass`,
+        );
+        return { isValid: true };
+      }
+
+      // Normalize strings for comparison (case-insensitive, trim whitespace)
+      const normalize = (str: string) =>
+        (str || "").toLowerCase().trim().replace(/\s+/g, " ");
+
+      const providedCity = normalize(addressCity);
+      const providedState = normalize(addressState);
+      const providedPincode = normalize(addressPincode);
+
+      const geocodedCity = normalize(geocoded.city || "");
+      const geocodedState = normalize(geocoded.state || "");
+      const geocodedPincode = normalize(geocoded.pincode || "");
+
+      // Check if city matches (allow partial matches)
+      const cityMatch =
+        geocodedCity.includes(providedCity) ||
+        providedCity.includes(geocodedCity) ||
+        geocodedCity === providedCity;
+
+      // Check if state matches (exact or partial)
+      const stateMatch =
+        geocodedState.includes(providedState) ||
+        providedState.includes(geocodedState) ||
+        geocodedState === providedState;
+
+      // Check if pincode matches (exact match required)
+      const pincodeMatch =
+        geocodedPincode === providedPincode ||
+        (geocodedPincode && providedPincode && geocodedPincode.includes(providedPincode));
+
+      // Require at least 2 out of 3 matches (city, state, pincode)
+      const matchCount = [cityMatch, stateMatch, pincodeMatch].filter(Boolean).length;
+
+      if (matchCount >= 2) {
+        return {
+          isValid: true,
+          geocodedAddress: geocoded,
+        };
+      }
+
+      return {
+        isValid: false,
+        message: `The provided coordinates (${latitude}, ${longitude}) do not match the address. ` +
+          `Expected: ${addressCity}, ${addressState} ${addressPincode}. ` +
+          `Found: ${geocoded.city || "N/A"}, ${geocoded.state || "N/A"} ${geocoded.pincode || "N/A"}`,
+        geocodedAddress: geocoded,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Address validation failed: ${error.message}`,
+        error.stack,
+      );
+      // On error, allow the address (don't block on validation failure)
+      return { isValid: true };
+    }
   }
 }

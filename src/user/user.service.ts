@@ -23,6 +23,7 @@ import { ConfigService } from "@nestjs/config";
 import { CartService } from "../buyer/cart.service";
 import { AppServiceableAreaService } from "../shared/services/app-serviceable-area.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
+import { LocationService } from "../shared/services/location.service";
 
 @Injectable()
 export class UserService {
@@ -43,6 +44,7 @@ export class UserService {
     private readonly configService: ConfigService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly locationService: LocationService,
 
     @Optional()
     @Inject(forwardRef(() => CartService))
@@ -224,6 +226,24 @@ export class UserService {
         createAddressDto.longitude,
       );
 
+      // NEW: Validate that coordinates match the provided text address
+      // Uses reverse geocoding to verify city, state, and pincode match
+      const coordinateValidation =
+        await this.locationService.validateCoordinatesMatchAddress(
+          createAddressDto.latitude,
+          createAddressDto.longitude,
+          createAddressDto.city,
+          createAddressDto.state,
+          createAddressDto.pincode,
+        );
+
+      if (!coordinateValidation.isValid) {
+        throw new BadRequestException(
+          coordinateValidation.message ||
+            "The provided coordinates do not match the address details",
+        );
+      }
+
       if (createAddressDto.is_default) {
         for (const addr of profile.addresses) {
           addr.is_default = false;
@@ -247,11 +267,27 @@ export class UserService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      // Preserve the original error message from serviceable area validation
+      // Handle serviceable area validation errors with proper message
       if (error instanceof ServiceUnavailableException) {
-        throw new BadRequestException(error.message);
+        // Convert to BadRequestException since this is a validation error (400), not server error (503)
+        throw new BadRequestException(
+          error.message ||
+            "Currently, we are not serviceable in your area. We will be expanding soon to your delivery area.",
+        );
       }
-      throw new BadRequestException("Failed to add address", error);
+      // Preserve BadRequestException messages (e.g., from coordinate validation)
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      // Log unexpected errors for debugging
+      this.logger.error(
+        `Failed to add address for user ${user.id}: ${error.message}`,
+        error.stack,
+      );
+      throw new BadRequestException(
+        error.message ||
+          "Unable to add address. Please check the address details and try again.",
+      );
     }
   }
 
@@ -316,20 +352,66 @@ export class UserService {
       // Store original address data for comparison
       const originalAddress = { ...address };
 
+      // Get the coordinates to validate (use updated or existing)
+      const latToValidate =
+        updateAddressDto.latitude !== undefined
+          ? updateAddressDto.latitude
+          : address.latitude;
+      const lngToValidate =
+        updateAddressDto.longitude !== undefined
+          ? updateAddressDto.longitude
+          : address.longitude;
+
+      // Get the address fields to validate (use updated or existing)
+      const cityToValidate =
+        updateAddressDto.city !== undefined
+          ? updateAddressDto.city
+          : address.city;
+      const stateToValidate =
+        updateAddressDto.state !== undefined
+          ? updateAddressDto.state
+          : address.state;
+      const pincodeToValidate =
+        updateAddressDto.pincode !== undefined
+          ? updateAddressDto.pincode
+          : address.pincode;
+
       // NEW: Validate address location is within app serviceable area if location is being updated
       // This is a global app-level control for service availability
       if (
         updateAddressDto.latitude !== undefined ||
         updateAddressDto.longitude !== undefined
       ) {
-        const latToValidate =
-          updateAddressDto.latitude ?? address.latitude;
-        const lngToValidate =
-          updateAddressDto.longitude ?? address.longitude;
         await this.appServiceableAreaService.validateServiceableArea(
           latToValidate,
           lngToValidate,
         );
+      }
+
+      // NEW: Validate that coordinates match the text address
+      // Validate if coordinates OR address fields are being updated
+      if (
+        updateAddressDto.latitude !== undefined ||
+        updateAddressDto.longitude !== undefined ||
+        updateAddressDto.city !== undefined ||
+        updateAddressDto.state !== undefined ||
+        updateAddressDto.pincode !== undefined
+      ) {
+        const coordinateValidation =
+          await this.locationService.validateCoordinatesMatchAddress(
+            latToValidate,
+            lngToValidate,
+            cityToValidate,
+            stateToValidate,
+            pincodeToValidate,
+          );
+
+        if (!coordinateValidation.isValid) {
+          throw new BadRequestException(
+            coordinateValidation.message ||
+              "The provided coordinates do not match the address details",
+          );
+        }
       }
 
       // If setting this address as default, unset all other addresses first
@@ -356,11 +438,27 @@ export class UserService {
       if (error instanceof NotFoundException) {
         throw error;
       }
-      // Preserve the original error message from serviceable area validation
+      // Handle serviceable area validation errors with proper message
       if (error instanceof ServiceUnavailableException) {
-        throw new BadRequestException(error.message);
+        // Convert to BadRequestException since this is a validation error (400), not server error (503)
+        throw new BadRequestException(
+          error.message ||
+            "Currently, we are not serviceable in your area. We will be expanding soon to your delivery area.",
+        );
       }
-      throw new BadRequestException("Failed to update address", error);
+      // Preserve BadRequestException messages (e.g., from coordinate validation)
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      // Log unexpected errors for debugging
+      this.logger.error(
+        `Failed to update address ${addressId} for user ${user.id}: ${error.message}`,
+        error.stack,
+      );
+      throw new BadRequestException(
+        error.message ||
+          "Unable to update address. Please check the address details and try again.",
+      );
     }
   }
 
