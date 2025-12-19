@@ -31,9 +31,6 @@ export class UserDeviceToken {
   @Column({ type: "varchar", length: 100, nullable: true })
   app_version: string;
 
-  @Column({ type: "varchar", length: 50, nullable: true })
-  version_name: string;
-
   @Column({ type: "integer", nullable: true })
   version_code: number;
 

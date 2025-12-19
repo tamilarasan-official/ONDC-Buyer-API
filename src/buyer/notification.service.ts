@@ -493,8 +493,12 @@ export class NotificationService {
     versionCode?: number,
   ): Promise<void> {
     try {
+      // Use versionName if provided, otherwise use appVersion
+      // Both are stored in app_version column
+      const finalAppVersion = versionName || appVersion;
+      
       this.logger.log(
-        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${appVersion || "N/A"} | Version Name: ${versionName || "N/A"} | Version Code: ${versionCode || "N/A"}`,
+        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${finalAppVersion || "N/A"} | Version Name: ${versionName || "N/A"} | Version Code: ${versionCode || "N/A"}`,
       );
 
       // Validate token with FCM service
@@ -522,35 +526,52 @@ export class NotificationService {
       });
 
       if (existingToken) {
-        // Update existing token
+        // Update existing token - update when there's a mismatch
         const changes: string[] = [];
+        let needsUpdate = false;
         
         if (deviceId && deviceId !== existingToken.device_id) {
           changes.push(`Device ID: ${existingToken.device_id || "null"} → ${deviceId}`);
+          needsUpdate = true;
         }
-        if (appVersion && appVersion !== existingToken.app_version) {
-          changes.push(`Version: ${existingToken.app_version || "null"} → ${appVersion}`);
+        
+        // Update app_version if provided and different
+        // Use versionName if provided, otherwise use appVersion
+        if (finalAppVersion && finalAppVersion !== existingToken.app_version) {
+          changes.push(`App Version: ${existingToken.app_version || "null"} → ${finalAppVersion}`);
+          needsUpdate = true;
         }
-        if (versionName && versionName !== existingToken.version_name) {
-          changes.push(`Version Name: ${existingToken.version_name || "null"} → ${versionName}`);
-        }
+        
+        // Update version_code if provided and different
         if (versionCode !== undefined && versionCode !== null && versionCode !== existingToken.version_code) {
           changes.push(`Version Code: ${existingToken.version_code || "null"} → ${versionCode}`);
+          needsUpdate = true;
         }
 
-        existingToken.is_active = true;
-        existingToken.platform = platform;
-        existingToken.device_id = deviceId || existingToken.device_id;
-        existingToken.app_version = appVersion || existingToken.app_version;
-        existingToken.version_name = versionName !== undefined ? versionName : existingToken.version_name;
-        existingToken.version_code = versionCode !== undefined && versionCode !== null ? versionCode : existingToken.version_code;
-        existingToken.updated_at = new Date();
+        // Always update platform and is_active
+        if (platform !== existingToken.platform) {
+          changes.push(`Platform: ${existingToken.platform} → ${platform}`);
+          needsUpdate = true;
+        }
 
-        await this.userDeviceTokenRepository.save(existingToken);
+        if (needsUpdate || !existingToken.is_active) {
+          existingToken.is_active = true;
+          existingToken.platform = platform;
+          existingToken.device_id = deviceId !== undefined ? deviceId : existingToken.device_id;
+          existingToken.app_version = finalAppVersion !== undefined ? finalAppVersion : existingToken.app_version;
+          existingToken.version_code = versionCode !== undefined && versionCode !== null ? versionCode : existingToken.version_code;
+          existingToken.updated_at = new Date();
 
-        this.logger.log(
-          `🔄 FCM token UPDATED | User: ${userId} | Changes: ${changes.length > 0 ? changes.join(", ") : "None"}`,
-        );
+          await this.userDeviceTokenRepository.save(existingToken);
+
+          this.logger.log(
+            `🔄 FCM token UPDATED | User: ${userId} | Changes: ${changes.length > 0 ? changes.join(", ") : "Reactivated token"}`,
+          );
+        } else {
+          this.logger.log(
+            `ℹ️  FCM token already up to date | User: ${userId} | No changes needed`,
+          );
+        }
       } else {
         // Create new token
         const newToken = this.userDeviceTokenRepository.create({
@@ -559,8 +580,7 @@ export class NotificationService {
           token: deviceToken,
           platform,
           device_id: deviceId,
-          app_version: appVersion,
-          version_name: versionName,
+          app_version: finalAppVersion,
           version_code: versionCode,
           is_active: true,
         });
