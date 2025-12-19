@@ -684,10 +684,22 @@ export class NotificationService {
         });
       }
 
+      // Extract image URL from notification data if present
+      let imageUrl: string | undefined;
+      if (notification.data && typeof notification.data === "object") {
+        // Check for image_url or imageUrl in data
+        imageUrl = notification.data.image_url || notification.data.imageUrl;
+        // Also check if it's a direct property
+        if (!imageUrl && (notification.data as any).image) {
+          imageUrl = (notification.data as any).image;
+        }
+      }
+
       const payload: FCMNotificationPayload = {
         title: notification.title,
         body: notification.message,
         data: notificationData,
+        imageUrl: imageUrl,
       };
 
       const options: FCMNotificationOptions = {
@@ -821,5 +833,111 @@ export class NotificationService {
       data: notification.data,
       created_at: notification.created_at.toISOString(),
     };
+  }
+
+  /**
+   * Broadcast notification to all users
+   */
+  async broadcastNotification(
+    title: string,
+    message: string,
+    type: "order" | "promotion" | "system" | "review" = "system",
+    imageUrl?: string,
+    data?: any,
+  ): Promise<{
+    totalUsers: number;
+    notificationsCreated: number;
+    pushSent: number;
+    pushFailed: number;
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+    let notificationsCreated = 0;
+    let pushSent = 0;
+    let pushFailed = 0;
+
+    try {
+      this.logger.log(
+        `📢 BROADCAST NOTIFICATION STARTED | Title: "${title}" | Message: "${message}" | Type: ${type} | Image: ${imageUrl || "none"}`,
+      );
+
+      // Get all active users
+      const users = await this.userRepository.find({
+        where: { status: true },
+        relations: ["device_tokens"],
+      });
+
+      const totalUsers = users.length;
+      this.logger.log(`📊 Found ${totalUsers} active users for broadcast`);
+
+      // Process users in batches to avoid overwhelming the system
+      const batchSize = 100;
+      for (let i = 0; i < users.length; i += batchSize) {
+        const batch = users.slice(i, i + batchSize);
+        
+        await Promise.all(
+          batch.map(async (user) => {
+            try {
+              // Prepare notification data with image URL
+              const notificationData = {
+                ...(data || {}),
+                ...(imageUrl ? { image_url: imageUrl } : {}),
+              };
+
+              // Create notification for user
+              const notification = await this.createNotification({
+                user_id: user.id,
+                title,
+                message,
+                type,
+                data: notificationData,
+              });
+
+              notificationsCreated++;
+
+              // Count push notifications
+              const activeTokens = user.device_tokens?.filter(
+                (dt) => dt.is_active,
+              ) || [];
+              
+              if (activeTokens.length > 0) {
+                // Push notification is sent automatically via deliverNotification
+                // in createNotification, so we count tokens
+                pushSent += activeTokens.length;
+              }
+            } catch (error) {
+              const errorMsg = `Failed to send to user ${user.id}: ${error.message}`;
+              errors.push(errorMsg);
+              pushFailed++;
+              this.logger.error(errorMsg, error.stack);
+            }
+          }),
+        );
+      }
+
+      this.logger.log(
+        `✅ BROADCAST COMPLETE | Users: ${totalUsers} | Notifications Created: ${notificationsCreated} | Push Sent: ${pushSent} | Failed: ${pushFailed} | Errors: ${errors.length}`,
+      );
+
+      return {
+        totalUsers,
+        notificationsCreated,
+        pushSent,
+        pushFailed,
+        errors,
+      };
+    } catch (error) {
+      const errorMsg = `Broadcast notification failed: ${error.message}`;
+      this.logger.error(errorMsg, error.stack);
+      errors.push(errorMsg);
+      
+      return {
+        totalUsers: 0,
+        notificationsCreated,
+        pushSent,
+        pushFailed,
+        errors,
+      };
+    }
   }
 }

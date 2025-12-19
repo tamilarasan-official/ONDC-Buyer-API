@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsString, IsOptional, IsBoolean, IsEnum } from "class-validator";
+import { IsString, IsOptional, IsBoolean, IsEnum, IsNotEmpty } from "class-validator";
 
 export class MarkNotificationReadDto {
   @ApiProperty({
@@ -128,4 +128,52 @@ export class UnregisterDeviceTokenDto {
   })
   @IsString()
   device_token: string;
+}
+
+export class BroadcastNotificationDto {
+  @ApiProperty({
+    description: "Notification title",
+    example: "Important Announcement",
+    required: true,
+  })
+  @IsNotEmpty()
+  @IsString()
+  title: string;
+
+  @ApiProperty({
+    description: "Notification message",
+    example: "We have exciting new features available!",
+    required: true,
+  })
+  @IsNotEmpty()
+  @IsString()
+  message: string;
+
+  @ApiProperty({
+    description: "Notification type",
+    example: "promotion",
+    enum: ["order", "promotion", "system", "review"],
+    required: false,
+    default: "system",
+  })
+  @IsOptional()
+  @IsEnum(["order", "promotion", "system", "review"])
+  type?: "order" | "promotion" | "system" | "review";
+
+  @ApiProperty({
+    description: "Image URL to display in the notification (for rich notifications)",
+    example: "https://example.com/images/promotion-banner.jpg",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  image_url?: string;
+
+  @ApiProperty({
+    description: "Additional data to include in notification",
+    example: { url: "https://example.com/offer" },
+    required: false,
+  })
+  @IsOptional()
+  data?: any;
 }

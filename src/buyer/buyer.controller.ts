@@ -50,7 +50,7 @@ import {
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { RemoveCouponDto } from "./dto/apply-coupon.dto";
 import { TestNotificationDto } from "./dto/test-notification.dto";
-import { RegisterDeviceTokenDto } from "./dto/notification-request.dto";
+import { RegisterDeviceTokenDto, BroadcastNotificationDto } from "./dto/notification-request.dto";
 import {
   CartResponseDto,
   AddToCartResponseDto,
@@ -1740,7 +1740,7 @@ export class BuyerController {
         tokenData.device_id,
         tokenData.app_version,
         versionName,
-        versionCode,
+        versionCode ?? undefined,
       );
 
       this.logger.log(
@@ -1888,6 +1888,116 @@ export class BuyerController {
       );
       throw new InternalServerErrorException(
         "Failed to send test notification",
+      );
+    }
+  }
+
+  @Post("broadcast-notification")
+  @ApiTags("Public Notifications")
+  @ApiOperation({
+    summary: "Broadcast notification to all users",
+    description:
+      "Send a notification to all active users. Creates a notification record for each user and sends push notifications to all active device tokens. Useful for announcements, promotions, or system-wide updates. **Note: This is a public endpoint (no authentication required). Admin role guard will be implemented later.**",
+  })
+  @ApiBody({
+    type: BroadcastNotificationDto,
+    description: "Broadcast notification payload",
+    examples: {
+      promotion: {
+        summary: "Promotional announcement with image",
+        value: {
+          title: "Special Offer!",
+          message: "Get 20% off on all orders today. Use code SAVE20",
+          type: "promotion",
+          image_url: "https://example.com/images/promotion-banner.jpg",
+          data: {
+            coupon_code: "SAVE20",
+            discount: 20,
+            url: "https://app.example.com/offers",
+          },
+        },
+      },
+      system: {
+        summary: "System announcement with image",
+        value: {
+          title: "Maintenance Scheduled",
+          message: "We will be performing maintenance on Saturday from 2-4 AM. App may be unavailable during this time.",
+          type: "system",
+          image_url: "https://example.com/images/maintenance-notice.jpg",
+          data: {
+            maintenance_date: "2025-01-20",
+            start_time: "02:00",
+            end_time: "04:00",
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Broadcast notification sent successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Broadcast notification sent successfully" },
+        data: {
+          type: "object",
+          properties: {
+            totalUsers: { type: "number", example: 150 },
+            notificationsCreated: { type: "number", example: 150 },
+            pushSent: { type: "number", example: 280 },
+            pushFailed: { type: "number", example: 5 },
+            errors: {
+              type: "array",
+              items: { type: "string" },
+              example: [],
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Invalid notification data",
+  })
+  @ApiResponse({
+    status: 500,
+    description: "Internal server error - Failed to send broadcast",
+  })
+  async broadcastNotification(
+    @Body() broadcastData: BroadcastNotificationDto,
+  ) {
+    try {
+      this.logger.log(
+        `📢 Broadcast notification request (public) | Title: "${broadcastData.title}" | Type: ${broadcastData.type || "system"} | Image: ${broadcastData.image_url || "none"}`,
+      );
+
+      const result = await this.notificationService.broadcastNotification(
+        broadcastData.title,
+        broadcastData.message,
+        broadcastData.type || "system",
+        broadcastData.image_url,
+        broadcastData.data,
+      );
+
+      this.logger.log(
+        `✅ Broadcast notification completed | Users: ${result.totalUsers} | Created: ${result.notificationsCreated} | Push Sent: ${result.pushSent} | Failed: ${result.pushFailed}`,
+      );
+
+      return {
+        success: true,
+        message: "Broadcast notification sent successfully",
+        data: result,
+      };
+    } catch (error) {
+      this.logger.error(
+        `Failed to send broadcast notification: ${error.message}`,
+        error.stack,
+      );
+      throw new InternalServerErrorException(
+        `Failed to send broadcast notification: ${error.message}`,
       );
     }
   }
