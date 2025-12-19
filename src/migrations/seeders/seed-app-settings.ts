@@ -115,6 +115,12 @@ async function seedAppSettings() {
         category: "ui_config",
         description: "Home screen restaurant card style (1 = default)",
       },
+      {
+        key: "APP_CLOSURE_MESSAGE",
+        value: "",
+        category: "app_config",
+        description: "Custom message to display when app is temporarily closed (if empty, default message will be used)",
+      },
     ];
 
     console.log(`🌱 Seeding ${settings.length} app settings...`);

@@ -72,7 +72,8 @@ export class CreateAppSettings1765580484000 implements MigrationInterface {
       ('DISTANCE_CALCULATION_METHOD', 'delivery_pricing_api', 'app_config', 'Distance calculation method: haversine, vincenty, euclidean, directions_api, or delivery_pricing_api', true),
       ('TAZTY_DELIVERY_PARTNER_API_BASE_URL', 'http://delivery.tazty.in/api/v1', 'app_config', 'Base URL for TAZTY Delivery Partner API', true),
       ('TAZTY_DELIVERY_PARTNER_API_KEY', 'c33becbd39da05dac5bf6515b35d784c65e4143cb301f0c7', 'app_config', 'API key for TAZTY Delivery Partner API', true),
-      ('HOME_SCREEN_RESTAURANT_CARD_STYLE', '1', 'ui_config', 'Home screen restaurant card style (1 = default)', true)
+      ('HOME_SCREEN_RESTAURANT_CARD_STYLE', '1', 'ui_config', 'Home screen restaurant card style (1 = default)', true),
+      ('APP_CLOSURE_MESSAGE', '', 'app_config', 'Custom message to display when app is temporarily closed (if empty, default message will be used)', true)
     `);
   }
 
