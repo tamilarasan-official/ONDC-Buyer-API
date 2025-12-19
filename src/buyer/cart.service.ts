@@ -234,11 +234,12 @@ export class CartService {
       }
 
       // Check maximum_count (per-customer limit)
-      if (stock.maximum_count < addToCartDto.quantity) {
-        throw new BadRequestException(
-          `You can only purchase up to ${stock.maximum_count} units of this item`
-        );
-      }
+      // TEMPORARILY DISABLED - Uncomment to re-enable
+      // if (stock.maximum_count < addToCartDto.quantity) {
+      //   throw new BadRequestException(
+      //     `You can only purchase up to ${stock.maximum_count} units of this item`
+      //   );
+      // }
 
       // Validate customizations if provided
       if (
@@ -485,11 +486,12 @@ export class CartService {
           );
         }
 
-        if (newTotalQty > stock.maximum_count) {
-          throw new BadRequestException(
-            `You can only purchase up to ${stock.maximum_count} units of this item`
-          );
-        }
+        // TEMPORARILY DISABLED - Uncomment to re-enable
+        // if (newTotalQty > stock.maximum_count) {
+        //   throw new BadRequestException(
+        //     `You can only purchase up to ${stock.maximum_count} units of this item`
+        //   );
+        // }
 
         existingCartItem.quantity = newTotalQty;
 
