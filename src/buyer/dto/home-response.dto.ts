@@ -554,6 +554,13 @@ export class HomeDataDto {
     message?: string;
     next_open_time?: string | null;
   };
+
+  @ApiProperty({
+    description: "Home screen restaurant card style (1 = default)",
+    example: "1",
+    type: "string",
+  })
+  home_screen_restaurant_card_style: string;
 }
 
 export class HomeResponseDto {

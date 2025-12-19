@@ -42,6 +42,7 @@ import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
 import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 @Injectable()
 export class BuyerService {
@@ -97,6 +98,7 @@ export class BuyerService {
     private readonly redisCouponService: RedisCouponService,
     private readonly locationService: LocationService,
     private readonly appOperationHoursService: AppOperationHoursService,
+    private readonly appSettingsService: AppSettingsService,
   ) { }
 
   /**
@@ -152,7 +154,7 @@ export class BuyerService {
       this.logger.log(
         `🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`,
       );
-      const [restaurantsResult, whatsOnYourMind, promotionalBanner, appOperationStatus] =
+      const [restaurantsResult, whatsOnYourMind, promotionalBanner, appOperationStatus, homeScreenCardStyle] =
         await Promise.all([
           this.getFeaturedRestaurants(
             userLocation.lat,
@@ -166,6 +168,7 @@ export class BuyerService {
           this.getWhatsOnYourMind(vegMode),
           this.getPromotionalBanner(),
           this.appOperationHoursService.checkAppOperationStatus(),
+          this.appSettingsService.get("HOME_SCREEN_RESTAURANT_CARD_STYLE"),
         ]);
 
       this.logger.log(
@@ -192,6 +195,7 @@ export class BuyerService {
           message: appOperationStatus.message,
           next_open_time: appOperationStatus.nextOpenTime || null,
         },
+        home_screen_restaurant_card_style: homeScreenCardStyle || "1",
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);
