@@ -68,6 +68,12 @@ async function seedAppSettings() {
         description: "Razorpay API Key Secret",
       },
       {
+        key: "RAZORPAY_WEBHOOK_SECRET",
+        value: "",
+        category: "payment",
+        description: "Razorpay Webhook Secret for webhook signature verification (optional but recommended for security)",
+      },
+      {
         key: "APP_SERVICEABLE_AREA_ENABLED",
         value: "true",
         category: "app_config",

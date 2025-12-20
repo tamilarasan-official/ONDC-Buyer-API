@@ -11,6 +11,7 @@ import {
   Body,
   UnauthorizedException,
   BadRequestException,
+  NotFoundException,
   InternalServerErrorException,
   Logger,
   Res,
@@ -87,6 +88,9 @@ import { NotificationService } from "./notification.service";
 import { ReviewService } from "./review.service";
 import { RazorpayService } from "./razorpay.service";
 import { StoreService } from "../store/store.service";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { WebhookEvent } from "../payment/entities/webhook-event.entity";
 
 @ApiTags("Buyer App APIs")
 @Controller("api/buyer")
@@ -100,6 +104,8 @@ export class BuyerController {
     private readonly reviewService: ReviewService,
     private readonly razorpayService: RazorpayService,
     private readonly storeService: StoreService,
+    @InjectRepository(WebhookEvent)
+    private readonly webhookEventRepository: Repository<WebhookEvent>,
   ) {}
 
   @Get("home")
@@ -2317,6 +2323,7 @@ export class BuyerController {
    */
   @Post("webhook/razorpay")
   async handleRazorpayWebhook(@Req() req: any, @Res() res: any) {
+    let webhookEventRecord: WebhookEvent | null = null;
     try {
       const signature = req.headers["x-razorpay-signature"];
       const body = JSON.stringify(req.body);
@@ -2335,24 +2342,178 @@ export class BuyerController {
       }
 
       const event = req.body;
-      this.logger.log(`📨 Webhook event: ${event.event}`);
+      const eventId = event.id || event.event_id; // Razorpay event ID
+      const eventType = event.event; // payment.captured, payment.failed, order.paid
 
-      // Handle different webhook events
-      switch (event.event) {
-        case "payment.captured":
-          await this.handlePaymentCaptured(event);
-          break;
-        case "payment.failed":
-          await this.handlePaymentFailed(event);
-          break;
-        case "order.paid":
-          await this.handleOrderPaid(event);
-          break;
-        default:
-          this.logger.log(`ℹ️ Unhandled webhook event: ${event.event}`);
+      this.logger.log(
+        `📨 Webhook event: ${eventType}, Event ID: ${eventId || "N/A"}`,
+      );
+
+      // Require event ID for webhook processing (Razorpay always provides this)
+      if (!eventId) {
+        this.logger.error(
+          `❌ Webhook event missing event ID. Event type: ${eventType || "unknown"}. Rejecting event.`,
+        );
+        return res.status(400).json({
+          error: "Event ID is required for webhook processing",
+          message: "Razorpay webhooks must include an event ID (event.id or event.event_id)",
+        });
       }
 
-      return res.status(200).json({ success: true });
+      // Check if this event has already been processed (idempotency check)
+      const existingEvent = await this.webhookEventRepository.findOne({
+        where: { event_id: eventId, event_type: eventType },
+      });
+
+      if (existingEvent) {
+        if (existingEvent.processing_status === "processed") {
+          this.logger.log(
+            `⏭️ Webhook event ${eventId} (${eventType}) already processed, skipping duplicate`,
+          );
+          return res.status(200).json({ success: true, message: "Event already processed" });
+        } else if (existingEvent.processing_status === "failed") {
+          this.logger.log(
+            `🔄 Retrying previously failed webhook event ${eventId} (${eventType})`,
+          );
+          // Continue processing - will update the existing record
+          webhookEventRecord = existingEvent;
+        }
+      } else {
+        // Create new webhook event record
+        webhookEventRecord = this.webhookEventRepository.create({
+          event_id: eventId,
+          event_type: eventType,
+          processing_status: "pending",
+          event_payload: event,
+        });
+        await this.webhookEventRepository.save(webhookEventRecord);
+        this.logger.log(
+          `📝 Created webhook event record for ${eventId} (${eventType})`,
+        );
+      }
+
+      // Extract common fields from event
+      let paymentId: string | null = null;
+      let razorpayOrderId: string | null = null;
+      let internalOrderId: number | null = null;
+
+      if (event.payload?.payment?.entity) {
+        paymentId = event.payload.payment.entity.id;
+        razorpayOrderId = event.payload.payment.entity.order_id;
+      } else if (event.payload?.order?.entity) {
+        razorpayOrderId = event.payload.order.entity.id;
+      } else if (event.payload?.refund?.entity) {
+        // For refund events, payment_id is in refund.entity
+        paymentId = event.payload.refund.entity.payment_id;
+      }
+
+      // Try to find internal order ID from Razorpay order ID or payment ID
+      if (razorpayOrderId) {
+        try {
+          const order = await this.orderService.findOrderByRazorpayOrderId(
+            razorpayOrderId,
+          );
+          if (order) {
+            internalOrderId = order.id;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not find internal order for Razorpay order ID: ${razorpayOrderId}`,
+          );
+        }
+      } else if (paymentId && eventType === "refund.processed") {
+        // For refund events, try to find order by payment ID
+        try {
+          const payment = await this.orderService.findPaymentByRazorpayPaymentId(
+            paymentId,
+          );
+          if (payment?.order) {
+            internalOrderId = payment.order.id;
+          }
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Could not find order for Razorpay payment ID: ${paymentId}`,
+          );
+        }
+      }
+
+      // Update webhook event record with extracted data
+      if (webhookEventRecord) {
+        if (paymentId) {
+          webhookEventRecord.payment_id = paymentId;
+        }
+        if (razorpayOrderId) {
+          webhookEventRecord.order_id = razorpayOrderId;
+        }
+        if (internalOrderId) {
+          webhookEventRecord.internal_order_id = internalOrderId;
+        }
+        await this.webhookEventRepository.save(webhookEventRecord);
+      }
+
+      // Handle different webhook events
+      try {
+        switch (eventType) {
+          case "payment.captured":
+            await this.handlePaymentCaptured(event, webhookEventRecord);
+            break;
+          case "payment.failed":
+            await this.handlePaymentFailed(event, webhookEventRecord);
+            break;
+          case "refund.processed":
+            await this.handleRefundProcessed(event, webhookEventRecord);
+            break;
+          case "order.paid":
+            await this.handleOrderPaid(event, webhookEventRecord);
+            break;
+          default:
+            this.logger.log(`ℹ️ Unhandled webhook event: ${eventType}`);
+        }
+
+        // Mark event as processed
+        if (webhookEventRecord) {
+          webhookEventRecord.processing_status = "processed";
+          webhookEventRecord.error_message = null;
+          await this.webhookEventRepository.save(webhookEventRecord);
+        }
+
+        return res.status(200).json({ success: true });
+      } catch (processingError) {
+        // Mark event as failed
+        if (webhookEventRecord) {
+          webhookEventRecord.processing_status = "failed";
+          webhookEventRecord.error_message = processingError.message;
+          await this.webhookEventRepository.save(webhookEventRecord);
+        }
+
+        // Classify error type to determine retry behavior
+        const errorMessage = processingError.message?.toLowerCase() || "";
+        const isPermanentError =
+          // Check for NotFoundException or 404 errors
+          processingError instanceof NotFoundException ||
+          processingError.status === 404 ||
+          // Check error message for permanent error patterns
+          errorMessage.includes("not found") ||
+          errorMessage.includes("missing") ||
+          errorMessage.includes("invalid");
+
+        if (isPermanentError) {
+          // Permanent error - return 200 to prevent Razorpay retries
+          // Examples: Order not found, invalid event data, missing required fields
+          this.logger.warn(
+            `⚠️ Permanent error in webhook processing (will not retry): ${processingError.message}`,
+          );
+          return res.status(200).json({
+            success: false,
+            message: "Webhook processed but failed permanently",
+            error: processingError.message,
+          });
+        } else {
+          // Transient error - re-throw to return 500 and trigger Razorpay retry
+          // Examples: Database connection errors, network timeouts, unknown errors
+          throw processingError;
+        }
+      }
     } catch (error) {
       this.logger.error(
         `❌ Error handling webhook: ${error.message}`,
@@ -2375,63 +2536,222 @@ export class BuyerController {
     return this.orderService.verifyPayment(userId, verifyPaymentDto);
   }
 
-  private async handlePaymentCaptured(event: any) {
+  private async handlePaymentCaptured(
+    event: any,
+    webhookEventRecord?: WebhookEvent | null,
+  ) {
     try {
       const paymentId = event.payload.payment.entity.id;
-      const orderId = event.payload.payment.entity.order_id;
+      const razorpayOrderId = event.payload.payment.entity.order_id;
 
       this.logger.log(
-        `💰 Payment captured: ${paymentId} for order: ${orderId}`,
+        `💰 Payment captured: ${paymentId} for Razorpay order: ${razorpayOrderId}`,
       );
 
-      // Update order payment status
+      // Find internal order ID from Razorpay order ID
+      const order = await this.orderService.findOrderByRazorpayOrderId(
+        razorpayOrderId,
+      );
+
+      if (!order) {
+        this.logger.warn(
+          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+        throw new Error(
+          `Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+      }
+
+      // Update order payment status (with idempotency check)
       await this.orderService.updatePaymentStatus(
-        parseInt(orderId),
+        order.id,
         "paid",
         paymentId,
       );
+
+      // Update order status to confirmed after payment success
+      await this.orderService.updateOrderStatus(order.id, "confirmed");
     } catch (error) {
       this.logger.error(
         `❌ Error handling payment captured: ${error.message}`,
         error.stack,
       );
+      throw error; // Re-throw to mark webhook event as failed
     }
   }
 
-  private async handlePaymentFailed(event: any) {
+  private async handlePaymentFailed(
+    event: any,
+    webhookEventRecord?: WebhookEvent | null,
+  ) {
     try {
       const paymentId = event.payload.payment.entity.id;
-      const orderId = event.payload.payment.entity.order_id;
+      const razorpayOrderId = event.payload.payment.entity.order_id;
 
-      this.logger.log(`❌ Payment failed: ${paymentId} for order: ${orderId}`);
+      this.logger.log(
+        `❌ Payment failed: ${paymentId} for Razorpay order: ${razorpayOrderId}`,
+      );
 
-      // Update order payment status
+      // Find internal order ID from Razorpay order ID
+      const order = await this.orderService.findOrderByRazorpayOrderId(
+        razorpayOrderId,
+      );
+
+      if (!order) {
+        this.logger.warn(
+          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+        throw new Error(
+          `Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+      }
+
+      // Update payment status with payment ID (idempotent)
       await this.orderService.updatePaymentStatus(
-        parseInt(orderId),
+        order.id,
         "failed",
         paymentId,
+      );
+
+      // Get order with user relation to get user ID for cart reactivation
+      const orderWithUser = await this.orderService.getOrderWithUser(order.id);
+
+      if (!orderWithUser || !orderWithUser.user) {
+        this.logger.warn(
+          `⚠️ Order ${order.id} found but user relation not available. Cart will not be reactivated.`,
+        );
+        return;
+      }
+
+      // Call handlePaymentFailure to restore preorder quota and reactivate cart
+      // Note: updatePaymentStatus was already called above, but handlePaymentFailure has idempotency checks
+      await this.orderService.handlePaymentFailure(
+        orderWithUser.user.id,
+        order.id,
+        "Payment failed via webhook",
       );
     } catch (error) {
       this.logger.error(
         `❌ Error handling payment failed: ${error.message}`,
         error.stack,
       );
+      throw error; // Re-throw to mark webhook event as failed
     }
   }
 
-  private async handleOrderPaid(event: any) {
+  private async handleRefundProcessed(
+    event: any,
+    webhookEventRecord?: WebhookEvent | null,
+  ) {
     try {
-      const orderId = event.payload.order.entity.id;
+      // Razorpay refund.processed event structure:
+      // event.payload.refund.entity contains refund details
+      // event.payload.refund.entity.payment_id contains the payment ID
+      // event.payload.refund.entity.amount is in paise
+      const refundEntity = event.payload.refund?.entity;
+      
+      if (!refundEntity) {
+        this.logger.error(
+          `❌ Invalid refund.processed event: missing refund entity`,
+        );
+        throw new Error("Invalid refund.processed event: missing refund entity");
+      }
 
-      this.logger.log(`✅ Order paid: ${orderId}`);
+      const refundId = refundEntity.id || null;
+      const paymentId = refundEntity.payment_id || null;
+      const refundAmount = refundEntity.amount
+        ? refundEntity.amount / 100
+        : null; // Convert from paise to rupees
+      const refundStatus = refundEntity.status || null;
 
-      // Update order status
-      await this.orderService.updateOrderStatus(parseInt(orderId), "confirmed");
+      this.logger.log(
+        `💸 Refund processed: Refund ID: ${refundId || "N/A"}, Payment ID: ${paymentId || "N/A"}, Amount: ${refundAmount ? `₹${refundAmount}` : "N/A"}`,
+      );
+
+      if (!paymentId) {
+        this.logger.error(
+          `❌ Refund processed event missing payment_id: ${JSON.stringify(refundEntity)}`,
+        );
+        throw new Error("Refund processed event missing payment_id");
+      }
+
+      // Find order by payment ID (payment_id in Payment table stores Razorpay payment ID)
+      const payment = await this.orderService.findPaymentByRazorpayPaymentId(
+        paymentId,
+      );
+
+      if (!payment || !payment.order) {
+        this.logger.warn(
+          `⚠️ Payment/Order not found for Razorpay payment ID: ${paymentId}`,
+        );
+        throw new Error(
+          `Payment/Order not found for Razorpay payment ID: ${paymentId}`,
+        );
+      }
+
+      const order = payment.order;
+
+      // Update order payment status to refunded (with idempotency check)
+      await this.orderService.updatePaymentStatus(
+        order.id,
+        "refunded",
+        paymentId,
+      );
+
+      // Handle refund-specific logic (e.g., restore preorder quota, update order status)
+      await this.orderService.handlePaymentRefunded(
+        order.id,
+        paymentId,
+        refundId,
+        refundAmount,
+        refundStatus,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error handling refund processed: ${error.message}`,
+        error.stack,
+      );
+      throw error; // Re-throw to mark webhook event as failed
+    }
+  }
+
+  private async handleOrderPaid(
+    event: any,
+    webhookEventRecord?: WebhookEvent | null,
+  ) {
+    try {
+      const razorpayOrderId = event.payload.order.entity.id;
+
+      this.logger.log(
+        `✅ Order paid: Razorpay order ID ${razorpayOrderId}`,
+      );
+
+      // Find internal order ID from Razorpay order ID
+      const order = await this.orderService.findOrderByRazorpayOrderId(
+        razorpayOrderId,
+      );
+
+      if (!order) {
+        this.logger.warn(
+          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+        throw new Error(
+          `Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        );
+      }
+
+      // Note: Order status update is handled by payment.captured event
+      // This event is acknowledged for audit purposes, but no action is needed
+      // to prevent redundant processing (payment.captured already updates order status)
+      this.logger.log(
+        `ℹ️ Order paid event received for order ${order.id}. Status update handled by payment.captured event.`,
+      );
     } catch (error) {
       this.logger.error(
         `❌ Error handling order paid: ${error.message}`,
         error.stack,
       );
+      throw error; // Re-throw to mark webhook event as failed
     }
   }
 

@@ -65,6 +65,7 @@ export class CreateAppSettings1765580484000 implements MigrationInterface {
       ('APP_OPERATION_HOURS', '0700-2230', 'app_config', 'App operational hours (HHMM-HHMM format)', true),
       ('RAZORPAY_KEY_ID', 'rzp_test_RYoAp8xLUKGiWa', 'payment', 'Razorpay API Key ID', true),
       ('RAZORPAY_KEY_SECRET', 'aZU636O8lC8j3qwIwHh9aUmw', 'payment', 'Razorpay API Key Secret', true),
+      ('RAZORPAY_WEBHOOK_SECRET', '', 'payment', 'Razorpay Webhook Secret for webhook signature verification (optional but recommended for security)', true),
       ('APP_SERVICEABLE_AREA_ENABLED', 'true', 'app_config', 'Enable/disable app serviceable area restriction', true),
       ('APP_SERVICEABLE_AREA_CENTER_LAT', '9.92671', 'app_config', 'Serviceable area center point latitude', true),
       ('APP_SERVICEABLE_AREA_CENTER_LNG', '78.12486', 'app_config', 'Serviceable area center point longitude', true),

@@ -10,6 +10,7 @@ export class RazorpayService {
   private razorpay: Razorpay;
   private keyId: string;
   private keySecret: string;
+  private webhookSecret: string | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -35,6 +36,23 @@ export class RazorpayService {
 
     this.keyId = keyId;
     this.keySecret = keySecret;
+
+    // Get webhook secret (optional - for better security)
+    try {
+      const webhookSecret = await this.appSettingsService.get("RAZORPAY_WEBHOOK_SECRET");
+      if (webhookSecret && webhookSecret.trim() !== "") {
+        this.webhookSecret = webhookSecret.trim();
+        this.logger.log(`🔐 Razorpay webhook secret configured`);
+      } else {
+        this.logger.warn(
+          `⚠️ RAZORPAY_WEBHOOK_SECRET not configured. Webhook verification will use API key secret as fallback. For better security, configure RAZORPAY_WEBHOOK_SECRET in app settings.`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `⚠️ Could not load RAZORPAY_WEBHOOK_SECRET. Webhook verification will use API key secret as fallback.`,
+      );
+    }
 
     try {
       this.razorpay = new Razorpay({
@@ -162,21 +180,35 @@ export class RazorpayService {
 
   /**
    * Verify webhook signature
+   * Uses webhook secret if configured, otherwise falls back to API key secret
    */
   verifyWebhookSignature(body: string, signature: string): boolean {
     try {
       this.logger.log(`🔍 Verifying webhook signature`);
 
+      // Use webhook secret if configured, otherwise fall back to API key secret
+      const secretToUse = this.webhookSecret || this.keySecret;
+      const secretType = this.webhookSecret ? "webhook secret" : "API key secret (fallback)";
+
+      this.logger.log(`🔐 Using ${secretType} for webhook signature verification`);
+
       const expectedSignature = crypto
-        .createHmac("sha256", this.keySecret)
+        .createHmac("sha256", secretToUse)
         .update(body)
         .digest("hex");
 
       const isValid = expectedSignature === signature;
 
       this.logger.log(
-        `🔐 Webhook signature verification: ${isValid ? "VALID" : "INVALID"}`,
+        `🔐 Webhook signature verification: ${isValid ? "VALID" : "INVALID"} (using ${secretType})`,
       );
+
+      if (!isValid && !this.webhookSecret) {
+        this.logger.warn(
+          `⚠️ Webhook signature verification failed. Consider configuring RAZORPAY_WEBHOOK_SECRET in app settings for better security.`,
+        );
+      }
+
       return isValid;
     } catch (error) {
       // Backend log - detailed error information for debugging
