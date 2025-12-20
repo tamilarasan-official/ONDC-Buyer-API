@@ -707,13 +707,28 @@ export class CartService {
         }
 
         // Deactivate all other carts for this user (only one active cart per user)
-        await this.cartRepository
-          .createQueryBuilder()
-          .update()
-          .set({ is_active: false })
-          .where("user_id = :userId", { userId })
-          .andWhere("id != :cartId", { cartId: cart.id })
-          .execute();
+        // Find all other active carts for this user first, then update them
+        const otherCarts = await this.cartRepository.find({
+          where: {
+            user: { id: userId },
+            is_active: true,
+          },
+        });
+
+        // Update all other carts except the current one
+        const cartIdsToDeactivate = otherCarts
+          .filter((c) => c.id !== cart.id)
+          .map((c) => c.id);
+
+        if (cartIdsToDeactivate.length > 0) {
+          // Use TypeORM query builder syntax for IN clause
+          await this.cartRepository
+            .createQueryBuilder()
+            .update()
+            .set({ is_active: false })
+            .where("id IN (:...cartIds)", { cartIds: cartIdsToDeactivate })
+            .execute();
+        }
 
         // Reactivate the requested cart
         await this.cartRepository.update(cart.id, { is_active: true });
