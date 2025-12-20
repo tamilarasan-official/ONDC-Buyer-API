@@ -25,7 +25,6 @@ export class ApiKeyGuard implements CanActivate {
             request.headers['X-API-KEY'];
 
         if (!apiKey) {
-            console.log('apiKey: ', apiKey);
             throw new UnauthorizedException('API key missing');
         }
 
