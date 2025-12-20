@@ -2648,25 +2648,61 @@ export class BuyerController {
     webhookEventRecord?: WebhookEvent | null,
   ) {
     try {
-      const paymentId = event.payload.payment.entity.id;
-      const razorpayOrderId = event.payload.payment.entity.order_id;
+      // Validate payload structure
+      if (!event?.payload?.payment?.entity) {
+        this.logger.error(
+          `❌ Invalid payment.failed event payload: missing payment.entity`,
+        );
+        throw new Error("Invalid webhook payload: missing payment entity");
+      }
+
+      const paymentEntity = event.payload.payment.entity;
+      const paymentId =
+        paymentEntity.id && typeof paymentEntity.id === "string"
+          ? paymentEntity.id
+          : null;
+      const razorpayOrderId =
+        paymentEntity.order_id && typeof paymentEntity.order_id === "string"
+          ? paymentEntity.order_id
+          : null;
+
+      if (!paymentId || !razorpayOrderId) {
+        this.logger.error(
+          `❌ Missing payment ID or order ID in payment.failed event payload`,
+        );
+        throw new Error("Missing required payment data in webhook payload");
+      }
 
       this.logger.log(
         `❌ Payment failed: ${paymentId} for Razorpay order: ${razorpayOrderId}`,
       );
 
       // Find internal order ID from Razorpay order ID
-      const order = await this.orderService.findOrderByRazorpayOrderId(
+      let order = await this.orderService.findOrderByRazorpayOrderId(
         razorpayOrderId,
       );
 
       if (!order) {
+        // Check if order was already processed (payment_id was updated from order_id to payment_id)
+        // Try to find order by payment ID
+        const payment = await this.orderService.findPaymentByRazorpayPaymentId(
+          paymentId,
+        );
+        if (payment?.order) {
+          order = payment.order;
+          this.logger.log(
+            `ℹ️ Order found via payment ID (ID: ${order.id}) for Razorpay order ID: ${razorpayOrderId}. Payment already processed.`,
+          );
+          return; // Order already processed, return success
+        }
+
+        // If still not found, order doesn't exist yet
         this.logger.warn(
-          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
+          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet or payment was already processed.`,
         );
-        throw new Error(
-          `Order not found for Razorpay order ID: ${razorpayOrderId}`,
-        );
+        // Return success to prevent Razorpay from retrying
+        // This can happen if order creation failed or order was deleted
+        return;
       }
 
       // Update payment status with payment ID (idempotent)
