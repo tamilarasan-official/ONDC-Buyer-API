@@ -14,6 +14,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
     const response = ctx.getResponse<Response>();
     const request = ctx.getRequest<Request>();
 
+    // Skip exception handling if response has already been sent (e.g., webhooks using @Res())
+    if (response.headersSent || response.finished) {
+      return;
+    }
+
     let status = HttpStatus.INTERNAL_SERVER_ERROR;
     let message = "Internal server error";
 

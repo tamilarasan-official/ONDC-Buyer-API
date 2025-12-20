@@ -230,8 +230,7 @@ export class AppSettingsService {
       value: string;
       category?: string;
       description?: string;
-    }>,
-    role?: string
+    }>
   ): Promise<void> {
     for (const setting of settings) {
       await this.set(
@@ -239,7 +238,6 @@ export class AppSettingsService {
         setting.value,
         setting.category,
         setting.description,
-        role
       );
     }
 

@@ -44,6 +44,10 @@ export class CartService {
 
   // Maximum tip amount constant (fixed amount in INR)
   private readonly MAX_TIP_AMOUNT = 450.0;
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(Cart)
@@ -178,12 +182,31 @@ export class CartService {
       // Check user's default/recent address to ensure they're in serviceable area
       try {
         const userLocation = await this.locationService.getUserLocation(userId);
+        
+        // Validate that coordinates are not the default values (location permissions disabled)
+        // Use tolerance-based comparison to handle floating-point precision
+        const latDiff = Math.abs(userLocation.lat - this.DEFAULT_LATITUDE);
+        const lngDiff = Math.abs(userLocation.lng - this.DEFAULT_LONGITUDE);
+        const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+        
+        if (latDiff < tolerance && lngDiff < tolerance) {
+          this.logger.warn(
+            `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Coordinates: (${userLocation.lat}, ${userLocation.lng})`,
+          );
+          throw new BadRequestException(
+            "Please update your address and location details properly to add items to cart. We need your accurate location to provide delivery services.",
+          );
+        }
+        
         await this.appServiceableAreaService.validateServiceableArea(
           userLocation.lat,
           userLocation.lng,
         );
       } catch (error) {
-        // If validation fails, log and rethrow (ServiceUnavailableException)
+        // If validation fails, log and rethrow
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         this.logger.warn(
           `⚠️ User location is outside serviceable area: ${error.message}`,
         );
@@ -211,11 +234,12 @@ export class CartService {
       }
 
       // Check maximum_count (per-customer limit)
-      if (stock.maximum_count < addToCartDto.quantity) {
-        throw new BadRequestException(
-          `You can only purchase up to ${stock.maximum_count} units of this item`
-        );
-      }
+      // TEMPORARILY DISABLED - Uncomment to re-enable
+      // if (stock.maximum_count < addToCartDto.quantity) {
+      //   throw new BadRequestException(
+      //     `You can only purchase up to ${stock.maximum_count} units of this item`
+      //   );
+      // }
 
       // Validate customizations if provided
       if (
@@ -462,11 +486,12 @@ export class CartService {
           );
         }
 
-        if (newTotalQty > stock.maximum_count) {
-          throw new BadRequestException(
-            `You can only purchase up to ${stock.maximum_count} units of this item`
-          );
-        }
+        // TEMPORARILY DISABLED - Uncomment to re-enable
+        // if (newTotalQty > stock.maximum_count) {
+        //   throw new BadRequestException(
+        //     `You can only purchase up to ${stock.maximum_count} units of this item`
+        //   );
+        // }
 
         existingCartItem.quantity = newTotalQty;
 

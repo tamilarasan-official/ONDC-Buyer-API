@@ -109,7 +109,7 @@ export class AppServiceableAreaService {
       }
 
       // Calculate distance from center point to user location
-      const distance = this.locationService.calculateDistance(
+      const distance = await this.locationService.calculateDistance(
         centerLat,
         centerLng,
         latitude,
@@ -130,7 +130,7 @@ export class AppServiceableAreaService {
           reason: "OUTSIDE_SERVICEABLE_AREA",
           distance: Number(distance.toFixed(2)),
           maxRadius: radiusKm,
-          message: `Service is not available at this location. We currently serve within ${radiusKm}km radius. Your location is ${distance.toFixed(2)}km away.`,
+          message: "Currently, we are not serviceable in your area. We will be expanding soon to your delivery area.",
         };
       }
 
@@ -162,7 +162,7 @@ export class AppServiceableAreaService {
    * Validate if location is serviceable and throw error if not
    * @param latitude User's latitude
    * @param longitude User's longitude
-   * @throws ServiceUnavailableException (503) if location is outside serviceable area
+   * @throws BadRequestException (400) if location is outside serviceable area
    */
   async validateServiceableArea(
     latitude: number,
@@ -170,9 +170,10 @@ export class AppServiceableAreaService {
   ): Promise<void> {
     const status = await this.checkServiceableArea(latitude, longitude);
     if (!status.isServiceable) {
+      // Throw exception with the error message from checkServiceableArea
+      // status.message is always set when isServiceable is false
       throw new ServiceUnavailableException(
-        status.message ||
-          "Service is not available at this location. Please try a different address.",
+        status.message || "Currently, we are not serviceable in your area. We will be expanding soon to your delivery area.",
       );
     }
   }

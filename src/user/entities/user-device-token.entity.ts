@@ -31,6 +31,9 @@ export class UserDeviceToken {
   @Column({ type: "varchar", length: 100, nullable: true })
   app_version: string;
 
+  @Column({ type: "integer", nullable: true })
+  version_code: number;
+
   @Column({ type: "boolean", default: true })
   is_active: boolean;
 

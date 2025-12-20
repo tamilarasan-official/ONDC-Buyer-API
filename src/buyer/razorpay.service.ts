@@ -10,6 +10,7 @@ export class RazorpayService {
   private razorpay: Razorpay;
   private keyId: string;
   private keySecret: string;
+  private webhookSecret: string | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -19,24 +20,37 @@ export class RazorpayService {
   }
 
   private async initializeRazorpay() {
-    // Get Razorpay credentials from database or use defaults
-    this.keyId = (await this.appSettingsService.get(
-      "RAZORPAY_KEY_ID",
-      "rzp_test_1DP5mmOlF5G5ag",
-    )) || "rzp_test_1DP5mmOlF5G5ag";
-    this.keySecret = (await this.appSettingsService.get(
-      "RAZORPAY_KEY_SECRET",
-      "thisisasecretkey",
-    )) || "thisisasecretkey";
+    // Get Razorpay credentials from database - no defaults to prevent errors
+    const keyId = await this.appSettingsService.get("RAZORPAY_KEY_ID");
+    const keySecret = await this.appSettingsService.get("RAZORPAY_KEY_SECRET");
 
-    // Validate credentials
-    if (
-      !this.keyId ||
-      !this.keySecret ||
-      this.keyId === "rzp_test_1DP5mmOlF5G5ag"
-    ) {
+    // Validate credentials are configured
+    if (!keyId || !keySecret) {
+      // Backend log - detailed information for debugging
+      this.logger.error(
+        `❌ Razorpay credentials not configured. RAZORPAY_KEY_ID=${keyId ? "SET" : "MISSING"}, RAZORPAY_KEY_SECRET=${keySecret ? "SET" : "MISSING"}. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in app settings.`,
+      );
+      // User-friendly error message
+      throw new Error("Payment service is temporarily unavailable. Please contact support.");
+    }
+
+    this.keyId = keyId;
+    this.keySecret = keySecret;
+
+    // Get webhook secret (optional - for better security)
+    try {
+      const webhookSecret = await this.appSettingsService.get("RAZORPAY_WEBHOOK_SECRET");
+      if (webhookSecret && webhookSecret.trim() !== "") {
+        this.webhookSecret = webhookSecret.trim();
+        this.logger.log(`🔐 Razorpay webhook secret configured`);
+      } else {
+        this.logger.warn(
+          `⚠️ RAZORPAY_WEBHOOK_SECRET not configured. Webhook verification will use API key secret as fallback. For better security, configure RAZORPAY_WEBHOOK_SECRET in app settings.`,
+        );
+      }
+    } catch (error) {
       this.logger.warn(
-        `⚠️ Using default Razorpay test credentials. Please set RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in app settings for production.`,
+        `⚠️ Could not load RAZORPAY_WEBHOOK_SECRET. Webhook verification will use API key secret as fallback.`,
       );
     }
 
@@ -48,8 +62,12 @@ export class RazorpayService {
 
       this.logger.log(`🔑 Razorpay initialized with Key ID: ${this.keyId}`);
     } catch (error) {
-      this.logger.error(`❌ Failed to initialize Razorpay:`, error);
-      throw new Error("Failed to initialize Razorpay service");
+      // Backend log - detailed error information
+      this.logger.error(
+        `❌ Failed to initialize Razorpay service. Error: ${error.message || error}, Stack: ${error.stack || "N/A"}`,
+      );
+      // User-friendly error message
+      throw new Error("Payment service initialization failed. Please contact support.");
     }
   }
 
@@ -68,25 +86,22 @@ export class RazorpayService {
 
       // Validate amount
       if (!amount || amount <= 0) {
-        throw new Error("Invalid amount provided");
-      }
-
-      // Development fallback - return mock order if using default credentials
-      if (this.keyId === "rzp_test_1DP5mmOlF5G5ag") {
-        this.logger.warn(`⚠️ Using mock Razorpay order for development`);
-        return {
-          id: `order_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          amount: amount,
-          currency: currency,
-          receipt: receipt || `receipt_${Date.now()}`,
-          status: "created",
-          created_at: Math.floor(Date.now() / 1000),
-        };
+        // Backend log
+        this.logger.error(
+          `❌ Invalid amount provided for Razorpay order creation. Amount: ${amount}, Currency: ${currency}`,
+        );
+        // User-friendly error message
+        throw new BadRequestException("Invalid payment amount. Please try again.");
       }
 
       // Validate Razorpay instance
       if (!this.razorpay) {
-        throw new Error("Razorpay instance not initialized");
+        // Backend log
+        this.logger.error(
+          `❌ Razorpay instance not initialized. keyId=${this.keyId ? "SET" : "MISSING"}, keySecret=${this.keySecret ? "SET" : "MISSING"}. Please configure RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET in app settings.`,
+        );
+        // User-friendly error message
+        throw new BadRequestException("Payment service is temporarily unavailable. Please try again later.");
       }
 
       const options = {
@@ -105,16 +120,22 @@ export class RazorpayService {
       this.logger.log(`✅ Razorpay order created: ${order.id}`);
       return order;
     } catch (error) {
-      this.logger.error(`❌ Error creating Razorpay order:`, error);
-      this.logger.error(`❌ Error details:`, {
+      // Backend log - detailed error information for debugging
+      this.logger.error(`❌ Error creating Razorpay order. Amount: ${amount} ${currency}, Receipt: ${receipt || "N/A"}`);
+      this.logger.error(`❌ Razorpay API error details:`, {
         message: error?.message,
         code: error?.code,
         statusCode: error?.statusCode,
         response: error?.response,
+        stack: error?.stack,
       });
-      throw new BadRequestException(
-        `Failed to create payment order: ${error?.message || "Unknown error"}`,
-      );
+      
+      // User-friendly error message
+      const userMessage = error?.statusCode === 400 
+        ? "Invalid payment request. Please check your payment details and try again."
+        : "Unable to process payment at the moment. Please try again later.";
+      
+      throw new BadRequestException(userMessage);
     }
   }
 
@@ -144,37 +165,60 @@ export class RazorpayService {
       );
       return isValid;
     } catch (error) {
+      // Backend log - detailed error information for debugging
       this.logger.error(
-        `❌ Error verifying payment signature: ${error.message}`,
-        error.stack,
+        `❌ Error verifying payment signature. Order ID: ${razorpayOrderId}, Payment ID: ${razorpayPaymentId}`,
       );
+      this.logger.error(`❌ Signature verification error details:`, {
+        message: error?.message,
+        stack: error?.stack,
+      });
+      // Return false for invalid signature - this is handled by the caller
       return false;
     }
   }
 
   /**
    * Verify webhook signature
+   * Uses webhook secret if configured, otherwise falls back to API key secret
    */
   verifyWebhookSignature(body: string, signature: string): boolean {
     try {
       this.logger.log(`🔍 Verifying webhook signature`);
 
+      // Use webhook secret if configured, otherwise fall back to API key secret
+      const secretToUse = this.webhookSecret || this.keySecret;
+      const secretType = this.webhookSecret ? "webhook secret" : "API key secret (fallback)";
+
+      this.logger.log(`🔐 Using ${secretType} for webhook signature verification`);
+
       const expectedSignature = crypto
-        .createHmac("sha256", this.keySecret)
+        .createHmac("sha256", secretToUse)
         .update(body)
         .digest("hex");
 
       const isValid = expectedSignature === signature;
 
       this.logger.log(
-        `🔐 Webhook signature verification: ${isValid ? "VALID" : "INVALID"}`,
+        `🔐 Webhook signature verification: ${isValid ? "VALID" : "INVALID"} (using ${secretType})`,
       );
+
+      if (!isValid && !this.webhookSecret) {
+        this.logger.warn(
+          `⚠️ Webhook signature verification failed. Consider configuring RAZORPAY_WEBHOOK_SECRET in app settings for better security.`,
+        );
+      }
+
       return isValid;
     } catch (error) {
-      this.logger.error(
-        `❌ Error verifying webhook signature: ${error.message}`,
-        error.stack,
-      );
+      // Backend log - detailed error information for debugging
+      this.logger.error(`❌ Error verifying webhook signature from Razorpay`);
+      this.logger.error(`❌ Webhook signature verification error details:`, {
+        message: error?.message,
+        stack: error?.stack,
+        bodyLength: body?.length || 0,
+      });
+      // Return false for invalid signature - this is handled by the caller
       return false;
     }
   }
@@ -186,21 +230,13 @@ export class RazorpayService {
     try {
       this.logger.log(`💳 Fetching payment details for: ${paymentId}`);
 
-      // Development fallback
-      if (this.keyId === "rzp_test_1DP5mmOlF5G5ag") {
-        this.logger.warn(`⚠️ Using mock payment details for development`);
-        return {
-          id: paymentId,
-          amount: 123000,
-          currency: "INR",
-          status: "captured",
-          method: "card",
-          created_at: Math.floor(Date.now() / 1000),
-        };
-      }
-
       if (!this.razorpay) {
-        throw new Error("Razorpay instance not initialized");
+        // Backend log
+        this.logger.error(
+          `❌ Razorpay instance not initialized while fetching payment details. Payment ID: ${paymentId}, keyId=${this.keyId ? "SET" : "MISSING"}, keySecret=${this.keySecret ? "SET" : "MISSING"}`,
+        );
+        // User-friendly error message
+        throw new BadRequestException("Payment service is temporarily unavailable. Please try again later.");
       }
 
       const payment = await this.razorpay.payments.fetch(paymentId);
@@ -208,10 +244,24 @@ export class RazorpayService {
       this.logger.log(`✅ Payment details fetched: ${payment.id}`);
       return payment;
     } catch (error) {
-      this.logger.error(`❌ Error fetching payment details:`, error);
-      throw new BadRequestException(
-        `Failed to fetch payment details: ${error?.message || "Unknown error"}`,
+      // Backend log - detailed error information for debugging
+      this.logger.error(
+        `❌ Error fetching payment details from Razorpay. Payment ID: ${paymentId}`,
       );
+      this.logger.error(`❌ Razorpay API error details:`, {
+        message: error?.message,
+        code: error?.code,
+        statusCode: error?.statusCode,
+        response: error?.response,
+        stack: error?.stack,
+      });
+      
+      // User-friendly error message
+      const userMessage = error?.statusCode === 404
+        ? "Payment not found. Please verify your payment details."
+        : "Unable to fetch payment details. Please try again later.";
+      
+      throw new BadRequestException(userMessage);
     }
   }
 
@@ -237,11 +287,24 @@ export class RazorpayService {
       this.logger.log(`✅ Payment captured successfully: ${payment.status}`);
       return payment;
     } catch (error) {
+      // Backend log - detailed error information for debugging
       this.logger.error(
-        `❌ Error capturing payment: ${error.message}`,
-        error.stack,
+        `❌ Error capturing payment in Razorpay. Payment ID: ${paymentId}, Amount: ${amount} ${currency}`,
       );
-      throw new BadRequestException("Failed to capture payment");
+      this.logger.error(`❌ Razorpay API error details:`, {
+        message: error?.message,
+        code: error?.code,
+        statusCode: error?.statusCode,
+        response: error?.response,
+        stack: error?.stack,
+      });
+      
+      // User-friendly error message
+      const userMessage = error?.statusCode === 400
+        ? "Payment capture failed. Please contact support for assistance."
+        : "Unable to process payment. Please try again later.";
+      
+      throw new BadRequestException(userMessage);
     }
   }
 
@@ -272,11 +335,24 @@ export class RazorpayService {
       this.logger.log(`✅ Refund processed successfully: ${refund.id}`);
       return refund;
     } catch (error) {
+      // Backend log - detailed error information for debugging
       this.logger.error(
-        `❌ Error processing refund: ${error.message}`,
-        error.stack,
+        `❌ Error processing refund in Razorpay. Payment ID: ${paymentId}, Amount: ${amount || "FULL"}, Notes: ${JSON.stringify(notes || {})}`,
       );
-      throw new BadRequestException("Failed to process refund");
+      this.logger.error(`❌ Razorpay API error details:`, {
+        message: error?.message,
+        code: error?.code,
+        statusCode: error?.statusCode,
+        response: error?.response,
+        stack: error?.stack,
+      });
+      
+      // User-friendly error message
+      const userMessage = error?.statusCode === 400
+        ? "Refund request is invalid. Please contact support for assistance."
+        : "Unable to process refund at the moment. Please try again later or contact support.";
+      
+      throw new BadRequestException(userMessage);
     }
   }
 
