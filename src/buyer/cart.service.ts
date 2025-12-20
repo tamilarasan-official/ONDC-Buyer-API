@@ -706,9 +706,20 @@ export class CartService {
           throw new NotFoundException("Cart not found");
         }
 
-        // Reactivate cart (with or without items)
+        // Deactivate all other carts for this user (only one active cart per user)
+        await this.cartRepository
+          .createQueryBuilder()
+          .update()
+          .set({ is_active: false })
+          .where("user_id = :userId", { userId })
+          .andWhere("id != :cartId", { cartId: cart.id })
+          .execute();
+
+        // Reactivate the requested cart
         await this.cartRepository.update(cart.id, { is_active: true });
-        this.logger.log(`✅ Cart ${cart.id} reactivated for user ${userId}`);
+        this.logger.log(
+          `✅ Cart ${cart.id} reactivated for user ${userId}. All other carts deactivated.`,
+        );
 
         // Get updated cart summary
         const updatedCart = await this.cartRepository.findOne({

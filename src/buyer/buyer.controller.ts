@@ -2790,11 +2790,42 @@ export class BuyerController {
       );
 
       // Find internal order ID from Razorpay order ID
-      const order = await this.orderService.findOrderByRazorpayOrderId(
+      let order = await this.orderService.findOrderByRazorpayOrderId(
         razorpayOrderId,
       );
 
       if (!order) {
+        // Check if order was already created by payment.captured webhook
+        // After payment.captured, payment.payment_id is updated from razorpay_order_id to razorpay_payment_id
+        // So we need to find order by payment ID if available in the event
+        const paymentId = event.payload?.payment?.entity?.id;
+        if (paymentId) {
+          const payment = await this.orderService.findPaymentByRazorpayPaymentId(
+            paymentId,
+          );
+          if (payment?.order) {
+            order = payment.order;
+            this.logger.log(
+              `ℹ️ Order already created (ID: ${order.id}) via payment.captured for Razorpay order ID: ${razorpayOrderId}. Order paid event acknowledged.`,
+            );
+            return; // Order already exists, return success
+          }
+        }
+
+        // If payment ID not available, check if order was already processed
+        // by looking for payment records with paid/success status
+        const existingOrder = await this.orderService.findOrderAlreadyProcessed(
+          razorpayOrderId,
+          paymentId,
+        );
+        if (existingOrder) {
+          this.logger.log(
+            `ℹ️ Order already created (ID: ${existingOrder.id}) via payment.captured for Razorpay order ID: ${razorpayOrderId}. Order paid event acknowledged.`,
+          );
+          return; // Order already exists, return success
+        }
+
+        // If still not found, order doesn't exist yet
         this.logger.warn(
           `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
         );

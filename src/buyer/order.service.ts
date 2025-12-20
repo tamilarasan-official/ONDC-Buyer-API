@@ -1030,7 +1030,8 @@ export class OrderService {
       this.logger.log(`✅ Payment signature verified`);
 
       // Find payment record by Razorpay order ID (payment_id temporarily stores razorpay_order_id)
-      const payment = await this.paymentRepository
+      // OR by Razorpay payment ID (if payment was already processed by webhook)
+      let payment = await this.paymentRepository
         .createQueryBuilder("p")
         .leftJoinAndSelect("p.order", "o")
         .leftJoin("o.user", "u")
@@ -1040,7 +1041,46 @@ export class OrderService {
         .andWhere("u.id = :userId", { userId })
         .getOne();
 
+      // If not found by order ID, try finding by payment ID (in case webhook already processed it)
       if (!payment || !payment.order) {
+        payment = await this.paymentRepository
+          .createQueryBuilder("p")
+          .leftJoinAndSelect("p.order", "o")
+          .leftJoin("o.user", "u")
+          .where("p.payment_id = :razorpayPaymentId", {
+            razorpayPaymentId: razorpay_payment_id,
+          })
+          .andWhere("u.id = :userId", { userId })
+          .getOne();
+      }
+
+      if (!payment || !payment.order) {
+        // Order not found - check if it was already created by webhook
+        // Try to find order by payment ID to see if it exists
+        const existingPayment = await this.findPaymentByRazorpayPaymentId(
+          razorpay_payment_id,
+        );
+
+        if (existingPayment?.order) {
+          // Order already exists and was processed (likely by webhook)
+          this.logger.log(
+            `ℹ️ Order already created (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning success.`,
+          );
+
+          // Get updated order data
+          const orderData = await this.getOrderById(
+            existingPayment.order.id,
+            userId,
+          );
+
+          return {
+            success: true,
+            message: "Payment already verified and order created successfully",
+            payment_id: razorpay_payment_id,
+            order: orderData,
+          };
+        }
+
         this.logger.error(
           `❌ Order not found for razorpay_order_id: ${razorpay_order_id}`,
         );
@@ -1516,6 +1556,55 @@ export class OrderService {
     } catch (error) {
       this.logger.error(
         `❌ Error finding order by Razorpay order ID: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Find order that was already processed by checking payment records
+   * This happens when payment.captured webhook processes the order before order.paid or verifyPayment
+   * After payment.captured, payment.payment_id is updated from razorpay_order_id to razorpay_payment_id
+   * So we check if there's a payment with payment_status = "paid" or "success" 
+   * and payment_id starts with "pay_" (not "order_"), indicating it was already processed
+   */
+  async findOrderAlreadyProcessed(razorpayOrderId: string, razorpayPaymentId?: string) {
+    try {
+      // First, try to find by payment ID if provided
+      if (razorpayPaymentId) {
+        const payment = await this.findPaymentByRazorpayPaymentId(razorpayPaymentId);
+        if (payment?.order && (payment.payment_status === "paid" || payment.payment_status === "success")) {
+          return payment.order;
+        }
+      }
+
+      // If not found, check all payment records for orders with paid status
+      // and see if any payment_id was updated (starts with "pay_" instead of "order_")
+      // This indicates the order was already processed by payment.captured
+      const payments = await this.paymentRepository
+        .createQueryBuilder("p")
+        .leftJoinAndSelect("p.order", "o")
+        .where("p.payment_status IN (:...statuses)", {
+          statuses: ["paid", "success"],
+        })
+        .andWhere("p.payment_id LIKE :paymentIdPattern", {
+          paymentIdPattern: "pay_%",
+        })
+        .getMany();
+
+      // Check if any of these payments might be related to the order_id
+      // by checking the order's payment_status
+      for (const payment of payments) {
+        if (payment.order && payment.order.payment_status === "paid") {
+          // This order was already processed, return it
+          return payment.order;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding already processed order: ${error.message}`,
       );
       return null;
     }
