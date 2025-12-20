@@ -1592,7 +1592,7 @@ export class OrderService {
 
       // Status was successfully updated (updateResult.affected > 0)
       // Push order to seller if status is confirmed AND our update succeeded
-      if (status === "confirmed" && updateResult.affected > 0) {
+      if (status === "confirmed" && updateResult.affected !== undefined && updateResult.affected > 0) {
         const orderWithRelations = await this.orderRepository
           .createQueryBuilder("o")
           .leftJoinAndSelect("o.user", "u")
