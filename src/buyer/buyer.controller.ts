@@ -2652,13 +2652,31 @@ export class BuyerController {
           );
           // Continue with status updates (idempotent operations)
         } else {
-          // Order doesn't exist
-          this.logger.warn(
-            `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet.`,
-          );
-          // Return success to prevent Razorpay from retrying
-          // This can happen if order creation failed or order was deleted
-          return;
+          // If still not found, try to find order by order_number from payment description
+          // This handles retry scenarios where payment_id was updated to a failed payment ID
+          // Payment description format: "Order #ORD-20251220103837-262" or "Order #ORD-20251220-262"
+          const paymentDescription = paymentEntity.description || "";
+          const orderNumberMatch = paymentDescription.match(/Order #(ORD-\d{8,14}-\d+)/i);
+          if (orderNumberMatch && orderNumberMatch[1]) {
+            const orderNumber = orderNumberMatch[1];
+            order = await this.orderService.findOrderByOrderNumber(orderNumber);
+            if (order) {
+              this.logger.log(
+                `ℹ️ Order found by order number (ID: ${order.id}, Number: ${orderNumber}) for Razorpay order ID: ${razorpayOrderId}. Handling retry scenario.`,
+              );
+              // Continue with status updates
+            }
+          }
+
+          if (!order) {
+            // Order doesn't exist
+            this.logger.warn(
+              `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet.`,
+            );
+            // Return success to prevent Razorpay from retrying
+            // This can happen if order creation failed or order was deleted
+            return;
+          }
         }
       }
 
@@ -2733,13 +2751,31 @@ export class BuyerController {
           return; // Order already processed, return success
         }
 
-        // If still not found, order doesn't exist yet
-        this.logger.warn(
-          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet or payment was already processed.`,
-        );
-        // Return success to prevent Razorpay from retrying
-        // This can happen if order creation failed or order was deleted
-        return;
+        // If still not found, try to find order by order_number from payment description
+        // This handles retry scenarios where payment_id was updated to a failed payment ID
+        // Payment description format: "Order #ORD-20251220103837-262"
+        const paymentDescription = paymentEntity.description || "";
+        const orderNumberMatch = paymentDescription.match(/Order #(ORD-\d{8}-\d+)/i);
+        if (orderNumberMatch && orderNumberMatch[1]) {
+          const orderNumber = orderNumberMatch[1];
+          order = await this.orderService.findOrderByOrderNumber(orderNumber);
+          if (order) {
+            this.logger.log(
+              `ℹ️ Order found by order number (ID: ${order.id}, Number: ${orderNumber}) for Razorpay order ID: ${razorpayOrderId}. Handling retry scenario.`,
+            );
+            // Continue processing (order found, will update payment status)
+          }
+        }
+
+        if (!order) {
+          // If still not found, order doesn't exist yet
+          this.logger.warn(
+            `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet or payment was already processed.`,
+          );
+          // Return success to prevent Razorpay from retrying
+          // This can happen if order creation failed or order was deleted
+          return;
+        }
       }
 
       // Update payment status with payment ID (idempotent)

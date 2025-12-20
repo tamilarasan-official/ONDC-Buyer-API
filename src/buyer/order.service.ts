@@ -1081,8 +1081,17 @@ export class OrderService {
           };
         }
 
+        // If still not found, this might be a retry scenario where payment_id was updated to a failed payment ID
+        // Try to find any payment record for this user that was created for this razorpay_order_id
+        // Since payment_id gets updated, we need to find by searching for orders that might match
+        // Actually, we can't easily do this without the order_number
+        
+        // Alternative: Since we have the order_id in the payment description in Razorpay,
+        // but we don't have access to that here, we need another approach
+        // The best we can do is return the error, as the order should exist if payment was initiated
+
         this.logger.error(
-          `❌ Order not found for razorpay_order_id: ${razorpay_order_id}`,
+          `❌ Order not found for razorpay_order_id: ${razorpay_order_id}. This may be a retry scenario where payment_id was updated to a failed payment ID.`,
         );
         throw new NotFoundException("Order not found");
       }
@@ -1541,10 +1550,12 @@ export class OrderService {
 
   /**
    * Find order by Razorpay order ID
+   * Handles retry scenarios where payment_id was updated to a failed payment ID
    */
   async findOrderByRazorpayOrderId(razorpayOrderId: string) {
     try {
-      const payment = await this.paymentRepository
+      // First, try to find by payment_id = razorpay_order_id (initial state, before payment attempts)
+      let payment = await this.paymentRepository
         .createQueryBuilder("p")
         .leftJoinAndSelect("p.order", "o")
         .where("p.payment_id = :razorpayOrderId", {
@@ -1552,10 +1563,34 @@ export class OrderService {
         })
         .getOne();
 
-      return payment?.order || null;
+      if (payment?.order) {
+        return payment.order;
+      }
+
+      // If not found, payment_id may have been updated to a failed payment ID
+      // Return null - the calling code will handle fallback logic (e.g., finding by order_number from description)
+      return null;
     } catch (error) {
       this.logger.error(
         `❌ Error finding order by Razorpay order ID: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Find order by order number (e.g., "ORD-20251220103837-262")
+   * Used as fallback when payment_id lookup fails (e.g., retry scenarios)
+   */
+  async findOrderByOrderNumber(orderNumber: string) {
+    try {
+      const order = await this.orderRepository.findOne({
+        where: { order_number: orderNumber },
+      });
+      return order;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding order by order number: ${error.message}`,
       );
       return null;
     }
