@@ -2322,7 +2322,50 @@ export class BuyerController {
    * Razorpay webhook handler
    */
   @Post("webhook/razorpay")
-  async handleRazorpayWebhook(@Req() req: any, @Res() res: any) {
+  @ApiOperation({
+    summary: "Razorpay payment webhook",
+    description:
+      "Webhook endpoint to receive payment events from Razorpay. Handles payment.captured, payment.failed, refund.processed, and order.paid events. Validates webhook signature and ensures idempotent processing. This endpoint is public and does not require authentication.",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Webhook processed successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: {
+          type: "string",
+          example: "Event already processed",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Invalid webhook signature or missing event ID",
+    schema: {
+      type: "object",
+      properties: {
+        error: { type: "string", example: "Invalid signature" },
+        message: {
+          type: "string",
+          example: "Razorpay webhooks must include an event ID",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: "Webhook processing failed (transient error - will be retried)",
+    schema: {
+      type: "object",
+      properties: {
+        error: { type: "string", example: "Webhook processing failed" },
+      },
+    },
+  })
+  async handleRazorpayWebhook(@Req() req: any, @Res({ passthrough: false }) res: any) {
     let webhookEventRecord: WebhookEvent | null = null;
     try {
       const signature = req.headers["x-razorpay-signature"];
@@ -2342,21 +2385,35 @@ export class BuyerController {
       }
 
       const event = req.body;
-      const eventId = event.id || event.event_id; // Razorpay event ID
       const eventType = event.event; // payment.captured, payment.failed, order.paid
+
+      // Generate event ID from available data if Razorpay doesn't provide one
+      // Razorpay doesn't always include event.id at top level, so we generate it
+      let eventId = event.id || event.event_id;
+
+      if (!eventId) {
+        // Generate event ID from payment/order/refund ID + event type for idempotency
+        if (event.payload?.payment?.entity?.id) {
+          eventId = `${event.payload.payment.entity.id}_${eventType}`;
+        } else if (event.payload?.order?.entity?.id) {
+          eventId = `${event.payload.order.entity.id}_${eventType}`;
+        } else if (event.payload?.refund?.entity?.id) {
+          eventId = `${event.payload.refund.entity.id}_${eventType}`;
+        }
+      }
 
       this.logger.log(
         `📨 Webhook event: ${eventType}, Event ID: ${eventId || "N/A"}`,
       );
 
-      // Require event ID for webhook processing (Razorpay always provides this)
+      // Require event ID for webhook processing (generated if not provided by Razorpay)
       if (!eventId) {
         this.logger.error(
-          `❌ Webhook event missing event ID. Event type: ${eventType || "unknown"}. Rejecting event.`,
+          `❌ Webhook event missing event ID and unable to generate one. Event type: ${eventType || "unknown"}. Rejecting event.`,
         );
         return res.status(400).json({
           error: "Event ID is required for webhook processing",
-          message: "Razorpay webhooks must include an event ID (event.id or event.event_id)",
+          message: "Unable to extract or generate event ID from webhook payload",
         });
       }
 
