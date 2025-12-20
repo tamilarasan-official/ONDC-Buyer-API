@@ -552,6 +552,7 @@ export class CartService {
       return {
         success: true,
         message: "Item added to cart successfully",
+        cart_id: cart.id,
         cart_item_id: cartItem.id,
         cart_summary: cartSummary,
       };
@@ -807,12 +808,57 @@ export class CartService {
 
       await this.cartItemRepository.save(cartItem);
 
+      const cartId = cartItem.cart.id;
+      const cart = cartItem.cart;
+
       // Update cart totals
-      await this.updateCartTotals(cartItem.cart.id);
+      await this.updateCartTotals(cartId);
+
+      // Check if cart is empty after update (defensive check)
+      const remainingItems = await this.cartItemRepository.count({
+        where: { cart: { id: cartId } },
+      });
+
+      if (remainingItems === 0) {
+        // Clear coupon fields before deactivating cart
+        if (cart.coupon_id || cart.coupon_code || cart.coupon_reservation_token) {
+          // Rollback reservation if exists
+          if (cart.coupon_reservation_token) {
+            try {
+              await this.couponService.rollbackCoupon({
+                reservation_token: cart.coupon_reservation_token as string,
+                reason: "Cart emptied",
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Failed to rollback coupon reservation: ${error.message}`,
+              );
+            }
+          }
+          
+          // Clear coupon fields directly
+          await this.cartRepository.update(cartId, {
+            coupon_code: undefined,
+            coupon_reservation_token: undefined,
+            coupon_id: undefined,
+            discount_amount: 0,
+          });
+        }
+        
+        // Deactivate empty cart
+        await this.cartRepository.update(cartId, { is_active: false });
+        this.logger.log(`Cart ${cartId} deactivated after update (cart is empty)`);
+      } else {
+        // Ensure cart remains active (in case it was somehow deactivated)
+        if (!cart.is_active) {
+          await this.cartRepository.update(cartId, { is_active: true });
+          this.logger.log(`Cart ${cartId} reactivated during update`);
+        }
+      }
 
       // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
-        where: { id: cartItem.cart.id },
+        where: { id: cartId },
         relations: ["store", "cart_items", "cart_items.item"],
       });
 
