@@ -828,9 +828,15 @@ export class NotificationService {
         "Your order is out for delivery and will reach you soon.",
       delivered: "Your order has been delivered. Enjoy your meal!",
       cancelled: "Your order has been cancelled.",
+      failed: "Your payment could not be processed. Please try again or use a different payment method.",
     };
 
     const baseMessage = baseMessages[status] || message;
+
+    // Don't include estimated delivery time for failed payments
+    if (status === "failed") {
+      return baseMessage;
+    }
 
     if (additionalData?.estimated_time) {
       return `${baseMessage} Estimated delivery time: ${additionalData.estimated_time}`;
