@@ -687,6 +687,62 @@ export class CartService {
    */
   async updateCartItem(userId: number, updateCartItemDto: UpdateCartItemDto) {
     try {
+      // Handle cart reactivation (cart_id + is_active: true)
+      if (updateCartItemDto.cart_id && updateCartItemDto.is_active === true) {
+        this.logger.log(
+          `🔄 Reactivating cart ${updateCartItemDto.cart_id} for user ${userId}`,
+        );
+
+        const cart = await this.cartRepository
+          .createQueryBuilder("c")
+          .leftJoinAndSelect("c.store", "s")
+          .leftJoinAndSelect("c.cart_items", "ci")
+          .leftJoin("c.user", "u")
+          .where("c.id = :cartId", { cartId: updateCartItemDto.cart_id })
+          .andWhere("u.id = :userId", { userId })
+          .getOne();
+
+        if (!cart) {
+          throw new NotFoundException("Cart not found");
+        }
+
+        // Reactivate cart (with or without items)
+        await this.cartRepository.update(cart.id, { is_active: true });
+        this.logger.log(`✅ Cart ${cart.id} reactivated for user ${userId}`);
+
+        // Get updated cart summary
+        const updatedCart = await this.cartRepository.findOne({
+          where: { id: cart.id },
+          relations: ["store", "cart_items", "cart_items.item"],
+        });
+
+        const cartSummary = updatedCart
+          ? await this.calculateCartSummary(updatedCart)
+          : {
+            subtotal: 0,
+            delivery_fee: 0,
+            tax_amount: 0,
+            discount_amount: 0,
+            tip_amount: 0,
+            max_tip_amount: null,
+            final_amount: 0,
+            estimated_delivery_time: null,
+          };
+
+        return {
+          success: true,
+          message: "Cart reactivated successfully",
+          cart_summary: cartSummary,
+        };
+      }
+
+      // Handle cart item update (requires cart_item_id)
+      if (!updateCartItemDto.cart_item_id) {
+        throw new BadRequestException(
+          "Either cart_id with is_active=true for reactivation, or cart_item_id for item update is required",
+        );
+      }
+
       this.logger.log(
         `✏️ Updating cart item ${updateCartItemDto.cart_item_id} for user ${userId}`,
       );
@@ -707,6 +763,11 @@ export class CartService {
 
       if (!cartItem) {
         throw new NotFoundException("Cart item not found");
+      }
+
+      // Validate quantity is provided for item update
+      if (updateCartItemDto.quantity === undefined) {
+        throw new BadRequestException("Quantity is required for cart item update");
       }
 
       // NEW: Prevent quantity changes for preorder items

@@ -143,14 +143,37 @@ export class AddToCartDto {
 
 export class UpdateCartItemDto {
   @ApiProperty({
+    description: "Cart ID (for cart reactivation)",
+    example: 1,
+    type: "number",
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  cart_id?: number;
+
+  @ApiProperty({
     description: "Cart item ID to update",
     example: 1,
     type: "number",
+    required: false,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  cart_item_id: number;
+  cart_item_id?: number;
+
+  @ApiProperty({
+    description: "Reactivate cart (set to true to reactivate inactive cart)",
+    example: true,
+    type: "boolean",
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  is_active?: boolean;
 
   @ApiProperty({
     description: "Restaurant ID (for validation)",
@@ -168,13 +191,14 @@ export class UpdateCartItemDto {
     type: "number",
     minimum: 1,
     maximum: 50,
+    required: false,
   })
-  @IsNotEmpty()
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
   @Max(50)
-  quantity: number;
+  quantity?: number;
 
   @ApiProperty({
     description: "Updated customizations",

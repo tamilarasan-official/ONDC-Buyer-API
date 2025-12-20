@@ -733,9 +733,9 @@ export class BuyerController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
-    summary: "Update cart item",
+    summary: "Update cart item or reactivate cart",
     description:
-      "Update quantity, customizations, or variants of an existing cart item. Note: Preorder items cannot have quantity changed (must be 1).",
+      "Update quantity, customizations, or variants of an existing cart item. Note: Preorder items cannot have quantity changed (must be 1). Alternatively, reactivate a cart by providing cart_id and is_active=true (works with or without items).",
   })
   @ApiBody({ type: UpdateCartItemDto })
   @ApiResponse({
