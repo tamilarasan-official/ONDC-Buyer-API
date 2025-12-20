@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { AppSettings } from "../entities/app-settings.entity";
+import { AdminAccessService } from "src/super-admin-access/super-admin-access.service";
 
 @Injectable()
 export class AppSettingsService {
@@ -13,6 +14,8 @@ export class AppSettingsService {
   constructor(
     @InjectRepository(AppSettings)
     private readonly appSettingsRepository: Repository<AppSettings>,
+
+    private readonly adminAccessService: AdminAccessService,
   ) {
     this.initializeCache();
   }
@@ -123,8 +126,10 @@ export class AppSettingsService {
     value: string,
     category?: string,
     description?: string,
+    role?: string
   ): Promise<AppSettings> {
     let setting = await this.appSettingsRepository.findOne({ where: { key } });
+    console.log('setting: ', setting);
 
     if (setting) {
       setting.value = value;
@@ -137,6 +142,10 @@ export class AppSettingsService {
         category,
         description,
       });
+    }
+    if (!setting) {
+      // optional audit
+      await this.adminAccessService.createLog(role, key, true);
     }
 
     const saved = await this.appSettingsRepository.save(setting);
@@ -167,7 +176,7 @@ export class AppSettingsService {
   /**
    * Delete a setting
    */
-  async delete(id: number): Promise<void> {
+  async delete(id: number, role?: string): Promise<void> {
     const setting = await this.appSettingsRepository.findOne({ where: { id } });
 
     if (!setting) {
@@ -177,13 +186,19 @@ export class AppSettingsService {
     await this.appSettingsRepository.remove(setting);
     await this.refreshCache();
 
+    await this.adminAccessService.createLog(
+      role,
+      setting.key,
+      false,
+    );
+
     this.logger.log(`✅ Setting deleted: ${setting.key}`);
   }
 
   /**
    * Toggle setting active status
    */
-  async toggleActive(id: number): Promise<AppSettings> {
+  async toggleActive(id: number, role?: string): Promise<AppSettings> {
     const setting = await this.appSettingsRepository.findOne({ where: { id } });
 
     if (!setting) {
@@ -193,6 +208,12 @@ export class AppSettingsService {
     setting.is_active = !setting.is_active;
     const saved = await this.appSettingsRepository.save(setting);
     await this.refreshCache();
+
+    await this.adminAccessService.createLog(
+      role,
+      setting.key,
+      setting.is_active,
+    );
 
     this.logger.log(
       `✅ Setting ${setting.is_active ? "activated" : "deactivated"}: ${setting.key}`,
@@ -210,6 +231,7 @@ export class AppSettingsService {
       category?: string;
       description?: string;
     }>,
+    role?: string
   ): Promise<void> {
     for (const setting of settings) {
       await this.set(
@@ -217,6 +239,7 @@ export class AppSettingsService {
         setting.value,
         setting.category,
         setting.description,
+        role
       );
     }
 

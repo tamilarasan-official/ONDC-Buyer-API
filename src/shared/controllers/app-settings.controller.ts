@@ -8,19 +8,19 @@ import {
   Param,
   UseGuards,
 } from "@nestjs/common";
-import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
+import { ApiTags, ApiOperation, ApiBearerAuth, ApiSecurity } from "@nestjs/swagger";
 import { AppSettingsService } from "../services/app-settings.service";
 import {
   CreateAppSettingDto,
   UpdateAppSettingDto,
   BulkCreateAppSettingsDto,
 } from "../dto/app-settings.dto";
-import { JwtAuthGuard } from "../../authentication/jwt-auth.guard";
+import { ApiKeyGuard, CurrentRole } from "src/super-admin-access/api-key-auth-gaurd";
 
 @ApiTags("App Settings")
 @Controller("app-settings")
 export class AppSettingsController {
-  constructor(private readonly appSettingsService: AppSettingsService) {}
+  constructor(private readonly appSettingsService: AppSettingsService) { }
 
   @Get()
   @ApiOperation({ summary: "Get all app settings" })
@@ -56,15 +56,16 @@ export class AppSettingsController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ApiKeyGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Create or update a setting" })
-  async create(@Body() dto: CreateAppSettingDto) {
+  async create(@Body() dto: CreateAppSettingDto, @CurrentRole() role: 'super-admin') {
     const setting = await this.appSettingsService.set(
       dto.key,
       dto.value,
       dto.category,
       dto.description,
+      role
     );
     return {
       success: true,
@@ -74,11 +75,12 @@ export class AppSettingsController {
   }
 
   @Post("bulk")
-  @UseGuards(JwtAuthGuard)
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Bulk create/update settings" })
-  async bulkCreate(@Body() dto: BulkCreateAppSettingsDto) {
-    await this.appSettingsService.bulkSet(dto.settings);
+  async bulkCreate(@Body() dto: BulkCreateAppSettingsDto, @CurrentRole() role: 'super-admin') {
+    await this.appSettingsService.bulkSet(dto.settings, role);
     return {
       success: true,
       message: "Settings created/updated successfully",
@@ -86,7 +88,7 @@ export class AppSettingsController {
   }
 
   @Put(":id")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ApiKeyGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Update a setting" })
   async update(@Param("id") id: number, @Body() dto: UpdateAppSettingDto) {
@@ -99,11 +101,11 @@ export class AppSettingsController {
   }
 
   @Put(":id/toggle")
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({ summary: "Toggle setting active status" })
-  async toggleActive(@Param("id") id: number) {
-    const setting = await this.appSettingsService.toggleActive(id);
+  async toggleActive(@Param("id") id: number, @CurrentRole() role: 'super-admin') {
+    const setting = await this.appSettingsService.toggleActive(id, role);
     return {
       success: true,
       message: "Setting status toggled successfully",
@@ -112,11 +114,11 @@ export class AppSettingsController {
   }
 
   @Delete(":id")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(ApiKeyGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Delete a setting" })
-  async delete(@Param("id") id: number) {
-    await this.appSettingsService.delete(id);
+  async delete(@Param("id") id: number, @CurrentRole() role: 'super-admin') {
+    await this.appSettingsService.delete(id, role);
     return {
       success: true,
       message: "Setting deleted successfully",

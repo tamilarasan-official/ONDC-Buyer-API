@@ -26,6 +26,7 @@ import { FavoritesModule } from "./favorites/favorites.module";
 import { BannerModule } from "./banner/banner.module";
 import { CouponModule } from "./coupon/coupon.module";
 import { AppSettingsModule } from "./shared/app-settings.module";
+import { AdminAccessModule } from './super-admin-access/super-admin-access.module';
 import "dotenv/config";
 import Redis from "ioredis";
 
@@ -101,6 +102,7 @@ import Redis from "ioredis";
     BannerModule,
     CouponModule,
     AppSettingsModule,
+    AdminAccessModule,
   ],
   controllers: [AppController],
   providers: [
