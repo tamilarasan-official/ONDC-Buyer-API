@@ -2325,7 +2325,7 @@ export class BuyerController {
   @ApiOperation({
     summary: "Razorpay payment webhook",
     description:
-      "Webhook endpoint to receive payment events from Razorpay. Handles payment.captured, payment.failed, refund.processed, and order.paid events. Validates webhook signature and ensures idempotent processing. This endpoint is public and does not require authentication.",
+      "Webhook endpoint to receive payment events from Razorpay. Handles payment.captured, payment.failed, and refund.processed events. Order events (order.paid) are temporarily disabled. Validates webhook signature and ensures idempotent processing. This endpoint is public and does not require authentication.",
   })
   @ApiResponse({
     status: 200,
@@ -2523,9 +2523,10 @@ export class BuyerController {
           case "refund.processed":
             await this.handleRefundProcessed(event, webhookEventRecord);
             break;
-          case "order.paid":
-            await this.handleOrderPaid(event, webhookEventRecord);
-            break;
+          // Temporarily commented out - handling only payment events
+          // case "order.paid":
+          //   await this.handleOrderPaid(event, webhookEventRecord);
+          //   break;
           default:
             this.logger.log(`ℹ️ Unhandled webhook event: ${eventType}`);
         }
@@ -2604,25 +2605,61 @@ export class BuyerController {
     webhookEventRecord?: WebhookEvent | null,
   ) {
     try {
-      const paymentId = event.payload.payment.entity.id;
-      const razorpayOrderId = event.payload.payment.entity.order_id;
+      // Validate payload structure
+      if (!event?.payload?.payment?.entity) {
+        this.logger.error(
+          `❌ Invalid payment.captured event payload: missing payment.entity`,
+        );
+        throw new Error("Invalid webhook payload: missing payment entity");
+      }
+
+      const paymentEntity = event.payload.payment.entity;
+      const paymentId =
+        paymentEntity.id && typeof paymentEntity.id === "string"
+          ? paymentEntity.id
+          : null;
+      const razorpayOrderId =
+        paymentEntity.order_id && typeof paymentEntity.order_id === "string"
+          ? paymentEntity.order_id
+          : null;
+
+      if (!paymentId || !razorpayOrderId) {
+        this.logger.error(
+          `❌ Missing payment ID or order ID in payment.captured event payload`,
+        );
+        throw new Error("Missing required payment data in webhook payload");
+      }
 
       this.logger.log(
         `💰 Payment captured: ${paymentId} for Razorpay order: ${razorpayOrderId}`,
       );
 
       // Find internal order ID from Razorpay order ID
-      const order = await this.orderService.findOrderByRazorpayOrderId(
+      let order = await this.orderService.findOrderByRazorpayOrderId(
         razorpayOrderId,
       );
 
       if (!order) {
-        this.logger.warn(
-          `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}`,
+        // Check if order was already processed by verifyPayment (payment_id was updated from order_id to payment_id)
+        // Try to find order by payment ID
+        const payment = await this.orderService.findPaymentByRazorpayPaymentId(
+          paymentId,
         );
-        throw new Error(
-          `Order not found for Razorpay order ID: ${razorpayOrderId}`,
-        );
+        if (payment?.order) {
+          order = payment.order;
+          this.logger.log(
+            `ℹ️ Order already processed (ID: ${order.id}) via verifyPayment for Razorpay order ID: ${razorpayOrderId}. Updating status.`,
+          );
+          // Continue with status updates (idempotent operations)
+        } else {
+          // Order doesn't exist
+          this.logger.warn(
+            `⚠️ Order not found for Razorpay order ID: ${razorpayOrderId}. Order may not have been created yet.`,
+          );
+          // Return success to prevent Razorpay from retrying
+          // This can happen if order creation failed or order was deleted
+          return;
+        }
       }
 
       // Update order payment status (with idempotency check)
@@ -2814,6 +2851,8 @@ export class BuyerController {
     }
   }
 
+  // Temporarily commented out - handling only payment events
+  /*
   private async handleOrderPaid(
     event: any,
     webhookEventRecord?: WebhookEvent | null,
@@ -2884,6 +2923,7 @@ export class BuyerController {
       throw error; // Re-throw to mark webhook event as failed
     }
   }
+  */
 
   @Post("webhook/seller-status")
   @ApiOperation({
