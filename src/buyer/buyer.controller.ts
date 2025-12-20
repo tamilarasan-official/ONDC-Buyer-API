@@ -2381,7 +2381,8 @@ export class BuyerController {
 
       if (!isValid) {
         this.logger.warn(`❌ Invalid webhook signature`);
-        return res.status(400).json({ error: "Invalid signature" });
+        res.status(400).json({ error: "Invalid signature" });
+        return;
       }
 
       const event = req.body;
@@ -2411,10 +2412,11 @@ export class BuyerController {
         this.logger.error(
           `❌ Webhook event missing event ID and unable to generate one. Event type: ${eventType || "unknown"}. Rejecting event.`,
         );
-        return res.status(400).json({
+        res.status(400).json({
           error: "Event ID is required for webhook processing",
           message: "Unable to extract or generate event ID from webhook payload",
         });
+        return;
       }
 
       // Check if this event has already been processed (idempotency check)
@@ -2427,7 +2429,8 @@ export class BuyerController {
           this.logger.log(
             `⏭️ Webhook event ${eventId} (${eventType}) already processed, skipping duplicate`,
           );
-          return res.status(200).json({ success: true, message: "Event already processed" });
+          res.status(200).json({ success: true, message: "Event already processed" });
+          return;
         } else if (existingEvent.processing_status === "failed") {
           this.logger.log(
             `🔄 Retrying previously failed webhook event ${eventId} (${eventType})`,
@@ -2534,7 +2537,8 @@ export class BuyerController {
           await this.webhookEventRepository.save(webhookEventRecord);
         }
 
-        return res.status(200).json({ success: true });
+        res.status(200).json({ success: true });
+        return;
       } catch (processingError) {
         // Mark event as failed
         if (webhookEventRecord) {
@@ -2560,11 +2564,12 @@ export class BuyerController {
           this.logger.warn(
             `⚠️ Permanent error in webhook processing (will not retry): ${processingError.message}`,
           );
-          return res.status(200).json({
+          res.status(200).json({
             success: false,
             message: "Webhook processed but failed permanently",
             error: processingError.message,
           });
+          return;
         } else {
           // Transient error - re-throw to return 500 and trigger Razorpay retry
           // Examples: Database connection errors, network timeouts, unknown errors
@@ -2576,7 +2581,8 @@ export class BuyerController {
         `❌ Error handling webhook: ${error.message}`,
         error.stack,
       );
-      return res.status(500).json({ error: "Webhook processing failed" });
+      res.status(500).json({ error: "Webhook processing failed" });
+      return;
     }
   }
 
