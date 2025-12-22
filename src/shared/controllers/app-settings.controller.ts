@@ -290,7 +290,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -339,7 +339,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -358,8 +358,8 @@ export class AppSettingsController {
   }
 
   @Put(":id")
+  @ApiSecurity('x-api-key')
   @UseGuards(ApiKeyGuard)
-  @ApiBearerAuth()
   @ApiOperation({
     summary: "Update a setting value",
     description: "Update the value of an existing setting by its ID. Requires authentication.",
@@ -448,7 +448,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -468,6 +468,8 @@ export class AppSettingsController {
   }
 
   @Put(":id/toggle")
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({
     summary: "Toggle setting active status",
     description: "Toggle the is_active status of a setting between true and false. Requires authentication.",
@@ -555,7 +557,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -565,7 +567,9 @@ export class AppSettingsController {
       },
     },
   })
- async toggleActive(@Param("id") id: number, @CurrentRole() role: 'super-admin') {
+
+  async toggleActive(@Param("id") id: number, @CurrentRole() role: string) {
+    console.log('role: ', role);
     const setting = await this.appSettingsService.toggleActive(id, role);
     return {
       success: true,
@@ -575,10 +579,11 @@ export class AppSettingsController {
   }
 
   @Delete(":id")
+  @ApiSecurity('x-api-key')
   @UseGuards(ApiKeyGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: "Delete a setting" })
-  async delete(@Param("id") id: number, @CurrentRole() role: 'super-admin') {
+  async delete(@Param("id") id: number, @CurrentRole() role: string) {
     await this.appSettingsService.delete(id, role);
     return {
       success: true,

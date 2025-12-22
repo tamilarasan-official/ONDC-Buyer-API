@@ -1,11 +1,5 @@
-// export class CreateAdminAccessDto {
-//   name: string;
-//   slug: string;
-//   metadata?: Record<string, any>;
-// }
-
 import { ApiProperty } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class CreateAdminAccessDto {
   @ApiProperty({
@@ -37,5 +31,6 @@ export class CreateAdminAccessDto {
     description: 'Optional metadata',
   })
   @IsOptional()
+  @IsObject()
   metadata?: Record<string, any>;
 }

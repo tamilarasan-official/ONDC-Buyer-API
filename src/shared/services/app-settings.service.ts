@@ -129,7 +129,6 @@ export class AppSettingsService {
     role?: string
   ): Promise<AppSettings> {
     let setting = await this.appSettingsRepository.findOne({ where: { key } });
-    console.log('setting: ', setting);
 
     if (setting) {
       setting.value = value;
@@ -142,10 +141,6 @@ export class AppSettingsService {
         category,
         description,
       });
-    }
-    if (!setting) {
-      // optional audit
-      await this.adminAccessService.createLog(role, key, true);
     }
 
     const saved = await this.appSettingsRepository.save(setting);
@@ -185,12 +180,6 @@ export class AppSettingsService {
 
     await this.appSettingsRepository.remove(setting);
     await this.refreshCache();
-
-    await this.adminAccessService.createLog(
-      role,
-      setting.key,
-      false,
-    );
 
     this.logger.log(`✅ Setting deleted: ${setting.key}`);
   }

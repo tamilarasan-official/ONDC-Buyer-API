@@ -7,22 +7,21 @@ import { ApiTags } from '@nestjs/swagger';
 @ApiTags("Super Admin Access")
 @Controller('super-admin-access')
 export class AdminAccessController {
-  constructor(private readonly AdminAccessservice: AdminAccessService) { }
+  constructor(private readonly adminAccessservice: AdminAccessService) { }
 
   @Post()
   create(@Body() dto: CreateAdminAccessDto) {
-    console.log('dto: ', dto);
-    return this.AdminAccessservice.create(dto);
+    return this.adminAccessservice.create(dto);
   }
 
-  @Get()
-  findAll() {
-    return this.AdminAccessservice.findAll();
-  }
+  // @Get()
+  // findAll() {
+  //   return this.adminAccessservice.findAll();
+  // }
 
   @Get(':id')
   findOne(@Param('id') id: number) {
-    return this.AdminAccessservice.findOne(+id);
+    return this.adminAccessservice.findOne(+id);
   }
 
   @Patch(':id')
@@ -30,16 +29,16 @@ export class AdminAccessController {
     @Param('id') id: number,
     @Body() dto: UpdateAdminAccessDto,
   ) {
-    return this.AdminAccessservice.update(+id, dto);
+    return this.adminAccessservice.update(+id, dto);
   }
 
   @Post(':id/regenerate-api-key')
   regenerateApiKey(@Param('id') id: number) {
-    return this.AdminAccessservice.regenerateApiKey(+id);
+    return this.adminAccessservice.regenerateApiKey(+id);
   }
 
   @Post(':id/disable')
   disable(@Param('id') id: number) {
-    return this.AdminAccessservice.disable(+id);
+    return this.adminAccessservice.disable(+id);
   }
 }

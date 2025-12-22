@@ -44,9 +44,10 @@ export class ApiKeyGuard implements CanActivate {
             adminAccessId: access.id,
         };
 
-        access.last_push_at = new Date();
-        access.push_count = Number(access.push_count) + 1;
-        await this.adminAccessRepo.save(access);
+        await Promise.all([
+            this.adminAccessRepo.increment({ id: access.id }, 'push_count', 1),
+            this.adminAccessRepo.update({ id: access.id }, { last_push_at: new Date() }),
+        ]);
 
         request.adminAccess = access;
 

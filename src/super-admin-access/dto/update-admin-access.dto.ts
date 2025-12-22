@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString } from 'class-validator';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class UpdateAdminAccessDto {
   @ApiPropertyOptional({ example: 'Admin Access Updated' })
@@ -16,5 +16,6 @@ export class UpdateAdminAccessDto {
     example: { scope: 'billing' },
   })
   @IsOptional()
+  @IsObject()
   metadata?: Record<string, any>;
 }

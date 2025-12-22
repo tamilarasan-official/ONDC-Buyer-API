@@ -34,11 +34,11 @@ export class AdminAccessService {
     return this.adminAccessRepo.save(adminAccess);
   }
 
-  async findAll(): Promise<AdminAccess[]> {
-    return this.adminAccessRepo.find({
-      order: { created_at: 'DESC' },
-    });
-  }
+  // async findAll(): Promise<AdminAccess[]> {
+  //   return this.adminAccessRepo.find({
+  //     order: { created_at: 'DESC' },
+  //   });
+  // }
 
   async findOne(id: number): Promise<AdminAccess> {
     const record = await this.adminAccessRepo.findOne({ where: { id } });
