@@ -73,6 +73,15 @@ async function bootstrap() {
       },
       "JWT-auth",
     )
+    .addApiKey(
+      {
+        type: "apiKey",
+        name: "x-api-key",
+        in: "header",
+        description: "Admin API Key (super-admin / admin)",
+      },
+      "x-api-key",
+    )
     .addServer("http://localhost:3008", "Development server")
     .addServer("https://devapi.tazty.in", "Staging server")
     .addServer("https://api.tazty.in", "Production server")

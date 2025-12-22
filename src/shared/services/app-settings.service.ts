@@ -2,6 +2,7 @@ import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { AppSettings } from "../entities/app-settings.entity";
+import { AdminAccessService } from "src/super-admin-access/super-admin-access.service";
 
 @Injectable()
 export class AppSettingsService {
@@ -13,6 +14,8 @@ export class AppSettingsService {
   constructor(
     @InjectRepository(AppSettings)
     private readonly appSettingsRepository: Repository<AppSettings>,
+
+    private readonly adminAccessService: AdminAccessService,
   ) {
     this.initializeCache();
   }
@@ -123,6 +126,7 @@ export class AppSettingsService {
     value: string,
     category?: string,
     description?: string,
+    role?: string
   ): Promise<AppSettings> {
     let setting = await this.appSettingsRepository.findOne({ where: { key } });
 
@@ -167,7 +171,7 @@ export class AppSettingsService {
   /**
    * Delete a setting
    */
-  async delete(id: number): Promise<void> {
+  async delete(id: number, role?: string): Promise<void> {
     const setting = await this.appSettingsRepository.findOne({ where: { id } });
 
     if (!setting) {
@@ -183,7 +187,7 @@ export class AppSettingsService {
   /**
    * Toggle setting active status
    */
-  async toggleActive(id: number): Promise<AppSettings> {
+  async toggleActive(id: number, role?: string): Promise<AppSettings> {
     const setting = await this.appSettingsRepository.findOne({ where: { id } });
 
     if (!setting) {
@@ -193,6 +197,12 @@ export class AppSettingsService {
     setting.is_active = !setting.is_active;
     const saved = await this.appSettingsRepository.save(setting);
     await this.refreshCache();
+
+    await this.adminAccessService.createLog(
+      role,
+      setting.key,
+      setting.is_active,
+    );
 
     this.logger.log(
       `✅ Setting ${setting.is_active ? "activated" : "deactivated"}: ${setting.key}`,
@@ -209,7 +219,7 @@ export class AppSettingsService {
       value: string;
       category?: string;
       description?: string;
-    }>,
+    }>
   ): Promise<void> {
     for (const setting of settings) {
       await this.set(

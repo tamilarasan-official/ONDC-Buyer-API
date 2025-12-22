@@ -6,6 +6,7 @@ import {
   Body,
   Param,
   UseGuards,
+  Delete,
 } from "@nestjs/common";
 import {
   ApiTags,
@@ -14,6 +15,7 @@ import {
   ApiResponse,
   ApiParam,
   ApiBody,
+  ApiSecurity
 } from "@nestjs/swagger";
 import { AppSettingsService } from "../services/app-settings.service";
 import {
@@ -21,12 +23,12 @@ import {
   UpdateAppSettingDto,
   BulkCreateAppSettingsDto,
 } from "../dto/app-settings.dto";
-import { JwtAuthGuard } from "../../authentication/jwt-auth.guard";
+import { ApiKeyGuard, CurrentRole } from "src/super-admin-access/api-key-auth-gaurd";
 
 @ApiTags("App Settings")
 @Controller("app-settings")
 export class AppSettingsController {
-  constructor(private readonly appSettingsService: AppSettingsService) {}
+  constructor(private readonly appSettingsService: AppSettingsService) { }
 
   @Get()
   @ApiOperation({
@@ -216,8 +218,8 @@ export class AppSettingsController {
   }
 
   @Post()
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({
     summary: "Create or update a setting",
     description: "Create a new setting or update an existing one if the key already exists. Requires authentication.",
@@ -288,7 +290,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -313,8 +315,8 @@ export class AppSettingsController {
   }
 
   @Post("bulk")
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({
     summary: "Bulk create/update settings",
     description: "Create or update multiple settings in a single operation. Requires authentication.",
@@ -336,7 +338,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -355,8 +357,8 @@ export class AppSettingsController {
   }
 
   @Put(":id")
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({
     summary: "Update a setting value",
     description: "Update the value of an existing setting by its ID. Requires authentication.",
@@ -445,7 +447,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -465,8 +467,8 @@ export class AppSettingsController {
   }
 
   @Put(":id/toggle")
-  @UseGuards(JwtAuthGuard)
-  @ApiBearerAuth()
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
   @ApiOperation({
     summary: "Toggle setting active status",
     description: "Toggle the is_active status of a setting between true and false. Requires authentication.",
@@ -554,7 +556,7 @@ export class AppSettingsController {
   })
   @ApiResponse({
     status: 401,
-    description: "Unauthorized - Invalid or missing JWT token",
+    description: "Unauthorized - Invalid or missing API key.",
     schema: {
       type: "object",
       properties: {
@@ -564,8 +566,10 @@ export class AppSettingsController {
       },
     },
   })
-  async toggleActive(@Param("id") id: number) {
-    const setting = await this.appSettingsService.toggleActive(id);
+
+  async toggleActive(@Param("id") id: number, @CurrentRole() role: string) {
+    console.log('role: ', role);
+    const setting = await this.appSettingsService.toggleActive(id, role);
     return {
       success: true,
       message: "Setting status toggled successfully",
@@ -573,4 +577,15 @@ export class AppSettingsController {
     };
   }
 
+  @Delete(":id")
+  @ApiSecurity('x-api-key')
+  @UseGuards(ApiKeyGuard)
+  @ApiOperation({ summary: "Delete a setting" })
+  async delete(@Param("id") id: number, @CurrentRole() role: string) {
+    await this.appSettingsService.delete(id, role);
+    return {
+      success: true,
+      message: "Setting deleted successfully",
+    };
+  }
 }
