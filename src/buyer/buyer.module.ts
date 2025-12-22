@@ -58,6 +58,7 @@ import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entit
 import { Banner } from "../banner/entities/banner.entity";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
+import { WebhookEvent } from "../payment/entities/webhook-event.entity";
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
       Banner,
       Coupon,
       CouponRedemption,
+      WebhookEvent,
     ]),
     HttpModule.register({
       timeout: 10000,

@@ -1,31 +1,16 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { HttpService } from "@nestjs/axios";
-import { ConfigService } from "@nestjs/config";
 import { firstValueFrom } from "rxjs";
+import { AppSettingsService } from "./app-settings.service";
 
 @Injectable()
 export class DeliveryPricingService {
   private readonly logger = new Logger(DeliveryPricingService.name);
-  private readonly apiUrl: string;
-  private readonly apiToken: string | undefined;
 
   constructor(
     private readonly httpService: HttpService,
-    private readonly configService: ConfigService,
-  ) {
-    const baseUrl =
-      this.configService.get<string>("TAZTY_DELIVERY_PARTNER_API_BASE_URL") || "";
-    this.apiUrl = baseUrl.length > 0 ? `${baseUrl}/quote/delivery-charge` : "";
-    this.apiToken = this.configService.get<string>(
-      "TAZTY_DELIVERY_PARTNER_API_KEY",
-    );
-
-    if (!this.apiToken) {
-      this.logger.warn(
-        "TAZTY_DELIVERY_PARTNER_API_KEY not configured. Delivery fee API calls will fail.",
-      );
-    }
-  }
+    private readonly appSettingsService: AppSettingsService,
+  ) {}
 
   /**
    * Get delivery charge and estimated delivery time from Delivery Pricing API
@@ -33,21 +18,29 @@ export class DeliveryPricingService {
    * @param pickupLng Pickup longitude (store location)
    * @param dropoffLat Dropoff latitude (user location)
    * @param dropoffLng Dropoff longitude (user location)
-   * @returns Object with delivery charge and estimated_delivery_time, or { charge: 0, estimated_delivery_time: null } if API call fails
+   * @returns Object with delivery charge, distance, and estimated_delivery_time, or { charge: 0, distance: 0, estimated_delivery_time: null } if API call fails
    */
   async getDeliveryCharge(
     pickupLat: number,
     pickupLng: number,
     dropoffLat: number,
     dropoffLng: number,
-  ): Promise<{ charge: number; estimated_delivery_time: string | null }> {
+  ): Promise<{ charge: number; distance: number; estimated_delivery_time: string | null }> {
     try {
-      if (!this.apiToken) {
+      // Get API configuration from app settings
+      const baseUrl = await this.appSettingsService.get("TAZTY_DELIVERY_PARTNER_API_BASE_URL");
+      const apiToken = await this.appSettingsService.get("TAZTY_DELIVERY_PARTNER_API_KEY");
+
+      if (!apiToken || !baseUrl) {
         this.logger.warn(
-          "Delivery Pricing API token not configured. Returning default values.",
+          "Delivery Pricing API not configured in app settings. TAZTY_DELIVERY_PARTNER_API_BASE_URL and TAZTY_DELIVERY_PARTNER_API_KEY must be set. Returning default values.",
         );
-        return { charge: 0, estimated_delivery_time: null };
+        return { charge: 0, distance: 0, estimated_delivery_time: null };
       }
+
+      const apiUrl = baseUrl.trim().endsWith("/")
+        ? `${baseUrl.trim()}quote/delivery-charge`
+        : `${baseUrl.trim()}/quote/delivery-charge`;
 
       this.logger.log(
         `📦 Fetching delivery charge: pickup(${pickupLat}, ${pickupLng}) → dropoff(${dropoffLat}, ${dropoffLng})`,
@@ -66,13 +59,13 @@ export class DeliveryPricingService {
 
       const response = await firstValueFrom(
         this.httpService.post(
-          this.apiUrl,
+          apiUrl,
           requestBody,
           {
             headers: {
               accept: "application/json",
               "Content-Type": "application/json",
-              Authorization: `Bearer ${this.apiToken}`,
+              Authorization: `Bearer ${apiToken}`,
             },
             timeout: 10000, // 10 seconds timeout
           },
@@ -81,7 +74,7 @@ export class DeliveryPricingService {
 
       if (!response.data) {
         this.logger.warn("TAZTY Delivery Pricing API returned no data");
-        return { charge: 0, estimated_delivery_time: null };
+        return { charge: 0, distance: 0, estimated_delivery_time: null };
       }
 
       // Extract response data matching API structure: { distance, charge, currency, policy_type, estimated_delivery_time }
@@ -97,6 +90,7 @@ export class DeliveryPricingService {
 
       return {
         charge,
+        distance, // Include distance in response
         estimated_delivery_time: estimatedDeliveryTime,
       };
     } catch (error) {
@@ -115,7 +109,7 @@ export class DeliveryPricingService {
       }
 
       // Always return default values on error (fallback strategy)
-      return { charge: 0, estimated_delivery_time: null };
+      return { charge: 0, distance: 0, estimated_delivery_time: null };
     }
   }
 }

@@ -348,6 +348,13 @@ export class AddToCartResponseDto {
   message: string;
 
   @ApiProperty({
+    description: "Cart ID",
+    example: 1,
+    type: "number",
+  })
+  cart_id: number;
+
+  @ApiProperty({
     description: "Cart item ID",
     example: 1,
     type: "number",

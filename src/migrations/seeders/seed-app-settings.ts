@@ -21,7 +21,7 @@ async function seedAppSettings() {
     const settings = [
       {
         key: "PLATFORM_FEE",
-        value: "50",
+        value: "10",
         category: "app_config",
         description: "Platform fee charged per order",
       },
@@ -33,7 +33,7 @@ async function seedAppSettings() {
       },
       {
         key: "SUPPORT_PHONE",
-        value: "+919952520699",
+        value: "+919952520699, +919677735329, +919677735316",
         category: "support",
         description: "Customer support phone number",
       },
@@ -51,7 +51,7 @@ async function seedAppSettings() {
       },
       {
         key: "APP_OPERATION_HOURS",
-        value: "0900-1700",
+        value: "0700-2230",
         category: "app_config",
         description: "App operational hours (HHMM-HHMM format)",
       },
@@ -66,6 +66,66 @@ async function seedAppSettings() {
         value: "aZU636O8lC8j3qwIwHh9aUmw",
         category: "payment",
         description: "Razorpay API Key Secret",
+      },
+      {
+        key: "RAZORPAY_WEBHOOK_SECRET",
+        value: "",
+        category: "payment",
+        description: "Razorpay Webhook Secret for webhook signature verification (optional but recommended for security)",
+      },
+      {
+        key: "APP_SERVICEABLE_AREA_ENABLED",
+        value: "true",
+        category: "app_config",
+        description: "Enable/disable app serviceable area restriction",
+      },
+      {
+        key: "APP_SERVICEABLE_AREA_CENTER_LAT",
+        value: "9.92671",
+        category: "app_config",
+        description: "Serviceable area center point latitude",
+      },
+      {
+        key: "APP_SERVICEABLE_AREA_CENTER_LNG",
+        value: "78.12486",
+        category: "app_config",
+        description: "Serviceable area center point longitude",
+      },
+      {
+        key: "APP_SERVICEABLE_AREA_RADIUS_KM",
+        value: "5",
+        category: "app_config",
+        description: "Serviceable area radius in kilometers",
+      },
+      {
+        key: "DISTANCE_CALCULATION_METHOD",
+        value: "delivery_pricing_api",
+        category: "app_config",
+        description: "Distance calculation method: haversine, vincenty, euclidean, directions_api, or delivery_pricing_api",
+      },
+      {
+        key: "TAZTY_DELIVERY_PARTNER_API_BASE_URL",
+        value: "http://delivery.tazty.in/api/v1",
+        category: "app_config",
+        description: "Base URL for TAZTY Delivery Partner API",
+      },
+      {
+        key: "TAZTY_DELIVERY_PARTNER_API_KEY",
+        value: "c33becbd39da05dac5bf6515b35d784c65e4143cb301f0c7",
+        category: "app_config",
+        description: "API key for TAZTY Delivery Partner API",
+      },
+      {
+        key: "HOME_SCREEN_RESTAURANT_CARD_STYLE",
+        value: "1",
+        category: "ui_config",
+        description: "Home screen restaurant card style (1 = default)",
+      },
+      {
+        key: "APP_CLOSURE_MESSAGE",
+        value: "",
+        category: "app_config",
+        description: "Custom message to display when app is temporarily closed (if empty, default message will be used)",
       },
     ];
 

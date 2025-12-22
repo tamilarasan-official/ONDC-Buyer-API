@@ -139,9 +139,6 @@ export class FCMService {
         this.logger.error(`Error Info Message: ${error.errorInfo.message}`);
       }
       
-      // Log the full error for debugging
-      this.logger.debug(`Full error object:`, JSON.stringify(error, null, 2));
-      
       return {
         success: false,
         error: error.message,

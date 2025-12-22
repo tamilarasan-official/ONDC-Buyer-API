@@ -489,10 +489,16 @@ export class NotificationService {
     platform: string,
     deviceId?: string,
     appVersion?: string,
+    versionName?: string,
+    versionCode?: number,
   ): Promise<void> {
     try {
+      // Use versionName if provided, otherwise use appVersion
+      // Both are stored in app_version column
+      const finalAppVersion = versionName || appVersion;
+      
       this.logger.log(
-        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${appVersion || "N/A"}`,
+        `🔍 Processing FCM token | User: ${userId} | Token Length: ${deviceToken.length} | Device ID: ${deviceId || "N/A"} | App Version: ${finalAppVersion || "N/A"} | Version Name: ${versionName || "N/A"} | Version Code: ${versionCode || "N/A"}`,
       );
 
       // Validate token with FCM service
@@ -520,27 +526,52 @@ export class NotificationService {
       });
 
       if (existingToken) {
-        // Update existing token
+        // Update existing token - update when there's a mismatch
         const changes: string[] = [];
+        let needsUpdate = false;
         
         if (deviceId && deviceId !== existingToken.device_id) {
           changes.push(`Device ID: ${existingToken.device_id || "null"} → ${deviceId}`);
+          needsUpdate = true;
         }
-        if (appVersion && appVersion !== existingToken.app_version) {
-          changes.push(`Version: ${existingToken.app_version || "null"} → ${appVersion}`);
+        
+        // Update app_version if provided and different
+        // Use versionName if provided, otherwise use appVersion
+        if (finalAppVersion && finalAppVersion !== existingToken.app_version) {
+          changes.push(`App Version: ${existingToken.app_version || "null"} → ${finalAppVersion}`);
+          needsUpdate = true;
+        }
+        
+        // Update version_code if provided and different
+        if (versionCode !== undefined && versionCode !== null && versionCode !== existingToken.version_code) {
+          changes.push(`Version Code: ${existingToken.version_code || "null"} → ${versionCode}`);
+          needsUpdate = true;
         }
 
-        existingToken.is_active = true;
-        existingToken.platform = platform;
-        existingToken.device_id = deviceId || existingToken.device_id;
-        existingToken.app_version = appVersion || existingToken.app_version;
-        existingToken.updated_at = new Date();
+        // Always update platform and is_active
+        if (platform !== existingToken.platform) {
+          changes.push(`Platform: ${existingToken.platform} → ${platform}`);
+          needsUpdate = true;
+        }
 
-        await this.userDeviceTokenRepository.save(existingToken);
+        if (needsUpdate || !existingToken.is_active) {
+          existingToken.is_active = true;
+          existingToken.platform = platform;
+          existingToken.device_id = deviceId !== undefined ? deviceId : existingToken.device_id;
+          existingToken.app_version = finalAppVersion !== undefined ? finalAppVersion : existingToken.app_version;
+          existingToken.version_code = versionCode !== undefined && versionCode !== null ? versionCode : existingToken.version_code;
+          existingToken.updated_at = new Date();
 
-        this.logger.log(
-          `🔄 FCM token UPDATED | User: ${userId} | Changes: ${changes.length > 0 ? changes.join(", ") : "None"}`,
-        );
+          await this.userDeviceTokenRepository.save(existingToken);
+
+          this.logger.log(
+            `🔄 FCM token UPDATED | User: ${userId} | Changes: ${changes.length > 0 ? changes.join(", ") : "Reactivated token"}`,
+          );
+        } else {
+          this.logger.log(
+            `ℹ️  FCM token already up to date | User: ${userId} | No changes needed`,
+          );
+        }
       } else {
         // Create new token
         const newToken = this.userDeviceTokenRepository.create({
@@ -549,7 +580,8 @@ export class NotificationService {
           token: deviceToken,
           platform,
           device_id: deviceId,
-          app_version: appVersion,
+          app_version: finalAppVersion,
+          version_code: versionCode,
           is_active: true,
         });
 
@@ -672,10 +704,22 @@ export class NotificationService {
         });
       }
 
+      // Extract image URL from notification data if present
+      let imageUrl: string | undefined;
+      if (notification.data && typeof notification.data === "object") {
+        // Check for image_url or imageUrl in data
+        imageUrl = notification.data.image_url || notification.data.imageUrl;
+        // Also check if it's a direct property
+        if (!imageUrl && (notification.data as any).image) {
+          imageUrl = (notification.data as any).image;
+        }
+      }
+
       const payload: FCMNotificationPayload = {
         title: notification.title,
         body: notification.message,
         data: notificationData,
+        imageUrl: imageUrl,
       };
 
       const options: FCMNotificationOptions = {
@@ -784,9 +828,15 @@ export class NotificationService {
         "Your order is out for delivery and will reach you soon.",
       delivered: "Your order has been delivered. Enjoy your meal!",
       cancelled: "Your order has been cancelled.",
+      failed: "Your payment could not be processed. Please try again or use a different payment method.",
     };
 
     const baseMessage = baseMessages[status] || message;
+
+    // Don't include estimated delivery time for failed payments
+    if (status === "failed") {
+      return baseMessage;
+    }
 
     if (additionalData?.estimated_time) {
       return `${baseMessage} Estimated delivery time: ${additionalData.estimated_time}`;
@@ -809,5 +859,111 @@ export class NotificationService {
       data: notification.data,
       created_at: notification.created_at.toISOString(),
     };
+  }
+
+  /**
+   * Broadcast notification to all users
+   */
+  async broadcastNotification(
+    title: string,
+    message: string,
+    type: "order" | "promotion" | "system" | "review" = "system",
+    imageUrl?: string,
+    data?: any,
+  ): Promise<{
+    totalUsers: number;
+    notificationsCreated: number;
+    pushSent: number;
+    pushFailed: number;
+    errors: string[];
+  }> {
+    const errors: string[] = [];
+    let notificationsCreated = 0;
+    let pushSent = 0;
+    let pushFailed = 0;
+
+    try {
+      this.logger.log(
+        `📢 BROADCAST NOTIFICATION STARTED | Title: "${title}" | Message: "${message}" | Type: ${type} | Image: ${imageUrl || "none"}`,
+      );
+
+      // Get all active users
+      const users = await this.userRepository.find({
+        where: { status: true },
+        relations: ["device_tokens"],
+      });
+
+      const totalUsers = users.length;
+      this.logger.log(`📊 Found ${totalUsers} active users for broadcast`);
+
+      // Process users in batches to avoid overwhelming the system
+      const batchSize = 100;
+      for (let i = 0; i < users.length; i += batchSize) {
+        const batch = users.slice(i, i + batchSize);
+        
+        await Promise.all(
+          batch.map(async (user) => {
+            try {
+              // Prepare notification data with image URL
+              const notificationData = {
+                ...(data || {}),
+                ...(imageUrl ? { image_url: imageUrl } : {}),
+              };
+
+              // Create notification for user
+              const notification = await this.createNotification({
+                user_id: user.id,
+                title,
+                message,
+                type,
+                data: notificationData,
+              });
+
+              notificationsCreated++;
+
+              // Count push notifications
+              const activeTokens = user.device_tokens?.filter(
+                (dt) => dt.is_active,
+              ) || [];
+              
+              if (activeTokens.length > 0) {
+                // Push notification is sent automatically via deliverNotification
+                // in createNotification, so we count tokens
+                pushSent += activeTokens.length;
+              }
+            } catch (error) {
+              const errorMsg = `Failed to send to user ${user.id}: ${error.message}`;
+              errors.push(errorMsg);
+              pushFailed++;
+              this.logger.error(errorMsg, error.stack);
+            }
+          }),
+        );
+      }
+
+      this.logger.log(
+        `✅ BROADCAST COMPLETE | Users: ${totalUsers} | Notifications Created: ${notificationsCreated} | Push Sent: ${pushSent} | Failed: ${pushFailed} | Errors: ${errors.length}`,
+      );
+
+      return {
+        totalUsers,
+        notificationsCreated,
+        pushSent,
+        pushFailed,
+        errors,
+      };
+    } catch (error) {
+      const errorMsg = `Broadcast notification failed: ${error.message}`;
+      this.logger.error(errorMsg, error.stack);
+      errors.push(errorMsg);
+      
+      return {
+        totalUsers: 0,
+        notificationsCreated,
+        pushSent,
+        pushFailed,
+        errors,
+      };
+    }
   }
 }

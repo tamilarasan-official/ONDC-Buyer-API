@@ -44,6 +44,10 @@ export class CartService {
 
   // Maximum tip amount constant (fixed amount in INR)
   private readonly MAX_TIP_AMOUNT = 450.0;
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(Cart)
@@ -178,12 +182,31 @@ export class CartService {
       // Check user's default/recent address to ensure they're in serviceable area
       try {
         const userLocation = await this.locationService.getUserLocation(userId);
+        
+        // Validate that coordinates are not the default values (location permissions disabled)
+        // Use tolerance-based comparison to handle floating-point precision
+        const latDiff = Math.abs(userLocation.lat - this.DEFAULT_LATITUDE);
+        const lngDiff = Math.abs(userLocation.lng - this.DEFAULT_LONGITUDE);
+        const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+        
+        if (latDiff < tolerance && lngDiff < tolerance) {
+          this.logger.warn(
+            `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Coordinates: (${userLocation.lat}, ${userLocation.lng})`,
+          );
+          throw new BadRequestException(
+            "Please update your address and location details properly to add items to cart. We need your accurate location to provide delivery services.",
+          );
+        }
+        
         await this.appServiceableAreaService.validateServiceableArea(
           userLocation.lat,
           userLocation.lng,
         );
       } catch (error) {
-        // If validation fails, log and rethrow (ServiceUnavailableException)
+        // If validation fails, log and rethrow
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         this.logger.warn(
           `⚠️ User location is outside serviceable area: ${error.message}`,
         );
@@ -211,11 +234,12 @@ export class CartService {
       }
 
       // Check maximum_count (per-customer limit)
-      if (stock.maximum_count < addToCartDto.quantity) {
-        throw new BadRequestException(
-          `You can only purchase up to ${stock.maximum_count} units of this item`
-        );
-      }
+      // TEMPORARILY DISABLED - Uncomment to re-enable
+      // if (stock.maximum_count < addToCartDto.quantity) {
+      //   throw new BadRequestException(
+      //     `You can only purchase up to ${stock.maximum_count} units of this item`
+      //   );
+      // }
 
       // Validate customizations if provided
       if (
@@ -462,11 +486,12 @@ export class CartService {
           );
         }
 
-        if (newTotalQty > stock.maximum_count) {
-          throw new BadRequestException(
-            `You can only purchase up to ${stock.maximum_count} units of this item`
-          );
-        }
+        // TEMPORARILY DISABLED - Uncomment to re-enable
+        // if (newTotalQty > stock.maximum_count) {
+        //   throw new BadRequestException(
+        //     `You can only purchase up to ${stock.maximum_count} units of this item`
+        //   );
+        // }
 
         existingCartItem.quantity = newTotalQty;
 
@@ -527,6 +552,7 @@ export class CartService {
       return {
         success: true,
         message: "Item added to cart successfully",
+        cart_id: cart.id,
         cart_item_id: cartItem.id,
         cart_summary: cartSummary,
       };
@@ -661,6 +687,88 @@ export class CartService {
    */
   async updateCartItem(userId: number, updateCartItemDto: UpdateCartItemDto) {
     try {
+      // Handle cart reactivation (cart_id + is_active: true)
+      if (updateCartItemDto.cart_id && updateCartItemDto.is_active === true) {
+        this.logger.log(
+          `🔄 Reactivating cart ${updateCartItemDto.cart_id} for user ${userId}`,
+        );
+
+        const cart = await this.cartRepository
+          .createQueryBuilder("c")
+          .leftJoinAndSelect("c.store", "s")
+          .leftJoinAndSelect("c.cart_items", "ci")
+          .leftJoin("c.user", "u")
+          .where("c.id = :cartId", { cartId: updateCartItemDto.cart_id })
+          .andWhere("u.id = :userId", { userId })
+          .getOne();
+
+        if (!cart) {
+          throw new NotFoundException("Cart not found");
+        }
+
+        // Deactivate all other carts for this user (only one active cart per user)
+        // Find all other active carts for this user first, then update them
+        const otherCarts = await this.cartRepository.find({
+          where: {
+            user: { id: userId },
+            is_active: true,
+          },
+        });
+
+        // Update all other carts except the current one
+        const cartIdsToDeactivate = otherCarts
+          .filter((c) => c.id !== cart.id)
+          .map((c) => c.id);
+
+        if (cartIdsToDeactivate.length > 0) {
+          // Use TypeORM query builder syntax for IN clause
+          await this.cartRepository
+            .createQueryBuilder()
+            .update()
+            .set({ is_active: false })
+            .where("id IN (:...cartIds)", { cartIds: cartIdsToDeactivate })
+            .execute();
+        }
+
+        // Reactivate the requested cart
+        await this.cartRepository.update(cart.id, { is_active: true });
+        this.logger.log(
+          `✅ Cart ${cart.id} reactivated for user ${userId}. All other carts deactivated.`,
+        );
+
+        // Get updated cart summary
+        const updatedCart = await this.cartRepository.findOne({
+          where: { id: cart.id },
+          relations: ["store", "cart_items", "cart_items.item"],
+        });
+
+        const cartSummary = updatedCart
+          ? await this.calculateCartSummary(updatedCart)
+          : {
+            subtotal: 0,
+            delivery_fee: 0,
+            tax_amount: 0,
+            discount_amount: 0,
+            tip_amount: 0,
+            max_tip_amount: null,
+            final_amount: 0,
+            estimated_delivery_time: null,
+          };
+
+        return {
+          success: true,
+          message: "Cart reactivated successfully",
+          cart_summary: cartSummary,
+        };
+      }
+
+      // Handle cart item update (requires cart_item_id)
+      if (!updateCartItemDto.cart_item_id) {
+        throw new BadRequestException(
+          "Either cart_id with is_active=true for reactivation, or cart_item_id for item update is required",
+        );
+      }
+
       this.logger.log(
         `✏️ Updating cart item ${updateCartItemDto.cart_item_id} for user ${userId}`,
       );
@@ -681,6 +789,11 @@ export class CartService {
 
       if (!cartItem) {
         throw new NotFoundException("Cart item not found");
+      }
+
+      // Validate quantity is provided for item update
+      if (updateCartItemDto.quantity === undefined) {
+        throw new BadRequestException("Quantity is required for cart item update");
       }
 
       // NEW: Prevent quantity changes for preorder items
@@ -782,12 +895,57 @@ export class CartService {
 
       await this.cartItemRepository.save(cartItem);
 
+      const cartId = cartItem.cart.id;
+      const cart = cartItem.cart;
+
       // Update cart totals
-      await this.updateCartTotals(cartItem.cart.id);
+      await this.updateCartTotals(cartId);
+
+      // Check if cart is empty after update (defensive check)
+      const remainingItems = await this.cartItemRepository.count({
+        where: { cart: { id: cartId } },
+      });
+
+      if (remainingItems === 0) {
+        // Clear coupon fields before deactivating cart
+        if (cart.coupon_id || cart.coupon_code || cart.coupon_reservation_token) {
+          // Rollback reservation if exists
+          if (cart.coupon_reservation_token) {
+            try {
+              await this.couponService.rollbackCoupon({
+                reservation_token: cart.coupon_reservation_token as string,
+                reason: "Cart emptied",
+              });
+            } catch (error) {
+              this.logger.warn(
+                `Failed to rollback coupon reservation: ${error.message}`,
+              );
+            }
+          }
+          
+          // Clear coupon fields directly
+          await this.cartRepository.update(cartId, {
+            coupon_code: undefined,
+            coupon_reservation_token: undefined,
+            coupon_id: undefined,
+            discount_amount: 0,
+          });
+        }
+        
+        // Deactivate empty cart
+        await this.cartRepository.update(cartId, { is_active: false });
+        this.logger.log(`Cart ${cartId} deactivated after update (cart is empty)`);
+      } else {
+        // Ensure cart remains active (in case it was somehow deactivated)
+        if (!cart.is_active) {
+          await this.cartRepository.update(cartId, { is_active: true });
+          this.logger.log(`Cart ${cartId} reactivated during update`);
+        }
+      }
 
       // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
-        where: { id: cartItem.cart.id },
+        where: { id: cartId },
         relations: ["store", "cart_items", "cart_items.item"],
       });
 

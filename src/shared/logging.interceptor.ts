@@ -81,6 +81,11 @@ export class LoggingInterceptor implements NestInterceptor {
     return next.handle().pipe(
       tap({
         next: (data) => {
+          // Skip logging if response has already been sent (e.g., webhooks using @Res())
+          if (response.headersSent || response.finished) {
+            return;
+          }
+
           const duration = Date.now() - startTime;
           const statusCode = response.statusCode;
 
@@ -109,6 +114,11 @@ export class LoggingInterceptor implements NestInterceptor {
           );
         },
         error: (error) => {
+          // Skip logging if response has already been sent
+          if (response.headersSent || response.finished) {
+            return;
+          }
+
           const duration = Date.now() - startTime;
           const statusCode = error.status || response.statusCode || 500;
 

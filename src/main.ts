@@ -1,20 +1,23 @@
 import { NestFactory, Reflector } from "@nestjs/core";
 import { AppModule } from "./app.module";
-import { ClassSerializerInterceptor, ValidationPipe } from "@nestjs/common";
+import { ValidationPipe } from "@nestjs/common";
 import { AllExceptionsFilter } from "./shared/http-exception.filter";
 import { ResponseInterceptor } from "./shared/response.interceptor";
 import { LoggingInterceptor } from "./shared/logging.interceptor";
+import { SafeClassSerializerInterceptor } from "./shared/safe-class-serializer.interceptor";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  const reflector = app.get(Reflector);
 
   // Global interceptors and pipes
   // Logging interceptor should be first to log all requests
   app.useGlobalInterceptors(new LoggingInterceptor(configService));
-  app.useGlobalInterceptors(new ClassSerializerInterceptor(app.get(Reflector)));
+  // Use SafeClassSerializerInterceptor to handle @Res() responses safely
+  app.useGlobalInterceptors(new SafeClassSerializerInterceptor(reflector));
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalPipes(
     new ValidationPipe({
@@ -43,7 +46,8 @@ async function bootstrap() {
     )
     .setVersion("1.0.0")
     .addTag("Health Check", "Service health monitoring endpoints")
-    .addTag("Buyer App APIs", "Core buyer application endpoints")
+    .addTag("Buyer App APIs", "Core buyer application endpoints (requires authentication)")
+    .addTag("Public Notifications", "Public notification endpoints (no authentication required)")
     .addTag("Authentication", "User authentication and authorization")
     .addTag("User Management", "User profile and address management")
     .addTag(

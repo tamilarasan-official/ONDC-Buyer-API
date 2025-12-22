@@ -138,29 +138,48 @@ export class AppOperationHoursService {
           `❌ App is closed. Current time: ${TimezoneUtil.formatTimeHHMM(currentTime)}, App hours: ${openTimeFormatted} - ${closeTimeFormatted}`,
         );
 
-        // Format next open time for user-friendly message
-        // Extract hours and format as "8 AM" or "8:00 AM"
-        const nextOpenHours = Math.floor(openTime / 100);
-        const nextOpenMinutes = openTime % 100;
-        let nextOpenTimeDisplay = "";
-        
-        if (nextOpenMinutes === 0) {
-          // No minutes, just show hour (e.g., "8 AM")
-          const displayHour = nextOpenHours > 12 ? nextOpenHours - 12 : nextOpenHours === 0 ? 12 : nextOpenHours;
-          const period = nextOpenHours >= 12 ? "PM" : "AM";
-          nextOpenTimeDisplay = `${displayHour} ${period}`;
+        // Check for custom closure message from app settings
+        const customClosureMessage = await this.appSettingsService.get(
+          "APP_CLOSURE_MESSAGE",
+          "",
+        );
+
+        let closureMessage: string;
+
+        if (customClosureMessage && customClosureMessage.trim() !== "") {
+          // Use custom message if available and not empty
+          closureMessage = customClosureMessage.trim();
+          this.logger.log(
+            `📝 Using custom app closure message: ${closureMessage}`,
+          );
         } else {
-          // Has minutes, show full time (e.g., "8:30 AM")
-          const displayHour = nextOpenHours > 12 ? nextOpenHours - 12 : nextOpenHours === 0 ? 12 : nextOpenHours;
-          const period = nextOpenHours >= 12 ? "PM" : "AM";
-          nextOpenTimeDisplay = `${displayHour}:${nextOpenMinutes.toString().padStart(2, "0")} ${period}`;
+          // Use default message with next open time
+          // Format next open time for user-friendly message
+          // Extract hours and format as "8 AM" or "8:00 AM"
+          const nextOpenHours = Math.floor(openTime / 100);
+          const nextOpenMinutes = openTime % 100;
+          let nextOpenTimeDisplay = "";
+          
+          if (nextOpenMinutes === 0) {
+            // No minutes, just show hour (e.g., "8 AM")
+            const displayHour = nextOpenHours > 12 ? nextOpenHours - 12 : nextOpenHours === 0 ? 12 : nextOpenHours;
+            const period = nextOpenHours >= 12 ? "PM" : "AM";
+            nextOpenTimeDisplay = `${displayHour} ${period}`;
+          } else {
+            // Has minutes, show full time (e.g., "8:30 AM")
+            const displayHour = nextOpenHours > 12 ? nextOpenHours - 12 : nextOpenHours === 0 ? 12 : nextOpenHours;
+            const period = nextOpenHours >= 12 ? "PM" : "AM";
+            nextOpenTimeDisplay = `${displayHour}:${nextOpenMinutes.toString().padStart(2, "0")} ${period}`;
+          }
+
+          closureMessage = `Restaurants not accepting orders right now. Ordering will be available again at ${nextOpenTimeDisplay}.`;
         }
 
         return {
           isOpen: false,
           reason: "OUTSIDE_OPERATING_HOURS",
           nextOpenTime: openTime.toString().padStart(4, "0"),
-          message: `Restaurants not accepting orders right now. Ordering will be available again at ${nextOpenTimeDisplay}.`,
+          message: closureMessage,
         };
       }
 

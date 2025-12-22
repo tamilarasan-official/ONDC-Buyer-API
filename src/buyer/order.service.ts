@@ -46,6 +46,10 @@ import { TimezoneUtil } from "../shared/utils/timezone.util";
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
+  
+  // Default coordinates used when location permissions are disabled in buyer app
+  private readonly DEFAULT_LATITUDE = 9.9252;
+  private readonly DEFAULT_LONGITUDE = 78.1198;
 
   constructor(
     @InjectRepository(Order)
@@ -139,6 +143,21 @@ export class OrderService {
 
       if (!deliveryAddress) {
         throw new NotFoundException("Delivery address not found");
+      }
+
+      // Validate that coordinates are not the default values (location permissions disabled)
+      // Use tolerance-based comparison to handle floating-point precision
+      const latDiff = Math.abs(Number(deliveryAddress.latitude) - this.DEFAULT_LATITUDE);
+      const lngDiff = Math.abs(Number(deliveryAddress.longitude) - this.DEFAULT_LONGITUDE);
+      const tolerance = 0.0001; // Very small tolerance for floating-point comparison
+      
+      if (latDiff < tolerance && lngDiff < tolerance) {
+        this.logger.warn(
+          `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Address ID: ${deliveryAddress.id}, Coordinates: (${deliveryAddress.latitude}, ${deliveryAddress.longitude})`,
+        );
+        throw new BadRequestException(
+          "Please update your address and location details properly to create an order. We need your accurate location to provide delivery services.",
+        );
       }
 
       // NEW: Validate delivery address is within app serviceable area
@@ -887,14 +906,37 @@ export class OrderService {
         throw new NotFoundException("Order not found");
       }
 
-      if (["delivered", "cancelled"].includes(order.status)) {
-        throw new BadRequestException("Order cannot be cancelled");
-      }
+      // Use atomic update with WHERE clause to prevent race conditions
+      // Only allow cancellation if order is not already delivered or cancelled
+      const updateResult = await this.orderRepository
+        .createQueryBuilder()
+        .update(Order)
+        .set({ status: "cancelled" })
+        .where("id = :orderId", { orderId })
+        .andWhere("status NOT IN (:...blockedStatuses)", {
+          blockedStatuses: ["delivered", "cancelled"],
+        })
+        .execute();
 
-      // Update order status
-      await this.orderRepository.update(orderId, {
-        status: "cancelled",
-      });
+      if (updateResult.affected === 0) {
+        // Order was already cancelled/delivered or doesn't exist
+        // Re-check to provide appropriate error message
+        const currentOrder = await this.orderRepository.findOne({
+          where: { id: orderId },
+          select: ["id", "status"],
+        });
+
+        if (!currentOrder) {
+          throw new NotFoundException("Order not found");
+        }
+
+        if (["delivered", "cancelled"].includes(currentOrder.status)) {
+          throw new BadRequestException("Order cannot be cancelled");
+        }
+
+        // This shouldn't happen, but handle it anyway
+        throw new BadRequestException("Order cannot be cancelled at this time");
+      }
 
       // NEW: Restore quota for preorder items
       const orderItems = await this.orderItemRepository.find({
@@ -988,7 +1030,8 @@ export class OrderService {
       this.logger.log(`✅ Payment signature verified`);
 
       // Find payment record by Razorpay order ID (payment_id temporarily stores razorpay_order_id)
-      const payment = await this.paymentRepository
+      // OR by Razorpay payment ID (if payment was already processed by webhook)
+      let payment = await this.paymentRepository
         .createQueryBuilder("p")
         .leftJoinAndSelect("p.order", "o")
         .leftJoin("o.user", "u")
@@ -998,9 +1041,57 @@ export class OrderService {
         .andWhere("u.id = :userId", { userId })
         .getOne();
 
+      // If not found by order ID, try finding by payment ID (in case webhook already processed it)
       if (!payment || !payment.order) {
+        payment = await this.paymentRepository
+          .createQueryBuilder("p")
+          .leftJoinAndSelect("p.order", "o")
+          .leftJoin("o.user", "u")
+          .where("p.payment_id = :razorpayPaymentId", {
+            razorpayPaymentId: razorpay_payment_id,
+          })
+          .andWhere("u.id = :userId", { userId })
+          .getOne();
+      }
+
+      if (!payment || !payment.order) {
+        // Order not found - check if it was already created by webhook
+        // Try to find order by payment ID to see if it exists
+        const existingPayment = await this.findPaymentByRazorpayPaymentId(
+          razorpay_payment_id,
+        );
+
+        if (existingPayment?.order) {
+          // Order already exists and was processed (likely by webhook)
+          this.logger.log(
+            `ℹ️ Order already created (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning success.`,
+          );
+
+          // Get updated order data
+          const orderData = await this.getOrderById(
+            existingPayment.order.id,
+            userId,
+          );
+
+          return {
+            success: true,
+            message: "Payment already verified and order created successfully",
+            payment_id: razorpay_payment_id,
+            order: orderData,
+          };
+        }
+
+        // If still not found, this might be a retry scenario where payment_id was updated to a failed payment ID
+        // Try to find any payment record for this user that was created for this razorpay_order_id
+        // Since payment_id gets updated, we need to find by searching for orders that might match
+        // Actually, we can't easily do this without the order_number
+        
+        // Alternative: Since we have the order_id in the payment description in Razorpay,
+        // but we don't have access to that here, we need another approach
+        // The best we can do is return the error, as the order should exist if payment was initiated
+
         this.logger.error(
-          `❌ Order not found for razorpay_order_id: ${razorpay_order_id}`,
+          `❌ Order not found for razorpay_order_id: ${razorpay_order_id}. This may be a retry scenario where payment_id was updated to a failed payment ID.`,
         );
         throw new NotFoundException("Order not found");
       }
@@ -1147,6 +1238,29 @@ export class OrderService {
         }
       }
 
+      // Reactivate cart to allow user to retry payment or modify cart
+      try {
+        const cart = await this.cartRepository
+          .createQueryBuilder("c")
+          .leftJoin("c.user", "u")
+          .where("u.id = :userId", { userId })
+          .andWhere("c.is_active = :isActive", { isActive: false })
+          .orderBy("c.updated_at", "DESC")
+          .getOne();
+
+        if (cart) {
+          await this.cartRepository.update(cart.id, { is_active: true });
+          this.logger.log(
+            `✅ Cart reactivated for user ${userId} after payment failure`,
+          );
+        }
+      } catch (reactivateCartError) {
+        this.logger.error(
+          `❌ Failed to reactivate cart after payment failure: ${reactivateCartError.message}`,
+        );
+        // Don't fail payment failure handling if cart reactivation fails
+      }
+
       // Keep order in created status so user can retry
       // Log payment failure without notification (user already knows from payment UI)
       await this.createOrderTracking(
@@ -1169,6 +1283,133 @@ export class OrderService {
     } catch (error) {
       this.logger.error(
         `❌ Error handling payment failure: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Handle payment refunded (called from webhook)
+   */
+  async handlePaymentRefunded(
+    orderId: number,
+    paymentId: string,
+    refundId?: string | null,
+    refundAmount?: number | null,
+    refundStatus?: string | null,
+  ) {
+    try {
+      this.logger.log(
+        `💸 Handling payment refunded for order ${orderId}, Payment ID: ${paymentId}, Refund ID: ${refundId || "N/A"}`,
+      );
+
+      const order = await this.orderRepository.findOne({
+        where: { id: orderId },
+        relations: ["order_items", "order_items.item"],
+      });
+
+      if (!order) {
+        this.logger.warn(`⚠️ Order ${orderId} not found for refund processing`);
+        return;
+      }
+
+      // Check refund status - only restore quota for successfully processed refunds
+      if (refundStatus && refundStatus !== "processed") {
+        this.logger.log(
+          `⏭️ Refund status is "${refundStatus}" (not "processed"), skipping quota restoration for order ${orderId}`,
+        );
+        // Continue to create tracking entry but don't restore quota
+      } else {
+        // Calculate total value of preorder items in this order
+        const preorderItems = (order.order_items || []).filter(
+          (item) => item.is_preorder,
+        );
+        const preorderItemsTotal = preorderItems.reduce(
+          (sum, item) => sum + Number(item.total_price || 0),
+          0,
+        );
+
+        this.logger.log(
+          `📊 Refund analysis for order ${orderId}: Preorder items count=${preorderItems.length}, Preorder items total=₹${preorderItemsTotal}, Refund amount=${refundAmount ? `₹${refundAmount}` : "N/A"}`,
+        );
+
+        // Only restore quota if refund amount >= preorder items total value
+        // This handles partial refunds correctly - small refunds don't restore quota
+        if (refundAmount !== null && refundAmount !== undefined) {
+          if (refundAmount >= preorderItemsTotal && preorderItemsTotal > 0) {
+            // Refund covers preorder items - restore quota
+            this.logger.log(
+              `✅ Refund amount (₹${refundAmount}) >= preorder items total (₹${preorderItemsTotal}). Restoring quota.`,
+            );
+
+            // Release reservations for preorder items
+            for (const orderItem of preorderItems) {
+              // Find the coupon redemption for this order
+              const couponRedemption =
+                await this.couponRedemptionRepository.findOne({
+                  where: { order_id: orderId },
+                  relations: ["coupon"],
+                });
+
+              if (couponRedemption && couponRedemption.coupon_id) {
+                if (couponRedemption.reserved_token) {
+                  // Release reservation and restore quota
+                  await this.redisCouponService.releaseReservation(
+                    couponRedemption.coupon_id,
+                    couponRedemption.reserved_token,
+                  );
+                  this.logger.log(
+                    `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment refund`,
+                  );
+                } else {
+                  // No reservation token - restore quota directly
+                  await this.redisCouponService.incrementQuota(
+                    couponRedemption.coupon_id,
+                    1,
+                  );
+                  this.logger.log(
+                    `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment refund (no reservation token found)`,
+                  );
+                }
+              }
+            }
+          } else {
+            // Partial refund - don't restore quota
+            this.logger.log(
+              `ℹ️ Partial refund (₹${refundAmount}) is less than preorder items total (₹${preorderItemsTotal}). Not restoring quota.`,
+            );
+          }
+        } else {
+          // Refund amount not provided - conservative approach: don't restore quota
+          this.logger.warn(
+            `⚠️ Refund amount not provided for order ${orderId}. Not restoring quota to prevent incorrect restoration.`,
+          );
+        }
+      }
+
+      // Create tracking entry for refund
+      const refundMessage = refundAmount
+        ? `Payment refunded: ₹${refundAmount}. Refund ID: ${refundId || "N/A"}`
+        : `Payment refunded. Refund ID: ${refundId || "N/A"}`;
+
+      await this.createOrderTracking(
+        order.id,
+        "refunded",
+        refundMessage,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false, // Send notification about refund
+      );
+
+      this.logger.log(
+        `✅ Payment refunded processed successfully for order ${orderId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `❌ Error handling payment refunded: ${error.message}`,
         error.stack,
       );
       throw error;
@@ -1216,7 +1457,7 @@ export class OrderService {
   }
 
   /**
-   * Update payment status
+   * Update payment status (with idempotency check)
    */
   async updatePaymentStatus(
     orderId: number,
@@ -1228,10 +1469,55 @@ export class OrderService {
         `💳 Updating payment status for order ${orderId}: ${paymentStatus}`,
       );
 
-      // Update order payment status (Order table only has payment_status field)
-      await this.orderRepository.update(orderId, {
-        payment_status: paymentStatus,
+      // Check if payment status has actually changed to prevent duplicate updates
+      const currentOrder = await this.orderRepository.findOne({
+        where: { id: orderId },
+        select: ["id", "payment_status"],
       });
+
+      if (!currentOrder) {
+        throw new NotFoundException(`Order ${orderId} not found`);
+      }
+
+      // Use atomic update with WHERE clause to prevent race conditions
+      // Only update if current payment status is different (idempotency)
+      const updateResult = await this.orderRepository
+        .createQueryBuilder()
+        .update(Order)
+        .set({ payment_status: paymentStatus })
+        .where("id = :orderId", { orderId })
+        .andWhere("payment_status != :paymentStatus", { paymentStatus })
+        .execute();
+
+      // If no rows were updated, payment status was already the target status (idempotent)
+      if (updateResult.affected === 0) {
+        this.logger.log(
+          `⏭️ Order ${orderId} already has payment status ${paymentStatus}, skipping duplicate update`,
+        );
+
+        // Still update payment_id if provided and different (even if status is same)
+        if (paymentId) {
+          const existingPayment = await this.paymentRepository.findOne({
+            where: { order: { id: orderId } },
+          });
+
+          if (existingPayment && existingPayment.payment_id !== paymentId) {
+            await this.paymentRepository.update(
+              { order: { id: orderId } },
+              {
+                payment_id: paymentId,
+                payment_status:
+                  paymentStatus === "paid" ? "success" : paymentStatus,
+              },
+            );
+            this.logger.log(
+              `✅ Updated payment_id for order ${orderId} to ${paymentId}`,
+            );
+          }
+        }
+
+        return; // Skip further processing
+      }
 
       // If paymentId is provided, update it in the Payment table (not Order table)
       if (paymentId) {
@@ -1263,6 +1549,145 @@ export class OrderService {
   }
 
   /**
+   * Find order by Razorpay order ID
+   * Handles retry scenarios where payment_id was updated to a failed payment ID
+   */
+  async findOrderByRazorpayOrderId(razorpayOrderId: string) {
+    try {
+      // First, try to find by payment_id = razorpay_order_id (initial state, before payment attempts)
+      let payment = await this.paymentRepository
+        .createQueryBuilder("p")
+        .leftJoinAndSelect("p.order", "o")
+        .where("p.payment_id = :razorpayOrderId", {
+          razorpayOrderId,
+        })
+        .getOne();
+
+      if (payment?.order) {
+        return payment.order;
+      }
+
+      // If not found, payment_id may have been updated to a failed payment ID
+      // Return null - the calling code will handle fallback logic (e.g., finding by order_number from description)
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding order by Razorpay order ID: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Find order by order number (e.g., "ORD-20251220103837-262")
+   * Used as fallback when payment_id lookup fails (e.g., retry scenarios)
+   */
+  async findOrderByOrderNumber(orderNumber: string) {
+    try {
+      const order = await this.orderRepository.findOne({
+        where: { order_number: orderNumber },
+      });
+      return order;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding order by order number: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Find order that was already processed by checking payment records
+   * This happens when payment.captured webhook processes the order before order.paid or verifyPayment
+   * After payment.captured, payment.payment_id is updated from razorpay_order_id to razorpay_payment_id
+   * So we check if there's a payment with payment_status = "paid" or "success" 
+   * and payment_id starts with "pay_" (not "order_"), indicating it was already processed
+   */
+  async findOrderAlreadyProcessed(razorpayOrderId: string, razorpayPaymentId?: string) {
+    try {
+      // First, try to find by payment ID if provided
+      if (razorpayPaymentId) {
+        const payment = await this.findPaymentByRazorpayPaymentId(razorpayPaymentId);
+        if (payment?.order && (payment.payment_status === "paid" || payment.payment_status === "success")) {
+          return payment.order;
+        }
+      }
+
+      // If not found, check all payment records for orders with paid status
+      // and see if any payment_id was updated (starts with "pay_" instead of "order_")
+      // This indicates the order was already processed by payment.captured
+      const payments = await this.paymentRepository
+        .createQueryBuilder("p")
+        .leftJoinAndSelect("p.order", "o")
+        .where("p.payment_status IN (:...statuses)", {
+          statuses: ["paid", "success"],
+        })
+        .andWhere("p.payment_id LIKE :paymentIdPattern", {
+          paymentIdPattern: "pay_%",
+        })
+        .getMany();
+
+      // Check if any of these payments might be related to the order_id
+      // by checking the order's payment_status
+      for (const payment of payments) {
+        if (payment.order && payment.order.payment_status === "paid") {
+          // This order was already processed, return it
+          return payment.order;
+        }
+      }
+
+      return null;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding already processed order: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Find payment by Razorpay payment ID
+   */
+  async findPaymentByRazorpayPaymentId(razorpayPaymentId: string) {
+    try {
+      const payment = await this.paymentRepository
+        .createQueryBuilder("p")
+        .leftJoinAndSelect("p.order", "o")
+        .where("p.payment_id = :razorpayPaymentId", {
+          razorpayPaymentId,
+        })
+        .getOne();
+
+      return payment;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error finding payment by Razorpay payment ID: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get order with user relation (for webhook handlers)
+   */
+  async getOrderWithUser(orderId: number) {
+    try {
+      const order = await this.orderRepository
+        .createQueryBuilder("o")
+        .leftJoinAndSelect("o.user", "u")
+        .where("o.id = :orderId", { orderId })
+        .getOne();
+
+      return order;
+    } catch (error) {
+      this.logger.error(
+        `❌ Error getting order with user: ${error.message}`,
+      );
+      return null;
+    }
+  }
+
+  /**
    * Update order status
    */
   async updateOrderStatus(orderId: number, status: string) {
@@ -1271,23 +1696,27 @@ export class OrderService {
         `📋 Updating order status for order ${orderId}: ${status}`,
       );
 
-      // Check if status has actually changed to prevent duplicate notifications
-      const currentOrder = await this.orderRepository.findOne({ 
-        where: { id: orderId },
-        select: ['id', 'status']
-      });
-      
-      if (currentOrder && currentOrder.status === status) {
+      // Use atomic update with WHERE clause to prevent race conditions
+      // Only update if current status is different (idempotency)
+      const updateResult = await this.orderRepository
+        .createQueryBuilder()
+        .update(Order)
+        .set({ status })
+        .where("id = :orderId", { orderId })
+        .andWhere("status != :status", { status }) // Only update if status is different
+        .execute();
+
+      // If no rows were updated, status was already the target status (idempotent)
+      if (updateResult.affected === 0) {
         this.logger.log(
-          `⏭️ Order ${orderId} already has status ${status}, skipping duplicate notification`,
+          `⏭️ Order ${orderId} already has status ${status}, skipping duplicate update`,
         );
         return;
       }
 
-      await this.orderRepository.update(orderId, { status });
-
-      // Push order to seller if status is confirmed
-      if (status === "confirmed") {
+      // Status was successfully updated (updateResult.affected > 0)
+      // Push order to seller if status is confirmed AND our update succeeded
+      if (status === "confirmed" && updateResult.affected !== undefined && updateResult.affected > 0) {
         const orderWithRelations = await this.orderRepository
           .createQueryBuilder("o")
           .leftJoinAndSelect("o.user", "u")
@@ -1297,7 +1726,9 @@ export class OrderService {
           .where("o.id = :orderId", { orderId: orderId })
           .getOne();
 
-        if(orderWithRelations && orderWithRelations.status === "confirmed") {
+        // Double-check status is still confirmed (race condition protection)
+        // Another thread might have changed status between update and this query
+        if (orderWithRelations && orderWithRelations.status === "confirmed") {
           try {
             const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
             console.log("SELLER PUSH RESPONSE:", response);
@@ -1310,10 +1741,9 @@ export class OrderService {
               error.stack,
             );
           }
-        }
-        else {
-          this.logger.error(
-            `❌ Order ${orderId} not found or status is not confirmed`,
+        } else {
+          this.logger.warn(
+            `⚠️ Order ${orderId} status changed before seller push (expected: confirmed, got: ${orderWithRelations?.status || "not found"})`,
           );
         }
       }
@@ -1724,30 +2154,76 @@ export class OrderService {
         );
       }
 
-      // Validate status transition
+      // Validate status transition (before atomic update)
       this.sellerStatusService.validateSellerStatusUpdate(
         sellerStatusUpdateDto.order_number,
         order.status,
         sellerStatusUpdateDto.status,
       );
 
-      // Update order status
-      const previousStatus = order.status;
-      order.status = sellerStatusUpdateDto.status;
+      // Prepare update data
+      const updateData: any = {
+        status: sellerStatusUpdateDto.status,
+      };
 
       // Set delivered_at timestamp if status is delivered
       if (sellerStatusUpdateDto.status === "delivered") {
-        order.delivered_at = new Date();
+        updateData.delivered_at = new Date();
       }
 
       // Update estimated delivery time if provided
       if (sellerStatusUpdateDto.estimated_delivery_time) {
-        order.estimated_delivery_time = new Date(
+        updateData.estimated_delivery_time = new Date(
           sellerStatusUpdateDto.estimated_delivery_time,
         );
       }
 
-      await this.orderRepository.save(order);
+      // Use atomic update with WHERE clause to prevent race conditions
+      // Only update if current status matches what we validated against
+      let updateBuilder = this.orderRepository
+        .createQueryBuilder()
+        .update(Order)
+        .set(updateData)
+        .where("id = :orderId", { orderId: order.id })
+        .andWhere("status = :currentStatus", { currentStatus: order.status });
+
+      const updateResult = await updateBuilder.execute();
+
+      if (updateResult.affected === 0) {
+        // Status changed between validation and update (race condition)
+        // Re-read order to get current status
+        const currentOrder = await this.orderRepository.findOne({
+          where: { id: order.id },
+          select: ["id", "status"],
+        });
+
+        if (currentOrder) {
+          // Re-validate with current status
+          this.sellerStatusService.validateSellerStatusUpdate(
+            sellerStatusUpdateDto.order_number,
+            currentOrder.status,
+            sellerStatusUpdateDto.status,
+          );
+
+          // Retry update with current status (using same updateData)
+          const retryBuilder = this.orderRepository
+            .createQueryBuilder()
+            .update(Order)
+            .set(updateData)
+            .where("id = :orderId", { orderId: order.id })
+            .andWhere("status = :currentStatus", {
+              currentStatus: currentOrder.status,
+            });
+
+          await retryBuilder.execute();
+        } else {
+          throw new NotFoundException(
+            `Order with number ${sellerStatusUpdateDto.order_number} not found`,
+          );
+        }
+      }
+
+      const previousStatus = order.status;
 
       // Create tracking entry
       const statusMessage = this.sellerStatusService.getStatusMessage(
