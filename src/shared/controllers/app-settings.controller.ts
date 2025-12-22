@@ -317,7 +317,6 @@ export class AppSettingsController {
   @Post("bulk")
   @ApiSecurity('x-api-key')
   @UseGuards(ApiKeyGuard)
-  @ApiBearerAuth()
   @ApiOperation({
     summary: "Bulk create/update settings",
     description: "Create or update multiple settings in a single operation. Requires authentication.",
@@ -581,7 +580,6 @@ export class AppSettingsController {
   @Delete(":id")
   @ApiSecurity('x-api-key')
   @UseGuards(ApiKeyGuard)
-  @ApiBearerAuth()
   @ApiOperation({ summary: "Delete a setting" })
   async delete(@Param("id") id: number, @CurrentRole() role: string) {
     await this.appSettingsService.delete(id, role);
