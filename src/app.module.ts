@@ -27,6 +27,7 @@ import { BannerModule } from "./banner/banner.module";
 import { CouponModule } from "./coupon/coupon.module";
 import { AppSettingsModule } from "./shared/app-settings.module";
 import { AdminAccessModule } from './super-admin-access/super-admin-access.module';
+import { CancelReasonModule } from './cancel-reason/cancel-reason.module';
 import "dotenv/config";
 import Redis from "ioredis";
 
@@ -103,6 +104,7 @@ import Redis from "ioredis";
     CouponModule,
     AppSettingsModule,
     AdminAccessModule,
+    CancelReasonModule,
   ],
   controllers: [AppController],
   providers: [
