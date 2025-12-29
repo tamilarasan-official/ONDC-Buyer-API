@@ -2341,16 +2341,6 @@ export class OrderService {
       return { success: false, message: 'Order not found', statusCode: 404 };
     }
 
-    const cancellableStatuses = ['pending', 'confirmed'];
-
-    if (!cancellableStatuses.includes(order.status)) {
-      return {
-        success: false,
-        message: 'Only pending or confirmed orders can be cancelled',
-        statusCode: 400,
-      };
-    }
-
     order.status = 'cancelled';
     await this.orderRepository.save(order);
 
@@ -2370,27 +2360,13 @@ export class OrderService {
     try {
       const sellerApiUrl =
         process.env.SELLER_API_URL || "http://localhost:3000";
-      const orderListEndpoint = `${sellerApiUrl}/orders/list/by-external-order-id`;
 
-      const orderList = await firstValueFrom(
-        this.httpService.get(orderListEndpoint, {
-          params: {
-            external_order_id: order.order_number,
-          },
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          timeout: 10000,
-        }),
-      );
-
-      const invoiceUpdateEndpoint = `${sellerApiUrl}/invoices/cancel-by-order`;
+      const invoiceUpdateEndpoint = `${sellerApiUrl}/orders/cancel-by-order`;
 
       this.logger.log(`🧪 Testing seller push to: ${invoiceUpdateEndpoint}`);
 
       const payload = {
-        order_id: orderList.data.data[0].id,
+        order_id: order.order_number,
         status: 'cancelled',
         cancel_code: code
       };
