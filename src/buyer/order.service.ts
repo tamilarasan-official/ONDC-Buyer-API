@@ -42,6 +42,7 @@ import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType } from "../coupon/entities/coupon.entity";
 import { PaymentStatus } from "../coupon/dto/redeem-coupon.dto";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
+import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 
 @Injectable()
 export class OrderService {
@@ -87,7 +88,10 @@ export class OrderService {
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
-  ) {}
+
+    @InjectRepository(WebhookEvent)
+    private readonly webhookEventRepository: Repository<WebhookEvent>,
+  ) { }
 
   /**
    * Create order from cart (without payment processing)
@@ -1099,10 +1103,20 @@ export class OrderService {
       const order = payment.order;
       this.logger.log(`✅ Found order ${order.order_number} (ID: ${order.id})`);
 
+      // Try to fetch webhook payload for this payment
+      const webhookEvent = await this.webhookEventRepository.findOne({
+        where: {
+          payment_id: razorpay_payment_id,
+          event_type: 'payment.captured',
+        },
+      });
+
       // Update payment record with actual payment ID
       await this.paymentRepository.update(payment.id, {
         payment_id: razorpay_payment_id,
         payment_status: "paid",
+        gateway_response: webhookEvent?.event_payload ?? payment.gateway_response,
+        paid_at: new Date(),
       });
 
       // Update payment status
@@ -1786,10 +1800,10 @@ export class OrderService {
     // Extract only code, reason, and cancelled_by from cancelReason
     const cancelReasonToSave = cancelReason
       ? {
-          code: cancelReason.code,
-          reason: cancelReason.reason,
-          cancelled_by: cancelReason.cancelled_by,
-        }
+        code: cancelReason.code,
+        reason: cancelReason.reason,
+        cancelled_by: cancelReason.cancelled_by,
+      }
       : undefined;
 
     const tracking = this.orderTrackingRepository.create({
@@ -2010,11 +2024,11 @@ export class OrderService {
       // Extract cancel_reason from tracking if order is cancelled
       cancel_reason: order.status === "cancelled" && order.tracking
         ? (() => {
-            const cancelledTracking = order.tracking.find(
-              (t) => t.status === "cancelled",
-            );
-            return cancelledTracking?.cancel_reason || null;
-          })()
+          const cancelledTracking = order.tracking.find(
+            (t) => t.status === "cancelled",
+          );
+          return cancelledTracking?.cancel_reason || null;
+        })()
         : undefined,
       tracking:
         order.tracking?.map((t) => ({
@@ -2031,17 +2045,17 @@ export class OrderService {
           delivery_code: t.delivery_code,
           cancel_reason: t.cancel_reason,
         })) || [],
-      tracking_url: order.tracking && order.tracking.length > 0 
-        ? order.tracking[order.tracking.length - 1].tracking_url 
+      tracking_url: order.tracking && order.tracking.length > 0
+        ? order.tracking[order.tracking.length - 1].tracking_url
         : null,
       delivery_code: order.tracking && order.tracking.length > 0
         ? (() => {
-            // Find the most recent tracking event that has a delivery_code
-            const trackingWithCode = [...order.tracking]
-              .reverse()
-              .find((t) => t.delivery_code);
-            return trackingWithCode?.delivery_code || null;
-          })()
+          // Find the most recent tracking event that has a delivery_code
+          const trackingWithCode = [...order.tracking]
+            .reverse()
+            .find((t) => t.delivery_code);
+          return trackingWithCode?.delivery_code || null;
+        })()
         : null,
       created_at: order.created_at.toISOString(),
       updated_at: order.updated_at.toISOString(),
@@ -2236,12 +2250,12 @@ export class OrderService {
       // Prepare agent details for storage
       const agentDetails = sellerStatusUpdateDto.agent_details
         ? {
-            name: sellerStatusUpdateDto.agent_details.name,
-            phone: sellerStatusUpdateDto.agent_details.phone,
-            vehicle_number: sellerStatusUpdateDto.agent_details.vehicle_number,
-            eta: sellerStatusUpdateDto.agent_details.eta,
-            photo_url: sellerStatusUpdateDto.agent_details.photo_url,
-          }
+          name: sellerStatusUpdateDto.agent_details.name,
+          phone: sellerStatusUpdateDto.agent_details.phone,
+          vehicle_number: sellerStatusUpdateDto.agent_details.vehicle_number,
+          eta: sellerStatusUpdateDto.agent_details.eta,
+          photo_url: sellerStatusUpdateDto.agent_details.photo_url,
+        }
         : undefined;
 
       await this.createOrderTracking(
