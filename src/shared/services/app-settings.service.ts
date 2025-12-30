@@ -52,23 +52,38 @@ export class AppSettingsService {
   /**
    * Get a setting value by key with caching
    */
-  async get(key: string, defaultValue?: string): Promise<string | null> {
-    // Check if cache needs refresh
+  async get(
+    key: string,
+    defaultValue?: string
+  ): Promise<string | null> {
+
+    // refresh cache if stale
     if (Date.now() - this.cacheTimestamp > this.CACHE_TTL) {
       await this.refreshCache();
     }
 
-    // Return from cache
+    // Normal lookup from cache
     if (this.settingsCache.has(key)) {
-      return this.settingsCache.get(key) || null;
+      return this.settingsCache.get(key) ?? null;
     }
 
-    // Return default if provided
     if (defaultValue !== undefined) {
       return defaultValue;
     }
 
     return null;
+  }
+
+  async getRestaurantCardConfig() {
+    if (Date.now() - this.cacheTimestamp > this.CACHE_TTL) {
+      await this.refreshCache();
+    }
+
+    return {
+      default: this.settingsCache.get("HOME_SCREEN_RESTAURANT_CARD_STYLE") || null,
+      image: this.settingsCache.get("HOME_SCREEN_RESTAURANT_CARD_IMAGE") || null,
+      css: this.settingsCache.get("HOME_SCREEN_RESTAURANT_CARD_CSS") || null,
+    };
   }
 
   /**
