@@ -45,6 +45,7 @@ import { TimezoneUtil } from "../shared/utils/timezone.util";
 import { HttpService } from "@nestjs/axios";
 import { firstValueFrom } from "rxjs";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
+import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 
 @Injectable()
 export class OrderService {
@@ -91,6 +92,9 @@ export class OrderService {
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
     private readonly httpService: HttpService,
+
+    @InjectRepository(WebhookEvent)
+    private readonly webhookEventRepository: Repository<WebhookEvent>,
   ) { }
 
   /**
@@ -1103,10 +1107,20 @@ export class OrderService {
       const order = payment.order;
       this.logger.log(`✅ Found order ${order.order_number} (ID: ${order.id})`);
 
+      // Try to fetch webhook payload for this payment
+      const webhookEvent = await this.webhookEventRepository.findOne({
+        where: {
+          payment_id: razorpay_payment_id,
+          event_type: 'payment.captured',
+        },
+      });
+
       // Update payment record with actual payment ID
       await this.paymentRepository.update(payment.id, {
         payment_id: razorpay_payment_id,
         payment_status: "paid",
+        gateway_response: webhookEvent?.event_payload ?? payment.gateway_response,
+        paid_at: new Date(),
       });
 
       // Update payment status
