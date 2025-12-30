@@ -42,12 +42,15 @@ import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType } from "../coupon/entities/coupon.entity";
 import { PaymentStatus } from "../coupon/dto/redeem-coupon.dto";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
+import { HttpService } from "@nestjs/axios";
+import { firstValueFrom } from "rxjs";
+import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
-  
+
   // Default coordinates used when location permissions are disabled in buyer app
   private readonly DEFAULT_LATITUDE = 9.9252;
   private readonly DEFAULT_LONGITUDE = 78.1198;
@@ -88,6 +91,7 @@ export class OrderService {
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
+    private readonly httpService: HttpService,
 
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
@@ -118,7 +122,7 @@ export class OrderService {
       // CRITICAL: Recalculate cart totals before creating order to ensure latest pricing
       // This ensures platform fee setting changes are reflected immediately
       await this.cartService.recalculateCartTotals(cart.id);
-      
+
       // Reload cart after recalculation to get updated totals
       const updatedCart = await this.cartRepository
         .createQueryBuilder("c")
@@ -128,11 +132,11 @@ export class OrderService {
         .leftJoin("c.user", "u")
         .where("c.id = :cartId", { cartId: cart.id })
         .getOne();
-      
+
       if (!updatedCart) {
         throw new BadRequestException("Cart not found after recalculation");
       }
-      
+
       // Use updated cart for order creation
       const cartToUse = updatedCart;
 
@@ -154,7 +158,7 @@ export class OrderService {
       const latDiff = Math.abs(Number(deliveryAddress.latitude) - this.DEFAULT_LATITUDE);
       const lngDiff = Math.abs(Number(deliveryAddress.longitude) - this.DEFAULT_LONGITUDE);
       const tolerance = 0.0001; // Very small tolerance for floating-point comparison
-      
+
       if (latDiff < tolerance && lngDiff < tolerance) {
         this.logger.warn(
           `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Address ID: ${deliveryAddress.id}, Coordinates: (${deliveryAddress.latitude}, ${deliveryAddress.longitude})`,
@@ -173,7 +177,7 @@ export class OrderService {
 
       // NEW: Re-validate preorder campaigns before checkout
       const preorderCartItems = cartToUse.cart_items.filter(ci => ci.is_preorder);
-      
+
       if (preorderCartItems.length > 0) {
         if (preorderCartItems.length > 1) {
           throw new BadRequestException(
@@ -220,7 +224,7 @@ export class OrderService {
           deliveryAddress.pincode,
           cartToUse.store.id, // Pass store_id directly
         );
-        
+
         // Update cart item with reservation token
         // FIX: Handle cart item save failure - rollback reservation if save fails
         try {
@@ -268,10 +272,10 @@ export class OrderService {
           // Parse delivery_date which includes both date and time
           // Supports formats: "2025-02-11T12:00:00Z", "2025-02-11 12:00:00", "2025-02-11T12:00:00"
           const deliveryDateTimeStr = preorderCoupon.type_meta.delivery_date;
-          
+
           // Try to parse as ISO datetime string
           estimatedDeliveryTime = new Date(deliveryDateTimeStr);
-          
+
           // Validate the parsed date
           if (isNaN(estimatedDeliveryTime.getTime())) {
             // If parsing fails, try to parse as date-only and default to noon
@@ -323,7 +327,7 @@ export class OrderService {
           );
         }
       }
-      
+
       this.logger.log(
         `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
       );
@@ -357,7 +361,7 @@ export class OrderService {
       });
 
       const savedOrder = await this.orderRepository.save(order);
-      
+
       // FIX: Log order values after saving to verify what was stored
       this.logger.log(
         `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
@@ -484,7 +488,7 @@ export class OrderService {
       // For online payment, create Razorpay order and return payment details
       // FIX: Use savedOrder.total_amount instead of cart.final_amount to ensure consistency
       const paymentAmountInPaise = Math.round(savedOrder.total_amount * 100);
-      
+
       this.logger.log(
         `💳 Creating Razorpay order for order ${savedOrder.id}: amount=${paymentAmountInPaise} paise (₹${savedOrder.total_amount})`,
       );
@@ -552,7 +556,7 @@ export class OrderService {
         `❌ Error creating order: ${error.message}`,
         error.stack,
       );
-      
+
       // FIX: Restore quota if reservation was created but order creation failed
       // Get cart again to check for reservation tokens
       try {
@@ -592,7 +596,7 @@ export class OrderService {
           `❌ Error during quota rollback after order creation failure: ${rollbackError.message}`
         );
       }
-      
+
       throw error;
     }
   }
@@ -643,8 +647,8 @@ export class OrderService {
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
           .where("u.id = :userId", { userId })
-          .andWhere("o.status NOT IN (:...excludedStatuses)", { 
-            excludedStatuses: ["pending", "created"] 
+          .andWhere("o.status NOT IN (:...excludedStatuses)", {
+            excludedStatuses: ["pending", "created"]
           })
           .orderBy("o.created_at", "DESC")
           .skip((page - 1) * limit)
@@ -654,8 +658,8 @@ export class OrderService {
           .createQueryBuilder("o")
           .leftJoin("o.user", "u")
           .where("u.id = :userId", { userId })
-          .andWhere("o.status NOT IN (:...excludedStatuses)", { 
-            excludedStatuses: ["pending", "created"] 
+          .andWhere("o.status NOT IN (:...excludedStatuses)", {
+            excludedStatuses: ["pending", "created"]
           })
           .getCount(),
       ]);
@@ -1089,7 +1093,7 @@ export class OrderService {
         // Try to find any payment record for this user that was created for this razorpay_order_id
         // Since payment_id gets updated, we need to find by searching for orders that might match
         // Actually, we can't easily do this without the order_number
-        
+
         // Alternative: Since we have the order_id in the payment description in Razorpay,
         // but we don't have access to that here, we need another approach
         // The best we can do is return the error, as the order should exist if payment was initiated
@@ -2337,5 +2341,76 @@ export class OrderService {
 
     // reserveCoupon returns { reservation_token, expires_in_seconds }
     return reservation.reservation_token;
+  }
+
+  async orderCancel(dto: OrderCancelDto) {
+    const { order_id, code, reason, cancelled_by } = dto;
+
+    const order = await this.orderRepository.findOne({
+      where: { id: order_id },
+      relations: ['tracking'],
+    });
+
+    if (!order) {
+      return { success: false, message: 'Order not found', statusCode: 404 };
+    }
+
+    order.status = 'cancelled';
+    await this.orderRepository.save(order);
+
+    const tracking = this.orderTrackingRepository.create({
+      order,
+      status: 'cancelled',
+      message: 'Order cancelled',
+      cancel_reason: {
+        code,
+        reason,
+        cancelled_by,
+      },
+    });
+
+    await this.orderTrackingRepository.save(tracking);
+
+    try {
+      const sellerApiUrl =
+        process.env.SELLER_API_URL || "http://localhost:3000";
+
+      const invoiceUpdateEndpoint = `${sellerApiUrl}/orders/cancel-by-order`;
+
+      this.logger.log(`🧪 Testing seller push to: ${invoiceUpdateEndpoint}`);
+
+      const payload = {
+        order_id: order.order_number,
+        status: 'cancelled',
+        cancel_code: code
+      };
+
+      const response = await firstValueFrom(
+        this.httpService.post(invoiceUpdateEndpoint, payload, {
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          timeout: 10000,
+        }),
+      );
+
+      this.logger.log(
+        `✅ Test seller push successful. Status: ${response.status}`,
+      );
+    } catch (error) {
+      this.logger.error(`❌ Test seller push failed: ${error.message}`);
+      if (error.response) {
+        this.logger.error(
+          `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
+        );
+      }
+    }
+
+    return {
+      success: true,
+      message: 'Order cancelled successfully',
+      statusCode: 200,
+    };
   }
 }

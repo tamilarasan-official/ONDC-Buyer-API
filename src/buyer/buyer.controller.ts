@@ -91,6 +91,7 @@ import { StoreService } from "../store/store.service";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { WebhookEvent } from "../payment/entities/webhook-event.entity";
+import { OrderCancelDto } from "./dto/cancel-order.dto";
 
 @ApiTags("Buyer App APIs")
 @Controller("api/buyer")
@@ -106,7 +107,7 @@ export class BuyerController {
     private readonly storeService: StoreService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
-  ) {}
+  ) { }
 
   @Get("home")
   @UseGuards(JwtAuthGuard)
@@ -1687,16 +1688,16 @@ export class BuyerController {
       // Extract app_version (version_name) and version_code from headers
       // Support x-app-version-name and x-app-version-code/app-version-code
       // version_name from headers takes priority, then body app_version
-      const headerVersionName = 
-        req.headers["x-app-version-name"] || 
-        req.headers["app-version-name"] || 
+      const headerVersionName =
+        req.headers["x-app-version-name"] ||
+        req.headers["app-version-name"] ||
         null;
       const versionName = headerVersionName || null;
       const appVersion = tokenData.app_version || null;
-      
-      const versionCodeStr = 
-        req.headers["x-app-version-code"] || 
-        req.headers["app-version-code"] || 
+
+      const versionCodeStr =
+        req.headers["x-app-version-code"] ||
+        req.headers["app-version-code"] ||
         null;
       const versionCode = versionCodeStr ? parseInt(versionCodeStr, 10) : null;
 
@@ -1737,7 +1738,7 @@ export class BuyerController {
 
       // Register FCM token in database
       this.logger.log(`🔄 Registering FCM token in database...`);
-      
+
       await this.notificationService.registerDeviceToken(
         userId,
         tokenData.device_token,
@@ -2821,7 +2822,7 @@ export class BuyerController {
       // event.payload.refund.entity.payment_id contains the payment ID
       // event.payload.refund.entity.amount is in paise
       const refundEntity = event.payload.refund?.entity;
-      
+
       if (!refundEntity) {
         this.logger.error(
           `❌ Invalid refund.processed event: missing refund entity`,
@@ -3453,5 +3454,23 @@ export class BuyerController {
     };
     return this.storeService.updateStoreTimingStatusFromSeller(storeCloseTimingDto);
   }
-  
+
+  @Post('orders/order-cancel')
+  @ApiOperation({
+    summary: 'Cancel order (pending only)',
+    description: 'Cancels an order only if it is in pending state',
+  })
+  @ApiBody({ type: CancelOrderDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Order cancelled successfully',
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Order cannot be cancelled',
+  })
+  async orderCancel(@Body() dto: OrderCancelDto) {
+    return this.orderService.orderCancel(dto);
+  }
+
 }
