@@ -10,7 +10,7 @@ export class DeliveryPricingService {
   constructor(
     private readonly httpService: HttpService,
     private readonly appSettingsService: AppSettingsService,
-  ) {}
+  ) { }
 
   /**
    * Get delivery charge and estimated delivery time from Delivery Pricing API
@@ -25,7 +25,13 @@ export class DeliveryPricingService {
     pickupLng: number,
     dropoffLat: number,
     dropoffLng: number,
-  ): Promise<{ charge: number; distance: number; estimated_delivery_time: string | null }> {
+  ): Promise<{
+    charge: number;
+    tax: number;
+    percent: number;
+    distance: number;
+    estimated_delivery_time: string | null;
+  }> {
     try {
       // Get API configuration from app settings
       const baseUrl = await this.appSettingsService.get("TAZTY_DELIVERY_PARTNER_API_BASE_URL");
@@ -35,7 +41,13 @@ export class DeliveryPricingService {
         this.logger.warn(
           "Delivery Pricing API not configured in app settings. TAZTY_DELIVERY_PARTNER_API_BASE_URL and TAZTY_DELIVERY_PARTNER_API_KEY must be set. Returning default values.",
         );
-        return { charge: 0, distance: 0, estimated_delivery_time: null };
+        return {
+          charge: 0,
+          tax: 0,
+          percent: 0,
+          distance: 0,
+          estimated_delivery_time: null,
+        };
       }
 
       const apiUrl = baseUrl.trim().endsWith("/")
@@ -71,14 +83,22 @@ export class DeliveryPricingService {
           },
         ),
       );
-
+      
       if (!response.data) {
         this.logger.warn("TAZTY Delivery Pricing API returned no data");
-        return { charge: 0, distance: 0, estimated_delivery_time: null };
+        return {
+          charge: 0,
+          tax: 0,
+          percent: 0,
+          distance: 0,
+          estimated_delivery_time: null,
+        };
       }
 
       // Extract response data matching API structure: { distance, charge, currency, policy_type, estimated_delivery_time }
       const charge = Number(response.data.charge ?? 0);
+      const tax = Number(response.data.tax ?? 0);
+      const percent = Number(response.data.percent ?? 0);
       const distance = Number(response.data.distance ?? 0);
       const currency = response.data.currency || "INR";
       const policyType = response.data.policy_type;
@@ -90,6 +110,8 @@ export class DeliveryPricingService {
 
       return {
         charge,
+        tax,
+        percent,
         distance, // Include distance in response
         estimated_delivery_time: estimatedDeliveryTime,
       };
@@ -109,7 +131,13 @@ export class DeliveryPricingService {
       }
 
       // Always return default values on error (fallback strategy)
-      return { charge: 0, distance: 0, estimated_delivery_time: null };
+      return {
+        charge: 0,
+        tax: 0,
+        percent: 0,
+        distance: 0,
+        estimated_delivery_time: null,
+      };
     }
   }
 }

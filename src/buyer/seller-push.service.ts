@@ -17,21 +17,24 @@ export class SellerPushService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Coupon)
     private readonly couponRepository: Repository<Coupon>,
-  ) {}
+  ) { }
 
   /**
    * Push order to seller immediately after order creation
    */
   async pushOrderToSeller(order: Order): Promise<void> {
+    console.log('order: ', order);
     try {
       this.logger.log(`🚀 Pushing order ${order.order_number} to seller`);
 
       const payload = await this.transformOrderToSellerPayload(order);
+      console.log('payload: ', payload);
 
       // Get seller API URL from environment
-      const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3001";
+      const sellerApiUrl = "http://localhost:3000";
+        // process.env.SELLER_API_URL || "http://localhost:3000";
       const endpoint = `${sellerApiUrl}/orders`;
+      console.log('endpoint: ', endpoint);
 
       this.logger.log(`Sending order to seller endpoint: ${endpoint}`);
       this.logger.log(`📤 SELLER PUSH PAYLOAD:`);
@@ -47,6 +50,7 @@ export class SellerPushService {
           timeout: 10000, // 10 second timeout
         }),
       );
+      console.log('response: seller=============> ', response.data);
 
       this.logger.log(
         `✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`,
@@ -245,6 +249,8 @@ export class SellerPushService {
       payment_method: order.payment_method,
       payment_status: order.payment_status === "paid" ? "received" : "pending",
       delivery_charge: Number(order.delivery_fee).toFixed(2),
+      delivery_fee_tax: Number(order.delivery_fee_tax || 0).toFixed(2),
+      platform_fee_tax: Number(order.platform_fee_tax || 0).toFixed(2),
       tip_amount: Number(order.tip_amount).toFixed(2),
       total_amount: Number(order.total_amount).toFixed(2),
       external_order_no: order.order_number,

@@ -66,6 +66,12 @@ export class Order {
   @Column({ type: "decimal", precision: 10, scale: 2 })
   delivery_fee: number;
 
+  @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
+  delivery_fee_tax: number;
+
+  @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
+  platform_fee_tax: number;
+
   @Column({ type: "decimal", precision: 10, scale: 2 })
   tax_amount: number;
 
