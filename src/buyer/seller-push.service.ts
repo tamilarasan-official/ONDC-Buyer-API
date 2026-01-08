@@ -31,8 +31,8 @@ export class SellerPushService {
       console.log('payload: ', payload);
 
       // Get seller API URL from environment
-      const sellerApiUrl = "http://localhost:3000";
-        // process.env.SELLER_API_URL || "http://localhost:3000";
+      const sellerApiUrl =
+        process.env.SELLER_API_URL || "http://localhost:3000";
       const endpoint = `${sellerApiUrl}/orders`;
       console.log('endpoint: ', endpoint);
 
