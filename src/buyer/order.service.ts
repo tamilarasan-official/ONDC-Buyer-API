@@ -350,6 +350,8 @@ export class OrderService {
         status: orderStatus,
         subtotal: cartToUse.total_amount,
         delivery_fee: cartToUse.delivery_fee,
+        delivery_fee_tax: cartToUse.delivery_fee_tax || 0,
+        platform_fee_tax: cartToUse.platform_fee_tax || 0,
         tax_amount: cartToUse.tax_amount,
         discount_amount: cartToUse.discount_amount,
         tip_amount: cartToUse.tip_amount || 0,
@@ -437,14 +439,14 @@ export class OrderService {
       try {
         // Get complete order data with relations for seller push
         const orderWithRelations = await this.orderRepository
-          .createQueryBuilder("o")
-          .leftJoinAndSelect("o.user", "u")
-          .leftJoinAndSelect("o.store", "s")
-          .leftJoinAndSelect("o.order_items", "oi")
-          .leftJoinAndSelect("oi.item", "i")
-          .where("o.id = :orderId", { orderId: savedOrder.id })
-          .getOne();
-
+        .createQueryBuilder("o")
+        .leftJoinAndSelect("o.user", "u")
+        .leftJoinAndSelect("o.store", "s")
+        .leftJoinAndSelect("o.order_items", "oi")
+        .leftJoinAndSelect("oi.item", "i")
+        .where("o.id = :orderId", { orderId: savedOrder.id })
+        .getOne();
+        
         if (orderWithRelations && orderWithRelations.status === "confirmed") {
           const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
           console.log("SELLER PUSH RESPONSE:", response);
@@ -1709,6 +1711,7 @@ export class OrderService {
    * Update order status
    */
   async updateOrderStatus(orderId: number, status: string) {
+    console.log('orderId: ', orderId);
     try {
       this.logger.log(
         `📋 Updating order status for order ${orderId}: ${status}`,
@@ -1736,14 +1739,14 @@ export class OrderService {
       // Push order to seller if status is confirmed AND our update succeeded
       if (status === "confirmed" && updateResult.affected !== undefined && updateResult.affected > 0) {
         const orderWithRelations = await this.orderRepository
-          .createQueryBuilder("o")
-          .leftJoinAndSelect("o.user", "u")
-          .leftJoinAndSelect("o.store", "s")
-          .leftJoinAndSelect("o.order_items", "oi")
-          .leftJoinAndSelect("oi.item", "i")
-          .where("o.id = :orderId", { orderId: orderId })
-          .getOne();
-
+        .createQueryBuilder("o")
+        .leftJoinAndSelect("o.user", "u")
+        .leftJoinAndSelect("o.store", "s")
+        .leftJoinAndSelect("o.order_items", "oi")
+        .leftJoinAndSelect("oi.item", "i")
+        .where("o.id = :orderId", { orderId: orderId })
+        .getOne();
+        
         // Double-check status is still confirmed (race condition protection)
         // Another thread might have changed status between update and this query
         if (orderWithRelations && orderWithRelations.status === "confirmed") {
