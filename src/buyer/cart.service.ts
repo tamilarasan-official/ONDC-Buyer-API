@@ -44,7 +44,7 @@ export class CartService {
 
   // Maximum tip amount constant (fixed amount in INR)
   private readonly MAX_TIP_AMOUNT = 450.0;
-  
+
   // Default coordinates used when location permissions are disabled in buyer app
   private readonly DEFAULT_LATITUDE = 9.9252;
   private readonly DEFAULT_LONGITUDE = 78.1198;
@@ -182,13 +182,13 @@ export class CartService {
       // Check user's default/recent address to ensure they're in serviceable area
       try {
         const userLocation = await this.locationService.getUserLocation(userId);
-        
+
         // Validate that coordinates are not the default values (location permissions disabled)
         // Use tolerance-based comparison to handle floating-point precision
         const latDiff = Math.abs(userLocation.lat - this.DEFAULT_LATITUDE);
         const lngDiff = Math.abs(userLocation.lng - this.DEFAULT_LONGITUDE);
         const tolerance = 0.0001; // Very small tolerance for floating-point comparison
-        
+
         if (latDiff < tolerance && lngDiff < tolerance) {
           this.logger.warn(
             `⚠️ Default coordinates detected and blocked. User ID: ${userId}, Coordinates: (${userLocation.lat}, ${userLocation.lng})`,
@@ -197,7 +197,7 @@ export class CartService {
             "Please update your address and location details properly to add items to cart. We need your accurate location to provide delivery services.",
           );
         }
-        
+
         await this.appServiceableAreaService.validateServiceableArea(
           userLocation.lat,
           userLocation.lng,
@@ -1682,7 +1682,7 @@ export class CartService {
         (sum, item) => sum + Number(item.total_price || 0),
         0,
       ) || 0;
-    let deliveryFee = Number(cart.delivery_fee || 0);
+    let deliveryFee = 0;
     let platformFee = 0;
     const platformFeeConfig = await this.getPlatformFee();
     if (platformFeeConfig.isEnabled) {
@@ -1728,15 +1728,10 @@ export class CartService {
           // % GST from API
           deliveryPercent = Number(deliveryInfo.percent || 0);
 
-          // Prefer API computed tax value
-          if (deliveryInfo.tax > 0) {
-            deliveryFeeTax = Number(deliveryInfo.tax.toFixed(2));
-          } else {
-            deliveryFeeTax = Number(
-              ((deliveryFee * deliveryPercent) / 100).toFixed(2),
-            );
-          }
-          
+          deliveryFeeTax = Number(
+            ((deliveryFee * deliveryPercent) / 100).toFixed(2),
+          );
+
           // Apply SAME percent to platform fee
           platformFeeTax = Number(
             ((platformFee * platformPercent) / 100).toFixed(2),
@@ -1758,6 +1753,9 @@ export class CartService {
     }
 
     await this.cartRepository.update(cart.id, {
+      platform_percent: platformPercent,
+      delivery_percent: deliveryPercent,
+      delivery_fee: deliveryFee,
       delivery_fee_tax: deliveryFeeTax,
       platform_fee_tax: platformFeeTax,
     });

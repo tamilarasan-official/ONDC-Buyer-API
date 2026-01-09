@@ -1711,7 +1711,6 @@ export class OrderService {
    * Update order status
    */
   async updateOrderStatus(orderId: number, status: string) {
-    console.log('orderId: ', orderId);
     try {
       this.logger.log(
         `📋 Updating order status for order ${orderId}: ${status}`,
