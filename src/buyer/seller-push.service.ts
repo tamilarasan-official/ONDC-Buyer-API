@@ -6,6 +6,8 @@ import { Repository } from "typeorm";
 import { Order } from "../order/entities/order.entity";
 import { Item } from "../item/entities/item.entity";
 import { Coupon } from "../coupon/entities/coupon.entity";
+import { platform } from "os";
+import { CartService } from "./cart.service";
 
 @Injectable()
 export class SellerPushService {
@@ -17,6 +19,7 @@ export class SellerPushService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Coupon)
     private readonly couponRepository: Repository<Coupon>,
+    private readonly cartService: CartService,
   ) { }
 
   /**
@@ -209,6 +212,12 @@ export class SellerPushService {
       }
     }
 
+    let platformFee;
+    const platformFeeConfig = await this.cartService.getPlatformFeeConfig();
+    if (platformFeeConfig.isEnabled) {
+      platformFee = platformFeeConfig.amount;
+    }
+
     const payload: any = {
       contact_number: order.user.phone_number.toString(),
       store_id: order.store.reference_id,
@@ -249,6 +258,9 @@ export class SellerPushService {
       payment_method: order.payment_method,
       payment_status: order.payment_status === "paid" ? "received" : "pending",
       delivery_charge: Number(order.delivery_fee).toFixed(2),
+      platform_charge: Number(platformFee),
+      delivery_percent: Number(order.delivery_percent),
+      platform_percent: Number(order.platform_percent),
       delivery_fee_tax: Number(order.delivery_fee_tax || 0).toFixed(2),
       platform_fee_tax: Number(order.platform_fee_tax || 0).toFixed(2),
       tip_amount: Number(order.tip_amount).toFixed(2),
