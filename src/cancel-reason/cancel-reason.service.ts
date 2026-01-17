@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { CreateCancelReasonDto } from './dto/create-cancel-reason.dto';
 import { UpdateCancelReasonDto } from './dto/update-cancel-reason.dto';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -13,82 +13,101 @@ export class CancelReasonService {
   ) { }
 
   async create(createCancelReasonDto: CreateCancelReasonDto) {
-    const orderCancelReason = this.orderCancelReasonRepository.create(
-      createCancelReasonDto,
-    );
+    try {
+      const orderCancelReason = this.orderCancelReasonRepository.create(
+        createCancelReasonDto,
+      );
 
-    const storedReason =
-      this.orderCancelReasonRepository.save(orderCancelReason);
+      const storedReason =
+        await this.orderCancelReasonRepository.save(orderCancelReason);
 
-    return {
-      success: true,
-      message: "Order cancel reason created successfully",
-      stored_reason: storedReason,
-    };
+      return storedReason;
+    } catch (error) {
+      throw new BadRequestException(
+        'Failed to create cancel reason. Please check your data and try again.',
+      );
+    }
   }
 
   async findAll() {
-    const reasons = await this.orderCancelReasonRepository.find();
-    return {
-      success: true,
-      message: "Order cancel reasons retrieved successfully",
-      stored_reason: reasons,
-    };
+    try {
+      const reasons = await this.orderCancelReasonRepository.find({
+        order: { created_at: 'ASC' },
+        select: ['code', 'reason', 'is_rto', 'is_part_cancel', 'cancelled_by'],
+        where: { is_active: true },
+      });
+
+      return reasons;
+    } catch (error) {
+      throw new BadRequestException('Failed to retrieve cancel reasons.');
+    }
   }
 
   async findOne(id: number) {
-    const reason = await this.orderCancelReasonRepository.findOne({
-      where: { id },
-    });
-    if (!reason) {
-      return {
-        success: false,
-        message: "Order cancel reason not found",
-        statusCode: 404
-      };
+    try {
+      const reason = await this.orderCancelReasonRepository.findOne({
+        where: { id, is_active: true },
+        select: ['code', 'reason', 'is_rto', 'is_part_cancel','cancelled_by'],
+      });
+
+      if (!reason) {
+        throw new NotFoundException('Cancel reason not found');
+      }
+
+      return reason;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to retrieve cancel reason.');
     }
-    return {
-      success: true,
-      message: "Order cancel reason retrieved successfully",
-      stored_reason: reason,
-    };
   }
 
   async update(
     id: number,
     updateOrderCancelReasonDto: UpdateCancelReasonDto,
   ) {
-    const reason = await this.orderCancelReasonRepository.findOne({
-      where: { id },
-    });
-    if (!reason) {
-      return { success: false, message: 'Order cancel reason not found', statusCode: 404};
+    try {
+      const reason = await this.orderCancelReasonRepository.findOne({
+        where: { id },
+      });
+
+      if (!reason) {
+        throw new NotFoundException('Cancel reason not found');
+      }
+
+      Object.assign(reason, updateOrderCancelReasonDto);
+      const updatedReason = await this.orderCancelReasonRepository.save(reason);
+
+      return updatedReason;
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(
+        'Failed to update cancel reason. Please check your data and try again.',
+      );
     }
-
-    Object.assign(reason, updateOrderCancelReasonDto);
-    const updatedReason = await this.orderCancelReasonRepository.save(reason);
-
-    return {
-      success: true,
-      message: "Order cancel reason updated successfully",
-      stored_reason: updatedReason,
-    };
   }
 
   async remove(id: number) {
-    const reason = await this.orderCancelReasonRepository.findOne({
-      where: { id },
-    });
-    if (!reason) {
-      return {success: false, message: 'Order cancel reason not found', statusCode: 404};
+    try {
+      const reason = await this.orderCancelReasonRepository.findOne({
+        where: { id },
+      });
+
+      if (!reason) {
+        throw new NotFoundException('Cancel reason not found');
+      }
+
+      await this.orderCancelReasonRepository.delete(id);
+
+      return { message: 'Cancel reason deleted successfully' };
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException('Failed to delete cancel reason.');
     }
-
-    this.orderCancelReasonRepository.delete(id);
-
-    return {
-      success: true,
-      message: 'Order cancel reason deleted successfully',
-      statusCode: 200,
-    };
   }
 }
