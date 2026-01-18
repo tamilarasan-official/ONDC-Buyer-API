@@ -98,14 +98,14 @@ export class DeliveryPricingService {
       // Extract response data matching API structure: { distance, charge, currency, policy_type, estimated_delivery_time }
       const charge = Number(response.data.charge ?? 0);
       const tax = Number(response.data.tax ?? 0);
-      const percent = Number(response.data.percent ?? 0);
+      const percent = Number(response.data.percentage ?? 0);
       const distance = Number(response.data.distance ?? 0);
       const currency = response.data.currency || "INR";
       const policyType = response.data.policy_type;
       const estimatedDeliveryTime = response.data.estimated_delivery_time || null;
 
       this.logger.log(
-        `✅ Delivery charge fetched: ₹${charge} (distance: ${distance}km, currency: ${currency}, policy: ${policyType}, estimated_time: ${estimatedDeliveryTime || "N/A"})`,
+        `✅ Delivery charge fetched: ₹${charge} + ₹${tax} (distance: ${distance}km, currency: ${currency}, policy: ${policyType}, estimated_time: ${estimatedDeliveryTime || "N/A"})`,
       );
 
       return {

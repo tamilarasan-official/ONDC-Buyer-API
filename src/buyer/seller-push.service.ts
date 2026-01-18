@@ -212,19 +212,13 @@ export class SellerPushService {
       }
     }
 
-    let platformFee;
-    const platformFeeConfig = await this.cartService.getPlatformFeeConfig();
-    if (platformFeeConfig.isEnabled) {
-      platformFee = platformFeeConfig.amount;
-    }
-
     const payload: any = {
       contact_number: order.user.phone_number.toString(),
       store_id: order.store.reference_id,
       items: items,
       billing: {
         name: order.user.name || "Customer",
-        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
+        email: order.user.email || order.user.phone_number + "@tazty.in", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
@@ -239,7 +233,7 @@ export class SellerPushService {
       },
       shipping: {
         name: order.user.name || "Customer",
-        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
+        email: order.user.email || order.user.phone_number + "@tazty.in", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
@@ -257,14 +251,17 @@ export class SellerPushService {
       pickup_date_time: "",
       payment_method: order.payment_method,
       payment_status: order.payment_status === "paid" ? "received" : "pending",
-      delivery_charge: Number(order.delivery_fee).toFixed(2),
-      platform_charge: Number(platformFee),
-      delivery_percent: Number(order.delivery_percent),
-      platform_percent: Number(order.platform_percent),
+      delivery_charge: Number(order.delivery_fee || 0).toFixed(2),
+      platform_charge: Number(order.platform_fee || 0).toFixed(2),
+      delivery_percent: Number(order.delivery_percent || 18.00).toFixed(2),
+      platform_percent: Number(order.platform_percent || 18.00).toFixed(2),
       delivery_fee_tax: Number(order.delivery_fee_tax || 0).toFixed(2),
       platform_fee_tax: Number(order.platform_fee_tax || 0).toFixed(2),
-      tip_amount: Number(order.tip_amount).toFixed(2),
-      total_amount: Number(order.total_amount).toFixed(2),
+      discount_amount: Number(order.discount_amount || 0).toFixed(2),
+      tax_amount: Number(order.tax_amount || 0).toFixed(2),
+      total_tax_amount: Number(order.total_tax_amount || 0).toFixed(2),
+      tip_amount: Number(order.tip_amount || 0).toFixed(2),
+      total_amount: Number(order.total_amount || 0).toFixed(2),
       external_order_no: order.order_number,
       order_through: "tazty",
       collected_by: order.payment_method === "cod" ? "seller" : "buyer",

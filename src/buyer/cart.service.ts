@@ -117,12 +117,17 @@ export class CartService {
             summary: {
               subtotal: 0,
               delivery_fee: 0,
+              delivery_fee_tax: 0,
               tax_amount: 0,
               discount_amount: 0,
               tip_amount: 0,
               max_tip_amount: this.MAX_TIP_AMOUNT,
               platform_fee: platformFeeConfig.amount,
+              platform_fee_tax: platformFeeConfig.tax,
               include_platform_fee: platformFeeConfig.isEnabled,
+              platform_percent: 18.00,
+              delivery_percent: 18.00,
+              total_tax_amount: 0,
               final_amount: 0,
               estimated_delivery_time: null,
             },
@@ -350,7 +355,7 @@ export class CartService {
       // For preorder items: store base_price in cart_item, calculate discount separately
       let preorderCoupon: Coupon | null = null;
       let preorderDiscountAmount = 0; // Discount amount for preorder items
-      const finalOrderPrice = 12.0; // Final order price after discount (₹12)
+      const finalOrderPrice = 0.00; // Final order price after discount
 
       if (addToCartDto.is_preorder) {
         this.logger.log(
@@ -541,10 +546,16 @@ export class CartService {
         : {
           subtotal: 0,
           delivery_fee: 0,
+          delivery_percent: 0,
+          delivery_fee_tax: 18.00,
+          platform_percent: 18.00,
+          platform_fee_tax: 0,
+          platform_fee: 0,
           tax_amount: 0,
           discount_amount: 0,
           tip_amount: 0,
           max_tip_amount: null,
+          total_tax_amount: 0,
           final_amount: 0,
           estimated_delivery_time: null,
         };
@@ -747,6 +758,12 @@ export class CartService {
           : {
             subtotal: 0,
             delivery_fee: 0,
+            delivery_fee_tax: 0,
+            platform_fee: 0,
+            platform_fee_tax: 0,
+            platform_percent: 18.00,
+            delivery_percent: 18.00,
+            total_tax_amount: 0,
             tax_amount: 0,
             discount_amount: 0,
             tip_amount: 0,
@@ -958,6 +975,11 @@ export class CartService {
           discount_amount: 0,
           tip_amount: 0,
           max_tip_amount: null,
+          platform_fee: 0,
+          platform_fee_tax: 0,
+          platform_percent: 18.00,
+          delivery_percent: 18.00,
+          total_tax_amount: 0,
           final_amount: 0,
           estimated_delivery_time: null,
         };
@@ -1098,6 +1120,11 @@ export class CartService {
           discount_amount: 0,
           tip_amount: 0,
           max_tip_amount: null,
+          platform_fee: 0,
+          platform_fee_tax: 0,
+          platform_percent: 18.00,
+          delivery_percent: 18.00,
+          total_tax_amount: 0,
           final_amount: 0,
           estimated_delivery_time: null,
         };
@@ -1336,6 +1363,7 @@ export class CartService {
       // Ensure all values are numbers with defaults to prevent NaN
       const subtotal = Number(cart.total_amount || 0);
       const deliveryFee = Number(cart.delivery_fee || 0);
+      const deliveryFeeTax = Number(cart.delivery_fee_tax || 0);
       const taxAmount = Number(cart.tax_amount || 0);
       const discountAmount = Number(cart.discount_amount || 0);
       const tipAmountValue = Number(cart.tip_amount || 0);
@@ -1349,9 +1377,11 @@ export class CartService {
       const finalAmount =
         subtotal +
         deliveryFee +
+        deliveryFeeTax +
         taxAmount +
         tipAmountValue +
-        platformFeeForCalculation -
+        platformFeeForCalculation + 
+        platformFeeConfig.tax -
         discountAmount;
 
       cart.final_amount = Number(finalAmount.toFixed(2));
@@ -1481,6 +1511,8 @@ export class CartService {
     });
 
     let deliveryFee = 0;
+    let deliveryTax = 0;
+    let deliveryPercent = 18.00;
 
     // Calculate delivery fee from API if cart has items and locations are available
     if (cart && cartItems.length > 0) {
@@ -1508,25 +1540,29 @@ export class CartService {
           );
 
           deliveryFee = deliveryInfo.charge;
-
+          deliveryTax = deliveryInfo.tax;
+          deliveryPercent = deliveryInfo.percent;
           this.logger.log(
-            `📦 Delivery fee calculated: ₹${deliveryFee} for cart ${cartId}`,
+            `📦 Delivery fee calculated: ₹${deliveryFee} + ₹${deliveryTax} for cart ${cartId}`,
           );
         } catch (error) {
           this.logger.error(
             `❌ Failed to fetch delivery fee for cart ${cartId}: ${error.message}`,
           );
           deliveryFee = 0; // Fallback to 0 on error
+          deliveryTax = 0;
         }
       } else {
         this.logger.warn(
           `⚠️ Cannot calculate delivery fee: missing store location or user for cart ${cartId}`,
         );
         deliveryFee = 0;
+        deliveryTax = 0;
       }
     } else {
       // Cart is empty or doesn't exist, delivery fee is 0
       deliveryFee = 0;
+      deliveryTax = 0;
     }
 
     // NEW: Check for preorder free delivery BEFORE saving
@@ -1551,6 +1587,7 @@ export class CartService {
             `✅ Preorder has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
           );
           deliveryFee = 0;
+          deliveryTax = 0;
         }
       } else {
         // FALLBACK: Check preorder item's campaign directly
@@ -1565,6 +1602,7 @@ export class CartService {
               `✅ Preorder campaign has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
             );
             deliveryFee = 0;
+            deliveryTax = 0;
           }
         }
       }
@@ -1596,7 +1634,6 @@ export class CartService {
         }
       }
     }
-    taxAmount = Number(taxAmount.toFixed(2));
 
     // Get platform fee configuration
     const platformFeeConfig = await this.getPlatformFee();
@@ -1605,32 +1642,48 @@ export class CartService {
       ? platformFeeConfig.amount
       : 0;
 
+    taxAmount = Number(taxAmount.toFixed(2));
+  
     const finalAmount = Number(
       (
         subtotal +
         deliveryFee +
+        deliveryTax +
         taxAmount +
         tipAmount +
-        platformFeeForCalculation -
+        platformFeeForCalculation +
+        platformFeeConfig.tax -
         discountAmount
       ).toFixed(2),
     );
 
+    const totalTaxAmount = taxAmount + deliveryTax + platformFeeConfig.tax;
+
     this.logger.log(`💰 Cart Calculation Breakdown:`);
     this.logger.log(`  subtotal: ${Number(subtotal)}`);
     this.logger.log(`  deliveryFee: ${Number(deliveryFee)}`);
+    this.logger.log(`  deliveryTax: ${Number(deliveryTax)}`);
     this.logger.log(`  taxAmount: ${Number(taxAmount)}`);
     this.logger.log(`  tipAmount: ${Number(tipAmount)}`);
     this.logger.log(`  platformFee (display): ${platformFeeConfig.amount}`);
     this.logger.log(`  platformFee (included in total): ${platformFeeForCalculation}`);
+    this.logger.log(`  platformFeeTax: ${platformFeeConfig.tax}`);
     this.logger.log(`  discountAmount: ${Number(discountAmount)}`);
-    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} - ${discountAmount} = ${finalAmount}`);
+    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${deliveryTax} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} + ${platformFeeConfig.tax} - ${discountAmount} = ${finalAmount}`);
+    this.logger.log(`  totalTaxAmount: ${Number(totalTaxAmount)}`);
     this.logger.log(`  finalAmount: ${Number(finalAmount)}`);
 
     await this.cartRepository.update(cartId, {
       total_amount: subtotal,
       delivery_fee: deliveryFee,
+      delivery_fee_tax: deliveryTax,
+      delivery_percent: deliveryPercent,
+      platform_fee: platformFeeForCalculation,
+      platform_fee_tax: platformFeeConfig.tax,
+      platform_percent:18.00,
       tax_amount: taxAmount,
+      discount_amount: discountAmount,
+      tip_amount: tipAmount,
       final_amount: finalAmount,
     });
 
@@ -1644,6 +1697,7 @@ export class CartService {
    */
   public async getPlatformFeeConfig(): Promise<{
     amount: number;
+    tax: number;
     isEnabled: boolean;
   }> {
     const includeFee = await this.appSettingsService.getBoolean(
@@ -1654,10 +1708,12 @@ export class CartService {
       "PLATFORM_FEE",
       0,
     );
+    const platformFeeTax = Number(((platformFeeAmount || 0) * 0.18).toFixed(2));
     // Always return the platform fee amount (for display), regardless of includeFee
 
     return {
       amount: Number((platformFeeAmount || 0).toFixed(2)),
+      tax: platformFeeTax,
       isEnabled: includeFee, // This determines if it's included in final_amount
     };
   }
@@ -1668,6 +1724,7 @@ export class CartService {
    */
   private async getPlatformFee(): Promise<{
     amount: number;
+    tax: number;
     isEnabled: boolean;
   }> {
     return await this.getPlatformFeeConfig();
@@ -1677,26 +1734,32 @@ export class CartService {
    * Calculate cart summary
    */
   private async calculateCartSummary(cart: Cart) {
+    
+    let deliveryFee = Number(cart.delivery_fee || 0);
+    let platformFee = Number(cart.platform_fee || 0);
+    let deliveryPercent = Number(cart.delivery_percent || 18.00);
+    let platformPercent = Number(cart.platform_percent || 18.00);
+    let deliveryFeeTax = Number(cart.delivery_fee_tax || 0.00);
+    let platformFeeTax = Number(cart.platform_fee_tax || 0.00);
+
     const subtotal =
       cart.cart_items?.reduce(
         (sum, item) => sum + Number(item.total_price || 0),
         0,
       ) || 0;
-    let deliveryFee = 0;
-    let platformFee = 0;
+
     const platformFeeConfig = await this.getPlatformFee();
     if (platformFeeConfig.isEnabled) {
       platformFee = platformFeeConfig.amount;
+      platformFeeTax = platformFeeConfig.tax;
+      platformPercent = 18.00;
     }
+
     const taxAmount = Number(cart.tax_amount || 0);
     let discountAmount = Number(cart.discount_amount || 0);
     const tipAmount = Number(cart.tip_amount || 0);
 
-    let deliveryPercent = 0;
-    let platformPercent = 18;
-    let deliveryFeeTax = 0;
-    let platformFeeTax = 0;
-
+    
     try {
       if (cart.store && cart.user) {
         // Ensure we have store + location + user
@@ -1723,19 +1786,9 @@ export class CartService {
           // Override delivery fee from partner quote (if present)
           if (deliveryInfo.charge > 0) {
             deliveryFee = Number(deliveryInfo.charge);
+            deliveryFeeTax = Number(deliveryInfo.tax);
+            deliveryPercent = Number(deliveryInfo.percent || 0);
           }
-
-          // % GST from API
-          deliveryPercent = Number(deliveryInfo.percent || 0);
-
-          deliveryFeeTax = Number(
-            ((deliveryFee * deliveryPercent) / 100).toFixed(2),
-          );
-
-          // Apply SAME percent to platform fee
-          platformFeeTax = Number(
-            ((platformFee * platformPercent) / 100).toFixed(2),
-          );
 
           this.logger.log(
             `🚚 Delivery GST from API percent=${deliveryPercent}% | deliveryTax=${deliveryFeeTax} | platformTax=${platformFeeTax}`,
@@ -1746,10 +1799,6 @@ export class CartService {
       this.logger.warn(
         `⚠️ Delivery pricing lookup failed — setting taxes to 0: ${err.message}`,
       );
-
-      // Explicitly zero out instead of fallback %
-      deliveryFeeTax = 0;
-      platformFeeTax = 0;
     }
 
     await this.cartRepository.update(cart.id, {
@@ -1758,6 +1807,7 @@ export class CartService {
       delivery_fee: deliveryFee,
       delivery_fee_tax: deliveryFeeTax,
       platform_fee_tax: platformFeeTax,
+      platform_fee: platformFee,
     });
 
     // NEW: Handle preorder discount and free delivery
@@ -1829,9 +1879,10 @@ export class CartService {
 
           if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
             deliveryFee = 0;
+            deliveryFeeTax = 0;
             // Update cart delivery fee if needed
             if (cart.delivery_fee !== 0) {
-              await this.cartRepository.update(cart.id, { delivery_fee: 0 });
+              await this.cartRepository.update(cart.id, { delivery_fee: deliveryFee, delivery_fee_tax: deliveryFeeTax });
             }
             this.logger.log(
               `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,
@@ -1976,17 +2027,22 @@ export class CartService {
       }
     }
 
+    const totalTaxAmount = taxAmount + deliveryFeeTax + platformFeeConfig.tax;
+
     return {
       subtotal: Number(subtotal.toFixed(2)),
       delivery_fee: Number(deliveryFee.toFixed(2)),
       delivery_fee_tax: deliveryFeeTax,
+      delivery_percent: deliveryPercent,
+      platform_fee: platformFee,
       platform_fee_tax: platformFeeTax,
+      platform_percent: platformPercent,
       tax_amount: Number(taxAmount.toFixed(2)),
       discount_amount: Number(discountAmount.toFixed(2)),
       tip_amount: Number(tipAmount.toFixed(2)),
       max_tip_amount: this.MAX_TIP_AMOUNT,
-      platform_fee: platformFeeConfig.amount,
       include_platform_fee: platformFeeConfig.isEnabled,
+      total_tax_amount: Number(totalTaxAmount.toFixed(2)),
       final_amount: Number(finalAmount.toFixed(2)),
       estimated_delivery_time: estimatedDeliveryTime,
       applied_offer:
@@ -2467,6 +2523,7 @@ export class CartService {
       // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
         cart.delivery_fee = 0;
+        cart.delivery_fee_tax = 0;
       }
 
       await this.cartRepository.save(cart);
@@ -2604,6 +2661,7 @@ export class CartService {
       // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
         cart.delivery_fee = 0;
+        cart.delivery_fee_tax = 0;
       }
 
       await this.cartRepository.save(cart);
@@ -2688,6 +2746,7 @@ export class CartService {
       // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
         cart.delivery_fee = 0;
+        cart.delivery_fee_tax = 0;
       }
 
       await this.cartRepository.save(cart);

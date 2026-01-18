@@ -332,11 +332,25 @@ export class OrderSummaryDto {
   delivery_fee: number;
 
   @ApiProperty({
-    description: "Tax amount",
+    description: "Tax amount (item tax only)",
     example: 107.64,
     type: "number",
   })
   tax_amount: number;
+
+  @ApiProperty({
+    description: "Platform fee amount",
+    example: 5.0,
+    type: "number",
+  })
+  platform_fee: number;
+
+  @ApiProperty({
+    description: "Total tax amount (includes item tax, delivery tax, and platform fee tax)",
+    example: 115.54,
+    type: "number",
+  })
+  total_tax_amount: number;
 
   @ApiProperty({
     description: "Discount amount",
