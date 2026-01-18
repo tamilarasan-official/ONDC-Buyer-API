@@ -332,6 +332,20 @@ export class OrderSummaryDto {
   delivery_fee: number;
 
   @ApiProperty({
+    description: "Delivery fee tax",
+    example: 3.0,
+    type: "number",
+  })
+  delivery_fee_tax: number;
+
+  @ApiProperty({
+    description: "Delivery percent",
+    example: 18.00,
+    type: "number",
+  })
+  delivery_percent: number;
+
+  @ApiProperty({
     description: "Tax amount (item tax only)",
     example: 107.64,
     type: "number",
@@ -344,6 +358,20 @@ export class OrderSummaryDto {
     type: "number",
   })
   platform_fee: number;
+
+  @ApiProperty({
+    description: "Platform fee tax",
+    example: 3.0,
+    type: "number",
+  })
+  platform_fee_tax: number;
+
+  @ApiProperty({
+    description: "Platform percent",
+    example: 18.00,
+    type: "number",
+  })
+  platform_percent: number;
 
   @ApiProperty({
     description: "Total tax amount (includes item tax, delivery tax, and platform fee tax)",
