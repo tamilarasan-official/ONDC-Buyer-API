@@ -29,7 +29,6 @@ import {
   CreatePaymentDto,
   VerifyPaymentDto,
   UpdateOrderStatusDto,
-  CancelOrderDto,
 } from "./dto/order-request.dto";
 import {
   SellerStatusUpdateDto,
@@ -898,22 +897,38 @@ export class OrderService {
   }
 
   /**
-   * Cancel order
+   * Cancel order (Buyer only)
+   * Validates order belongs to authenticated user
    */
   async cancelOrder(
+    cancelOrderDto: OrderCancelDto,
     userId: number,
-    orderId: number,
-    cancelOrderDto: CancelOrderDto,
   ) {
     try {
-      this.logger.log(`❌ Cancelling order ${orderId} for user ${userId}`);
+      this.logger.log(
+        `❌ Cancelling order ${cancelOrderDto.order_number} for user ${userId}`,
+      );
 
       const order = await this.orderRepository.findOne({
-        where: { id: orderId, user: { id: userId } },
+        where: { 
+          order_number: cancelOrderDto.order_number,
+          user: { id: userId }
+        },
       });
 
       if (!order) {
         throw new NotFoundException("Order not found");
+      }
+
+      let blockedStatuses = ["delivered", "cancelled"]
+
+
+      if (cancelOrderDto.cancelled_by === "buyer") {
+        blockedStatuses = ["confirmed", "preparing", "billed", "packed", "agent-assigned", "agent-arrived-restaurant", "picked", "out_for_delivery", "delivered", "cancelled"]
+      }
+      
+      else if(cancelOrderDto.cancelled_by === "seller" || cancelOrderDto.cancelled_by === "system") {
+        blockedStatuses = [ "delivered", "cancelled"]
       }
 
       // Use atomic update with WHERE clause to prevent race conditions
@@ -922,9 +937,9 @@ export class OrderService {
         .createQueryBuilder()
         .update(Order)
         .set({ status: "cancelled" })
-        .where("id = :orderId", { orderId })
+        .where("id = :orderId", { orderId: order.id })
         .andWhere("status NOT IN (:...blockedStatuses)", {
-          blockedStatuses: ["delivered", "cancelled"],
+          blockedStatuses,
         })
         .execute();
 
@@ -932,7 +947,7 @@ export class OrderService {
         // Order was already cancelled/delivered or doesn't exist
         // Re-check to provide appropriate error message
         const currentOrder = await this.orderRepository.findOne({
-          where: { id: orderId },
+          where: { id: order.id },
           select: ["id", "status"],
         });
 
@@ -940,7 +955,7 @@ export class OrderService {
           throw new NotFoundException("Order not found");
         }
 
-        if (["delivered", "cancelled"].includes(currentOrder.status)) {
+        if (blockedStatuses.includes(currentOrder.status)) {
           throw new BadRequestException("Order cannot be cancelled");
         }
 
@@ -948,9 +963,46 @@ export class OrderService {
         throw new BadRequestException("Order cannot be cancelled at this time");
       }
 
+      if(cancelOrderDto.cancelled_by === "buyer") {
+        try {
+          const sellerApiUrl =
+            process.env.SELLER_API_URL || "http://localhost:3000";
+    
+          const invoiceUpdateEndpoint = `${sellerApiUrl}/orders/cancel-by-order`;
+    
+          this.logger.log(`🧪 Testing seller push to: ${invoiceUpdateEndpoint}`);
+    
+          const payload = {
+            external_order_id: order.order_number,
+            cancel_code: cancelOrderDto.code,
+          };
+    
+          const response = await firstValueFrom(
+            this.httpService.post(invoiceUpdateEndpoint, payload, {
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+              },
+              timeout: 10000,
+            }),
+          );
+    
+          this.logger.log(
+            `✅ Test seller push successful. Status: ${response.status}`,
+          );
+        } catch (error) {
+          this.logger.error(`❌ Test seller push failed: ${error.message}`);
+          if (error.response) {
+            this.logger.error(
+              `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
+            );
+          }
+        }
+      }
+
       // NEW: Restore quota for preorder items
       const orderItems = await this.orderItemRepository.find({
-        where: { order: { id: orderId } },
+        where: { order: { id: order.id } },
         relations: ['item'],
       });
 
@@ -958,7 +1010,7 @@ export class OrderService {
         if (orderItem.is_preorder) {
           // Find the coupon redemption for this order
           const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: orderId },
+            where: { order_id: order.id },
             relations: ['coupon'],
           });
 
@@ -985,7 +1037,7 @@ export class OrderService {
 
       // Create tracking entry
       await this.createOrderTracking(
-        orderId,
+        order.id,
         "cancelled",
         `Order cancelled: ${cancelOrderDto.reason || "Customer request"}`,
       );
@@ -996,7 +1048,7 @@ export class OrderService {
         order.payment_method === "online"
       ) {
         // In a real app, you would initiate refund here
-        this.logger.log(`💰 Refund initiated for order ${orderId}`);
+        this.logger.log(`💰 Refund initiated for order ${order.id}`);
       }
 
       return {
@@ -2345,74 +2397,4 @@ export class OrderService {
     return reservation.reservation_token;
   }
 
-  async orderCancel(dto: OrderCancelDto) {
-    const { order_id, code, reason, cancelled_by } = dto;
-
-    const order = await this.orderRepository.findOne({
-      where: { id: order_id },
-      relations: ['tracking'],
-    });
-
-    if (!order) {
-      return { success: false, message: 'Order not found', statusCode: 404 };
-    }
-
-    order.status = 'cancelled';
-    await this.orderRepository.save(order);
-
-    const tracking = this.orderTrackingRepository.create({
-      order,
-      status: 'cancelled',
-      message: 'Order cancelled',
-      cancel_reason: {
-        code,
-        reason,
-        cancelled_by,
-      },
-    });
-
-    await this.orderTrackingRepository.save(tracking);
-
-    try {
-      const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3000";
-
-      const invoiceUpdateEndpoint = `${sellerApiUrl}/orders/cancel-by-order`;
-
-      this.logger.log(`🧪 Testing seller push to: ${invoiceUpdateEndpoint}`);
-
-      const payload = {
-        order_id: order.order_number,
-        status: 'cancelled',
-        cancel_code: code
-      };
-
-      const response = await firstValueFrom(
-        this.httpService.post(invoiceUpdateEndpoint, payload, {
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          timeout: 10000,
-        }),
-      );
-
-      this.logger.log(
-        `✅ Test seller push successful. Status: ${response.status}`,
-      );
-    } catch (error) {
-      this.logger.error(`❌ Test seller push failed: ${error.message}`);
-      if (error.response) {
-        this.logger.error(
-          `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
-        );
-      }
-    }
-
-    return {
-      success: true,
-      message: 'Order cancelled successfully',
-      statusCode: 200,
-    };
-  }
 }

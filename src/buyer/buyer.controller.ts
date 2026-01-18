@@ -64,7 +64,6 @@ import {
   CreatePaymentDto,
   VerifyPaymentDto,
   UpdateOrderStatusDto,
-  CancelOrderDto,
 } from "./dto/order-request.dto";
 import {
   CreateOrderResponseDto,
@@ -1185,55 +1184,114 @@ export class BuyerController {
     return this.orderService.getOrderById(parseInt(orderId), userId);
   }
 
-  @Post("orders/:id/cancel")
+  @Post("orders/cancel")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Cancel order",
     description:
-      "Cancel a pending or confirmed order. Refunds will be processed for paid orders.",
+      "Cancel an order using order number with a specific cancel reason. Use GET /cancel-reason to fetch available cancellation reasons. Refunds will be automatically processed for paid orders. Orders can only be cancelled before they are out for delivery.\n\n**Note:** This endpoint is for buyer cancellations only. Sellers should use the webhook endpoint to update order status to cancelled.",
   })
-  @ApiParam({
-    name: "id",
-    description: "Order ID",
-    example: 1,
-    type: "number",
+  @ApiBody({ 
+    type: OrderCancelDto,
+    description: "Cancel order request with order number, reason code and description from cancel-reason API",
+    examples: {
+      'Duplicate Order': {
+        value: {
+          order_number: "ORD-20250117-001",
+          code: "100",
+          reason: "Placed duplicate order",
+          cancelled_by: "buyer"
+        }
+      },
+      'Ordered by Mistake': {
+        value: {
+          order_number: "ORD-20250117-002",
+          code: "101",
+          reason: "Ordered by mistake",
+          cancelled_by: "buyer"
+        }
+      },
+      'Change Address': {
+        value: {
+          order_number: "ORD-20250117-003",
+          code: "104",
+          reason: "Need to change delivery address",
+          cancelled_by: "buyer"
+        }
+      }
+    }
   })
-  @ApiBody({ type: CancelOrderDto })
   @ApiResponse({
     status: 200,
-    description: "Order cancelled successfully",
+    description: "Order cancelled successfully with refund details",
     schema: {
       type: "object",
       properties: {
         success: { type: "boolean", example: true },
+        statusCode: { type: "number", example: 200 },
         message: { type: "string", example: "Order cancelled successfully" },
+        data: {
+          type: "object",
+          properties: {
+            order_number: { type: "string", example: "ORD-20250117-001" },
+            status: { type: "string", example: "cancelled" },
+            payment_status: { type: "string", example: "refunded" },
+            cancel_reason: {
+              type: "object",
+              properties: {
+                code: { type: "string", example: "100" },
+                reason: { type: "string", example: "Placed duplicate order" },
+                cancelled_by: { type: "string", example: "buyer" }
+              }
+            },
+            refund_amount: { type: "number", example: 566.40 },
+            refund_method: { type: "string", example: "original_payment" },
+            estimated_refund_time: { type: "string", example: "3-5 business days" },
+            cancelled_at: { type: "string", example: "2026-01-17T12:30:00Z" }
+          }
+        },
+        timestamp: { type: "string", example: "2026-01-17T12:30:00Z" }
       },
     },
   })
   @ApiResponse({
     status: 400,
-    description: "Order cannot be cancelled",
+    description: "Order cannot be cancelled - invalid status or already delivered/cancelled",
     schema: {
       type: "object",
       properties: {
         success: { type: "boolean", example: false },
-        message: { type: "string", example: "Order cannot be cancelled" },
-        error: { type: "string", example: "BAD_REQUEST" },
+        statusCode: { type: "number", example: 400 },
+        message: { 
+          type: "string", 
+          example: "Order cannot be cancelled. It is already out for delivery or delivered." 
+        },
+        timestamp: { type: "string", example: "2026-01-17T12:30:00Z" },
+        path: { type: "string", example: "/api/buyer/orders/1/cancel" }
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Order not found or does not belong to user",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 404 },
+        message: { type: "string", example: "Order not found" },
+        timestamp: { type: "string", example: "2026-01-17T12:30:00Z" },
+        path: { type: "string", example: "/api/buyer/orders/cancel" }
       },
     },
   })
   async cancelOrder(
     @Req() req: any,
-    @Param("id") orderId: string,
-    @Body() cancelOrderDto: CancelOrderDto,
+    @Body() cancelOrderDto: OrderCancelDto,
   ) {
     const userId = req.user.id;
-    return this.orderService.cancelOrder(
-      userId,
-      parseInt(orderId),
-      cancelOrderDto,
-    );
+    return this.orderService.cancelOrder(cancelOrderDto, userId);
   }
 
   @Post("payments/create")
@@ -3453,24 +3511,6 @@ export class BuyerController {
       stores: stores,
     };
     return this.storeService.updateStoreTimingStatusFromSeller(storeCloseTimingDto);
-  }
-
-  @Post('orders/order-cancel')
-  @ApiOperation({
-    summary: 'Cancel order (pending only)',
-    description: 'Cancels an order only if it is in pending state',
-  })
-  @ApiBody({ type: CancelOrderDto })
-  @ApiResponse({
-    status: 200,
-    description: 'Order cancelled successfully',
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Order cannot be cancelled',
-  })
-  async orderCancel(@Body() dto: OrderCancelDto) {
-    return this.orderService.orderCancel(dto);
   }
 
 }
