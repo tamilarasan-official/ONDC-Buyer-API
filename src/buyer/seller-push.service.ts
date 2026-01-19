@@ -225,7 +225,7 @@ export class SellerPushService {
     const platformFeeTax = parseFloat(String(order.platform_fee_tax || 0));
     const platformPercent = parseFloat(String(order.platform_percent || 18.00));
     
-    const paymentGatewayCharges = (platformFee * paymentGatewayChargesPercent) / 100;
+    const paymentGatewayCharges = (order.total_amount * paymentGatewayChargesPercent) / 100;
     const buyerappFinderFee = platformFee - paymentGatewayCharges;
     const totalBuyerappCharges = buyerappFinderFee + platformFeeTax;
 
