@@ -219,18 +219,24 @@ export class SellerPushService {
       where: { key: "PAYMENT_GATEWAY_CHARGES_PERCENT" },
     });
     const paymentGatewayChargesPercent = parseFloat(paymentGatewayChargesDetails?.value || '0');
-    const paymentGatewayCharges = (order.platform_fee * paymentGatewayChargesPercent) / 100;
-    const buyerappFinderFee = order.platform_fee - paymentGatewayCharges;
-    const totalBuyerappCharges = buyerappFinderFee + order.platform_fee_tax;
+    
+    // Convert order values to numbers for calculations
+    const platformFee = parseFloat(String(order.platform_fee || 0));
+    const platformFeeTax = parseFloat(String(order.platform_fee_tax || 0));
+    const platformPercent = parseFloat(String(order.platform_percent || 18.00));
+    
+    const paymentGatewayCharges = (platformFee * paymentGatewayChargesPercent) / 100;
+    const buyerappFinderFee = platformFee - paymentGatewayCharges;
+    const totalBuyerappCharges = buyerappFinderFee + platformFeeTax;
 
     const buyer_app_settlement_config = {
-      platform_fee: (order.platform_fee || 0).toFixed(2),
-      platform_fee_tax: (order.platform_fee_tax || 0).toFixed(2),
-      platform_percent: (order.platform_percent || 18.00).toFixed(2),
+      platform_fee: platformFee.toFixed(2),
+      platform_fee_tax: platformFeeTax.toFixed(2),
+      platform_percent: platformPercent.toFixed(2),
       payment_gateway_charges: paymentGatewayCharges.toFixed(2),
       payment_gateway_charges_percent: paymentGatewayChargesPercent.toFixed(2),
       buyer_app_charges: buyerappFinderFee.toFixed(2),
-      buyer_app_charges_tax: (order.platform_fee_tax || 0).toFixed(2),
+      buyer_app_charges_tax: platformFeeTax.toFixed(2),
       total_buyer_app_charges: totalBuyerappCharges.toFixed(2),
       settlement_done_by: "seller",
       settlement_amount: buyerappFinderFee.toFixed(2),
