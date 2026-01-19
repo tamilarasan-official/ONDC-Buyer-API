@@ -59,6 +59,7 @@ import { Banner } from "../banner/entities/banner.entity";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
 import { WebhookEvent } from "../payment/entities/webhook-event.entity";
+import { AppSettings } from "../shared/entities/app-settings.entity";
 
 @Module({
   imports: [
@@ -102,6 +103,7 @@ import { WebhookEvent } from "../payment/entities/webhook-event.entity";
       Coupon,
       CouponRedemption,
       WebhookEvent,
+      AppSettings,
     ]),
     HttpModule.register({
       timeout: 10000,

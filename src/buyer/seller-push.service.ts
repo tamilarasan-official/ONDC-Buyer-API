@@ -6,6 +6,7 @@ import { Repository } from "typeorm";
 import { Order } from "../order/entities/order.entity";
 import { Item } from "../item/entities/item.entity";
 import { Coupon } from "../coupon/entities/coupon.entity";
+import { AppSettings } from "../shared/entities/app-settings.entity";
 import { platform } from "os";
 import { CartService } from "./cart.service";
 
@@ -19,6 +20,8 @@ export class SellerPushService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Coupon)
     private readonly couponRepository: Repository<Coupon>,
+    @InjectRepository(AppSettings)
+    private readonly appSettingsRepository: Repository<AppSettings>,
     private readonly cartService: CartService,
   ) { }
 
@@ -211,6 +214,32 @@ export class SellerPushService {
         }
       }
     }
+    // Get payment gateway charges from app settings
+    const paymentGatewayChargesDetails = await this.appSettingsRepository.findOne({
+      where: { key: "PAYMENT_GATEWAY_CHARGES_PERCENT" },
+    });
+    const paymentGatewayChargesPercent = parseFloat(paymentGatewayChargesDetails?.value || '0');
+    const paymentGatewayCharges = (order.platform_fee * paymentGatewayChargesPercent) / 100;
+    const buyerappFinderFee = order.platform_fee - paymentGatewayCharges;
+    const totalBuyerappCharges = buyerappFinderFee + order.platform_fee_tax;
+
+    const buyer_app_settlement_config = {
+      platform_fee: (order.platform_fee || 0).toFixed(2),
+      platform_fee_tax: (order.platform_fee_tax || 0).toFixed(2),
+      platform_percent: (order.platform_percent || 18.00).toFixed(2),
+      payment_gateway_charges: paymentGatewayCharges.toFixed(2),
+      payment_gateway_charges_percent: paymentGatewayChargesPercent.toFixed(2),
+      buyer_app_charges: buyerappFinderFee.toFixed(2),
+      buyer_app_charges_tax: (order.platform_fee_tax || 0).toFixed(2),
+      total_buyer_app_charges: totalBuyerappCharges.toFixed(2),
+      settlement_done_by: "seller",
+      settlement_amount: buyerappFinderFee.toFixed(2),
+
+      buyer_app_charge_type:'amount',
+      settlement_basis:'delivery',
+      settlement_window:'P3D',
+      withholding_amount:0,
+    }
 
     const payload: any = {
       contact_number: order.user.phone_number.toString(),
@@ -265,6 +294,7 @@ export class SellerPushService {
       external_order_no: order.order_number,
       order_through: "tazty",
       collected_by: order.payment_method === "cod" ? "seller" : "buyer",
+      buyer_app_settlement_config,
     };
 
     // NEW: Add preorder fields if order has preorder items
