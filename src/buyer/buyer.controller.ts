@@ -257,7 +257,7 @@ export class BuyerController {
               data: {
                 current_version: userDeviceToken.version_code,
                 minimum_required_version: minRequiredVersion,
-                play_store_url: 'https://play.google.com/store/apps/details?id=com.tazty.buyer',
+                play_store_url: 'https://play.google.com/store/apps/details?id=in.tazty.buyer',
               },
             });
           }
