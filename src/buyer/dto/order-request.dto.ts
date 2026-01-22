@@ -83,15 +83,38 @@ export class UpdateOrderStatusDto {
   message?: string;
 }
 
+/**
+ * @deprecated Use OrderCancelDto from './cancel-order.dto' instead
+ * This DTO is kept for backward compatibility
+ */
 export class CancelOrderDto {
   @ApiProperty({
-    description: "Cancellation reason",
-    example: "Changed my mind",
+    description: "Cancel reason code from cancel-reason API (e.g., '100', '101', etc.)",
+    example: "100",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  code?: string;
+
+  @ApiProperty({
+    description: "Cancellation reason description",
+    example: "Placed duplicate order",
     required: false,
   })
   @IsOptional()
   @IsString()
   reason?: string;
+
+  @ApiProperty({
+    description: "Who is cancelling the order",
+    example: "buyer",
+    enum: ['buyer', 'seller', 'system'],
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  cancelled_by?: string;
 }
 
 export class CreatePaymentDto {

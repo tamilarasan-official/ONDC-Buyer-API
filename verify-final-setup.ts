@@ -1,19 +1,19 @@
-import dataSource from "./data-source";
+import { AppDataSource } from "./data-source";
 
 async function verifySetup() {
 
   try {
-    await dataSource.initialize();
+    await AppDataSource.initialize();
     console.log("✅ Database connected successfully");
 
     // Check app_settings table
-    const settingsCount = await dataSource.query(
+    const settingsCount = await AppDataSource.query(
       "SELECT COUNT(*) as count FROM app_settings"
     );
     console.log(`\n📊 App Settings Count: ${settingsCount[0].count}`);
 
     // Display all settings
-    const settings = await dataSource.query(
+    const settings = await AppDataSource.query(
       "SELECT key, value, category, is_active FROM app_settings ORDER BY category, key"
     );
     
@@ -26,7 +26,7 @@ async function verifySetup() {
     console.log("─".repeat(80));
 
     // Check migration status
-    const migrations = await dataSource.query(
+    const migrations = await AppDataSource.query(
       "SELECT COUNT(*) as count FROM migrations"
     );
     console.log(`\n✅ Total Migrations Executed: ${migrations[0].count}`);
@@ -36,7 +36,7 @@ async function verifySetup() {
     console.error("❌ Verification failed:", error);
     process.exit(1);
   } finally {
-    await dataSource.destroy();
+    await AppDataSource.destroy();
   }
 }
 

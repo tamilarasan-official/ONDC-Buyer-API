@@ -154,6 +154,7 @@ export class BuyerService {
       this.logger.log(
         `🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`,
       );
+
       const [restaurantsResult, whatsOnYourMind, promotionalBanner, appOperationStatus, homeScreenCardStyle] =
         await Promise.all([
           this.getFeaturedRestaurants(
@@ -168,7 +169,7 @@ export class BuyerService {
           this.getWhatsOnYourMind(vegMode),
           this.getPromotionalBanner(),
           this.appOperationHoursService.checkAppOperationStatus(),
-          this.appSettingsService.get("HOME_SCREEN_RESTAURANT_CARD_STYLE"),
+          this.appSettingsService.getRestaurantCardConfig(),
         ]);
 
       this.logger.log(
@@ -1410,7 +1411,7 @@ export class BuyerService {
       // Check if campaign is active (time-based)
       // Use IST time to ensure consistent timezone comparison with database timestamps
       const now = TimezoneUtil.getCurrentISTTime();
-      const isActive = 
+      const isActive =
         (!preorderCoupon.start_at || now >= preorderCoupon.start_at) &&
         (!preorderCoupon.end_at || now <= preorderCoupon.end_at);
 
@@ -1443,40 +1444,40 @@ export class BuyerService {
 
       // Show preorder info regardless of available slots (even if 0, user should know it's a preorder)
       item.is_preorder_available = true;
-      
+
       this.logger.log(
         `✅ Setting is_preorder_available=true for item_id=${item.id}, store_id=${storeId}, coupon_id=${preorderCoupon.id}`
       );
-      
+
       // Calculate discount_amount so that: slashed_price = base_price - discount_amount = final_order_total
       // Handle both number and string formats for base_price
-      const basePrice = item.price?.base_price 
-        ? (typeof item.price.base_price === 'string' 
-            ? parseFloat(item.price.base_price) 
-            : parseFloat(item.price.base_price.toString()))
+      const basePrice = item.price?.base_price
+        ? (typeof item.price.base_price === 'string'
+          ? parseFloat(item.price.base_price)
+          : parseFloat(item.price.base_price.toString()))
         : 0;
-      
+
       // Final order price to show (12 as per requirement)
       // This is the price after discount, which should equal: base_price - discount_amount
       const finalOrderPrice = 12.0;
-      
+
       let discountAmount = 0;
       let discountAmountString = "0.00";
-      
+
       if (basePrice > 0) {
         // Calculate discount_amount so that: base_price - discount_amount = final_order_price
         // Therefore: discount_amount = base_price - final_order_price
         discountAmount = parseFloat((basePrice - finalOrderPrice).toFixed(2));
         discountAmountString = discountAmount.toFixed(2); // Convert to string with 2 decimal places
-        
+
         // Verify: slashed_price = base_price - discount_amount should equal final_order_price
         const slashedPrice = basePrice - discountAmount;
-        
+
         this.logger.log(
           `💰 Preorder item ${item.id}: base_price=${basePrice}, final_order_price=${finalOrderPrice}, discount_amount=${discountAmountString}, slashed_price=${slashedPrice}`
         );
       }
-      
+
       item.preorder_campaign = {
         id: preorderCoupon.campaign_id || preorderCoupon.id,
         title: preorderCoupon.type_meta?.title || "Preorder",

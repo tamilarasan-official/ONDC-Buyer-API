@@ -6,6 +6,9 @@ import { Repository } from "typeorm";
 import { Order } from "../order/entities/order.entity";
 import { Item } from "../item/entities/item.entity";
 import { Coupon } from "../coupon/entities/coupon.entity";
+import { AppSettings } from "../shared/entities/app-settings.entity";
+import { platform } from "os";
+import { CartService } from "./cart.service";
 
 @Injectable()
 export class SellerPushService {
@@ -17,21 +20,27 @@ export class SellerPushService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Coupon)
     private readonly couponRepository: Repository<Coupon>,
-  ) {}
+    @InjectRepository(AppSettings)
+    private readonly appSettingsRepository: Repository<AppSettings>,
+    private readonly cartService: CartService,
+  ) { }
 
   /**
    * Push order to seller immediately after order creation
    */
   async pushOrderToSeller(order: Order): Promise<void> {
+    console.log('order: ', order);
     try {
       this.logger.log(`🚀 Pushing order ${order.order_number} to seller`);
 
       const payload = await this.transformOrderToSellerPayload(order);
+      console.log('payload: ', payload);
 
       // Get seller API URL from environment
       const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3001";
+        process.env.SELLER_API_URL || "http://localhost:3000";
       const endpoint = `${sellerApiUrl}/orders`;
+      console.log('endpoint: ', endpoint);
 
       this.logger.log(`Sending order to seller endpoint: ${endpoint}`);
       this.logger.log(`📤 SELLER PUSH PAYLOAD:`);
@@ -47,6 +56,7 @@ export class SellerPushService {
           timeout: 10000, // 10 second timeout
         }),
       );
+      console.log('response: seller=============> ', response.data);
 
       this.logger.log(
         `✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`,
@@ -204,6 +214,38 @@ export class SellerPushService {
         }
       }
     }
+    // Get payment gateway charges from app settings
+    const paymentGatewayChargesDetails = await this.appSettingsRepository.findOne({
+      where: { key: "PAYMENT_GATEWAY_CHARGES_PERCENT" },
+    });
+    const paymentGatewayChargesPercent = parseFloat(paymentGatewayChargesDetails?.value || '0');
+    
+    // Convert order values to numbers for calculations
+    const platformFee = parseFloat(String(order.platform_fee || 0));
+    const platformFeeTax = parseFloat(String(order.platform_fee_tax || 0));
+    const platformPercent = parseFloat(String(order.platform_percent || 18.00));
+    
+    const paymentGatewayCharges = (order.total_amount * paymentGatewayChargesPercent) / 100;
+    const buyerappFinderFee = platformFee - paymentGatewayCharges;
+    const totalBuyerappCharges = buyerappFinderFee + platformFeeTax;
+
+    const buyer_app_settlement_config = {
+      platform_fee: platformFee.toFixed(2),
+      platform_fee_tax: platformFeeTax.toFixed(2),
+      platform_percent: platformPercent.toFixed(2),
+      payment_gateway_charges: paymentGatewayCharges.toFixed(2),
+      payment_gateway_charges_percent: paymentGatewayChargesPercent.toFixed(2),
+      buyer_app_charges: buyerappFinderFee.toFixed(2),
+      buyer_app_charges_tax: platformFeeTax.toFixed(2),
+      total_buyer_app_charges: totalBuyerappCharges.toFixed(2),
+      settlement_done_by: "seller",
+      settlement_amount: buyerappFinderFee.toFixed(2),
+
+      buyer_app_charge_type:'amount',
+      settlement_basis:'delivery',
+      settlement_window:'P3D',
+      withholding_amount:0,
+    }
 
     const payload: any = {
       contact_number: order.user.phone_number.toString(),
@@ -211,7 +253,7 @@ export class SellerPushService {
       items: items,
       billing: {
         name: order.user.name || "Customer",
-        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
+        email: order.user.email || order.user.phone_number + "@tazty.in", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
@@ -226,7 +268,7 @@ export class SellerPushService {
       },
       shipping: {
         name: order.user.name || "Customer",
-        email: order.user.email || order.user.phone_number + "@tazty.com", // Use phone as fallback email
+        email: order.user.email || order.user.phone_number + "@tazty.in", // Use phone as fallback email
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
@@ -244,12 +286,21 @@ export class SellerPushService {
       pickup_date_time: "",
       payment_method: order.payment_method,
       payment_status: order.payment_status === "paid" ? "received" : "pending",
-      delivery_charge: Number(order.delivery_fee).toFixed(2),
-      tip_amount: Number(order.tip_amount).toFixed(2),
-      total_amount: Number(order.total_amount).toFixed(2),
+      delivery_charge: Number(order.delivery_fee || 0).toFixed(2),
+      platform_charge: Number(order.platform_fee || 0).toFixed(2),
+      delivery_percent: Number(order.delivery_percent || 18.00).toFixed(2),
+      platform_percent: Number(order.platform_percent || 18.00).toFixed(2),
+      delivery_fee_tax: Number(order.delivery_fee_tax || 0).toFixed(2),
+      platform_fee_tax: Number(order.platform_fee_tax || 0).toFixed(2),
+      discount_amount: Number(order.discount_amount || 0).toFixed(2),
+      tax_amount: Number(order.tax_amount || 0).toFixed(2),
+      total_tax_amount: Number(order.total_tax_amount || 0).toFixed(2),
+      tip_amount: Number(order.tip_amount || 0).toFixed(2),
+      total_amount: Number(order.total_amount || 0).toFixed(2),
       external_order_no: order.order_number,
       order_through: "tazty",
       collected_by: order.payment_method === "cod" ? "seller" : "buyer",
+      buyer_app_settlement_config,
     };
 
     // NEW: Add preorder fields if order has preorder items
