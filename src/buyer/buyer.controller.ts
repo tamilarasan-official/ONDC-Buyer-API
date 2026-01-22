@@ -255,8 +255,8 @@ export class BuyerController {
               message: 'Please update your app to the latest version from the Play Store to continue using Tazty.',
               error: 'FORCE_UPDATE_REQUIRED',
               data: {
-                // current_version: userDeviceToken.version_code,
-                // minimum_required_version: minRequiredVersion,
+                current_version: userDeviceToken.version_code,
+                minimum_required_version: minRequiredVersion,
                 play_store_url: 'https://play.google.com/store/apps/details?id=com.tazty.buyer',
               },
             });
