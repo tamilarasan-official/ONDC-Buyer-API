@@ -15,6 +15,8 @@ import {
   InternalServerErrorException,
   Logger,
   Res,
+  HttpException,
+  HttpStatus,
 } from "@nestjs/common";
 import {
   ApiTags,
@@ -250,7 +252,7 @@ export class BuyerController {
           const minRequiredVersion = parseInt(minVersionSetting.value);
           
           if (userDeviceToken.version_code < minRequiredVersion) {
-            throw new BadRequestException({
+            throw new HttpException({
               success: false,
               message: 'Please update your app to the latest version from the Play Store to continue using Tazty.',
               error: 'FORCE_UPDATE_REQUIRED',
@@ -259,7 +261,7 @@ export class BuyerController {
                 minimum_required_version: minRequiredVersion,
                 play_store_url: 'https://play.google.com/store/apps/details?id=in.tazty.buyer',
               },
-            });
+            }, 426);
           }
         }
       }
