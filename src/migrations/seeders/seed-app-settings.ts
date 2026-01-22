@@ -127,6 +127,12 @@ async function seedAppSettings() {
         category: "app_config",
         description: "Custom message to display when app is temporarily closed (if empty, default message will be used)",
       },
+      {
+        key: "BUYER_APP_ANDROID_MINIMAL_FORCE_UPDATE_VERSION_CODE",
+        value: "1",
+        category: "app_config",
+        description: "Minimum Android app version code required - users with lower versions will be forced to update",
+      },
     ];
 
     console.log(`🌱 Seeding ${settings.length} app settings...`);

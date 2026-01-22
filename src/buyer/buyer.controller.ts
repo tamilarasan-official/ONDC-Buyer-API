@@ -91,6 +91,8 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { WebhookEvent } from "../payment/entities/webhook-event.entity";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
+import { AppSettings } from "../shared/entities/app-settings.entity";
+import { UserDeviceToken } from "../user/entities/user-device-token.entity";
 
 @ApiTags("Buyer App APIs")
 @Controller("api/buyer")
@@ -106,6 +108,10 @@ export class BuyerController {
     private readonly storeService: StoreService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
+    @InjectRepository(AppSettings)
+    private readonly appSettingsRepository: Repository<AppSettings>,
+    @InjectRepository(UserDeviceToken)
+    private readonly userDeviceTokenRepository: Repository<UserDeviceToken>,
   ) { }
 
   @Get("home")
@@ -187,6 +193,26 @@ export class BuyerController {
     },
   })
   @ApiResponse({
+    status: 426,
+    description: "Upgrade Required - App version is outdated and needs to be updated",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Please update your app to the latest version from the Play Store to continue using Tazty." },
+        error: { type: "string", example: "FORCE_UPDATE_REQUIRED" },
+        data: {
+          type: "object",
+          properties: {
+            current_version: { type: "number", example: 1 },
+            minimum_required_version: { type: "number", example: 2 },
+            play_store_url: { type: "string", example: "https://play.google.com/store/apps/details?id=com.tazty.buyer" },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
     status: 500,
     description: "Internal server error",
     schema: {
@@ -207,6 +233,38 @@ export class BuyerController {
     @Req() req?: any,
   ) {
     const userId = req?.user?.id;
+
+    // Check if force update is required for Android users
+    if (userId) {
+      const userDeviceToken = await this.userDeviceTokenRepository.findOne({
+        where: { userId, platform: 'android', is_active: true },
+        order: { updated_at: 'DESC' },
+      });
+
+      if (userDeviceToken && userDeviceToken.version_code) {
+        const minVersionSetting = await this.appSettingsRepository.findOne({
+          where: { key: 'BUYER_APP_ANDROID_MINIMAL_FORCE_UPDATE_VERSION_CODE', is_active: true },
+        });
+
+        if (minVersionSetting) {
+          const minRequiredVersion = parseInt(minVersionSetting.value);
+          
+          if (userDeviceToken.version_code < minRequiredVersion) {
+            throw new BadRequestException({
+              success: false,
+              message: 'Please update your app to the latest version from the Play Store to continue using Tazty.',
+              error: 'FORCE_UPDATE_REQUIRED',
+              data: {
+                // current_version: userDeviceToken.version_code,
+                // minimum_required_version: minRequiredVersion,
+                play_store_url: 'https://play.google.com/store/apps/details?id=com.tazty.buyer',
+              },
+            });
+          }
+        }
+      }
+    }
+
     const lat = deviceLat ? parseFloat(deviceLat) : undefined;
     const lng = deviceLng ? parseFloat(deviceLng) : undefined;
     // Parse veg_mode: accept enum values or "false" for disabled
