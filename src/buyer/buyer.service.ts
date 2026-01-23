@@ -1084,10 +1084,11 @@ export class BuyerService {
           close_start_datetime: LessThanOrEqual(now),
           close_end_datetime: MoreThanOrEqual(now),
         },
+        relations: ['store'], // Load store relation to access store.id
       });
       // Create a Set of restaurant IDs with active close timings for O(1) lookup
       const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store.id),
+        activeCloseTimings.map((ct) => ct.store?.id).filter(id => id !== undefined),
       );
 
       // Calculate ratings and additional data for each restaurant
@@ -1252,21 +1253,21 @@ export class BuyerService {
 
       queryBuilder = queryBuilder
         .select([
-          "i.id",
-          "i.name",
-          "i.short_desc",
-          "i.images",
-          "s.id",
-          "s.name",
-          "s.logo_url",
-          "s.food_type",
-          "s.tags",
-          "p.base_price",
-          "p.currency",
-          "c.id",
-          "c.name",
-          "q.available_count",
-          "q.maximum_count"
+          "i.id AS i_id",
+          "i.name AS i_name",
+          "i.short_desc AS i_short_desc",
+          "i.images AS i_images",
+          "s.id AS s_id",
+          "s.name AS s_name",
+          "s.logo_url AS s_logo_url",
+          "s.food_type AS s_food_type",
+          "s.tags AS s_tags",
+          "p.base_price AS p_base_price",
+          "p.currency AS p_currency",
+          "c.id AS c_id",
+          "c.name AS c_name",
+          "q.available_count AS q_available_count",
+          "q.maximum_count AS q_maximum_count"
         ])
         .addSelect(`(${distanceSubquery})`, "distance");
 
