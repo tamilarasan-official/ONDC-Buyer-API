@@ -7,11 +7,38 @@ import { LoggingInterceptor } from "./shared/logging.interceptor";
 import { SafeClassSerializerInterceptor } from "./shared/safe-class-serializer.interceptor";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import { ConfigService } from "@nestjs/config";
+import * as express from "express";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    bodyParser: false, // Disable NestJS default body parser to use custom Express middleware
+  });
   const configService = app.get(ConfigService);
   const reflector = app.get(Reflector);
+
+  // Create middleware instances
+  const largeBodyParserJson = express.json({ limit: '10mb' });
+  const largeBodyParserUrlencoded = express.urlencoded({ limit: '10mb', extended: true });
+  const defaultBodyParserJson = express.json({ limit: '1mb' });
+  const defaultBodyParserUrlencoded = express.urlencoded({ limit: '1mb', extended: true });
+
+  // Route-specific body parser for /ondc-search/on_search (50MB limit for large ONDC payloads)
+  // Must be added BEFORE the default body parser middleware
+  app.use((req, res, next) => {
+    if (req.path === '/ondc-search/on_search' || req.path === '/ondc-search/on_search/') {
+      largeBodyParserJson(req, res, next);
+    } else {
+      defaultBodyParserJson(req, res, next);
+    }
+  });
+
+  app.use((req, res, next) => {
+    if (req.path === '/ondc-search/on_search' || req.path === '/ondc-search/on_search/') {
+      largeBodyParserUrlencoded(req, res, next);
+    } else {
+      defaultBodyParserUrlencoded(req, res, next);
+    }
+  });
 
   // Global interceptors and pipes
   // Logging interceptor should be first to log all requests
