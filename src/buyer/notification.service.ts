@@ -827,14 +827,14 @@ export class NotificationService {
       out_for_delivery:
         "Your order is out for delivery and will reach you soon.",
       delivered: "Your order has been delivered. Enjoy your meal!",
-      cancelled: "Your order has been cancelled.",
+      cancelled: "Your order has been cancelled. A refund will be processed ASAP.",
       failed: "Your payment could not be processed. Please try again or use a different payment method.",
     };
 
     const baseMessage = baseMessages[status] || message;
 
-    // Don't include estimated delivery time for failed payments
-    if (status === "failed") {
+    // Don't include estimated delivery time for failed payments or cancelled orders
+    if (status === "failed" || status === "cancelled" || status === "delivered") {
       return baseMessage;
     }
 
