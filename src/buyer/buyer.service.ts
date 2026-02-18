@@ -3792,7 +3792,7 @@ export class BuyerService {
 
         // Get nearby restaurants sorted by distance
         // Search restaurants by name OR restaurants that have items matching the query
-        const restaurantSuggestions = await this.storeRepository
+        const restaurantRows = await this.storeRepository
           .createQueryBuilder("s")
           .leftJoin("s.locations", "sl")
           .leftJoin("s.items", "i") // Join with items to search by item names
@@ -3830,12 +3830,22 @@ export class BuyerService {
           })
           .groupBy(
             "s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality, sf.id",
-          ) // Group to avoid duplicates
+          )
           .orderBy("distance", "ASC")
-          .limit(remainingLimit)
+          .limit(remainingLimit * 20) // Fetch extra rows to deduplicate (same store can have multiple locations)
           .getRawMany();
 
-        this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants`);
+        // Deduplicate by store id - keep only the closest location per store (results are already ordered by distance)
+        const seenStoreIds = new Set<number>();
+        const restaurantSuggestions: typeof restaurantRows = [];
+        for (const row of restaurantRows) {
+          if (seenStoreIds.has(row.s_id)) continue;
+          seenStoreIds.add(row.s_id);
+          restaurantSuggestions.push(row);
+          if (restaurantSuggestions.length >= remainingLimit) break;
+        }
+
+        this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants (deduplicated from ${restaurantRows.length} rows)`);
 
         // Add restaurant suggestions
         for (const restaurant of restaurantSuggestions) {
