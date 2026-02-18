@@ -373,6 +373,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store.id),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const storesWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        allStoreIds,
+      );
+
       // Calculate ratings, open status, and delivery times for ALL restaurants
       const allStoresWithRatings = await Promise.all(
         allStores.map(async (store, index) => {
@@ -412,7 +417,12 @@ export class BuyerService {
           );
 
           const hasActiveCloseTiming = storesWithActiveCloseTimings.has(store.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = storesWithHolidayToday.has(store.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: store.s_id,
@@ -1099,6 +1109,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store?.id).filter(id => id !== undefined),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        restaurantIds,
+      );
+
       // Calculate ratings and additional data for each restaurant
       const restaurantsWithData = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -1134,7 +1149,12 @@ export class BuyerService {
           });
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: restaurant.s_id,
@@ -1737,7 +1757,20 @@ export class BuyerService {
               (ct) =>
                 ct.close_start_datetime <= now && ct.close_end_datetime >= now,
             ) || false;
-            return this.expandTimingsToDays(restaurant.timings, hasActiveCloseTiming);
+            // Check if today is a holiday (in any location's schedule_holidays)
+            const istComponents = TimezoneUtil.getISTComponents();
+            const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+            const isHolidayToday =
+              (restaurant.locations || []).some(
+                (loc) =>
+                  Array.isArray(loc.schedule_holidays) &&
+                  loc.schedule_holidays.includes(todayYYYYMMDD),
+              ) || false;
+            return this.expandTimingsToDays(
+              restaurant.timings,
+              hasActiveCloseTiming,
+              isHolidayToday,
+            );
           })()
           : [],
         offers:
@@ -1947,11 +1980,13 @@ export class BuyerService {
    * Days are converted to display format: 1=Sunday, 2=Monday, ..., 7=Saturday
    * @param timings - Array of timing objects with day_from, day_to, time_from, time_to (in database format)
    * @param hasActiveCloseTiming - Whether the store has an active close timing (pre-computed to avoid N+1 queries)
+   * @param isHolidayToday - If true, today's entry will have is_open=false (from location schedule_holidays)
    * @returns Array of expanded timing entries, one per day (in display format)
    */
   private expandTimingsToDays(
     timings: StoreTimings[],
     hasActiveCloseTiming: boolean = false,
+    isHolidayToday: boolean = false,
   ): Array<{
     day: number;
     open_time: string;
@@ -2006,7 +2041,7 @@ export class BuyerService {
         let isOpen = false;
 
         // Check if this day entry is today (compare in display format)
-        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming) {
+        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming && !isHolidayToday) {
           // Check if current time is within operating hours for this timing entry
           const openTime = parseInt(timing.time_from);
           const closeTime = parseInt(timing.time_to);
@@ -3308,6 +3343,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store.id),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        restaurantIds,
+      );
+
       // Process and enrich restaurant data
       const topRatedRestaurants = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -3339,7 +3379,12 @@ export class BuyerService {
           });
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: restaurant.s_id,
@@ -3378,6 +3423,30 @@ export class BuyerService {
       );
       return [];
     }
+  }
+
+  /**
+   * Get store IDs where today (IST) is in any active location's schedule_holidays
+   */
+  private async getStoreIdsWithHolidayToday(
+    storeIds: number[],
+  ): Promise<Set<number>> {
+    if (storeIds.length === 0) return new Set();
+    const istComponents = TimezoneUtil.getISTComponents();
+    const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+    const locations = await this.storeLocationRepository.find({
+      where: { store: { id: In(storeIds) }, status: true },
+      relations: ["store"],
+    });
+    return new Set(
+      locations
+        .filter(
+          (loc) =>
+            Array.isArray(loc.schedule_holidays) &&
+            loc.schedule_holidays.includes(todayYYYYMMDD),
+        )
+        .map((loc) => loc.store.id),
+    );
   }
 
   /**
