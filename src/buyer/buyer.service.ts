@@ -252,7 +252,9 @@ export class BuyerService {
 
       const storesWithLocations = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .where("s.status = :status", { status: true })
         .andWhere("sl.gps_lat IS NOT NULL")
         .andWhere("sl.gps_lng IS NOT NULL")
@@ -275,7 +277,9 @@ export class BuyerService {
 
       const queryBuilder = this.storeRepository
         .createQueryBuilder("s")
-        .innerJoin("s.locations", "sl")
+        .innerJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
           deliveryType: "Delivery",
         })
@@ -640,7 +644,9 @@ export class BuyerService {
       const queryBuilder = this.itemRepository
         .createQueryBuilder("i")
         .leftJoin("i.store", "s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("i.prices", "p")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
@@ -981,7 +987,9 @@ export class BuyerService {
 
       let queryBuilder = this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("s.items", "i")
         .leftJoin("i.prices", "p")
         .leftJoin("i.attributes", "a")
@@ -1193,7 +1201,9 @@ export class BuyerService {
       let queryBuilder = this.itemRepository
         .createQueryBuilder("i")
         .leftJoin("i.store", "s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("i.prices", "p")
         .leftJoin("i.quantities", "q")
         .leftJoin("i.attributes", "a")
@@ -1617,10 +1627,12 @@ export class BuyerService {
           source: "device_location",
         };
 
-      // Get restaurant basic info
+      // Get restaurant basic info (only active locations)
       const restaurant = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoinAndSelect("s.locations", "sl")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("s.timings", "st")
         .leftJoinAndSelect("s.closeTimings", "sct")
         .leftJoinAndSelect("s.offers", "o")
@@ -1712,6 +1724,10 @@ export class BuyerService {
             area_code: location.address_area_code,
             state: location.address_state,
             delivery_radius: location.delivery_radius_km,
+            schedule_holidays:
+              Array.isArray(location.schedule_holidays) ?
+                location.schedule_holidays
+              : [],
           })) || [],
         timings: restaurant.timings
           ? (() => {
@@ -1951,12 +1967,12 @@ export class BuyerService {
 
     // Use IST timezone for current day and time calculation
     const now = TimezoneUtil.getCurrentISTTime();
-    // Convert JavaScript's getDay() to display format (1=Sunday, 7=Saturday)
-    // JS getDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
+    // JS getUTCDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
     // Display format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-    const jsDay = now.getDay();
+    const jsDay = now.getUTCDay();
     const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
 
     for (const timing of timings) {
       // Database format: 1=Monday, 7=Sunday
@@ -2128,10 +2144,11 @@ export class BuyerService {
     }> = [];
 
     // Use IST timezone for current day and time calculation
+    // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
     const now = TimezoneUtil.getCurrentISTTime();
-    const jsDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const jsDay = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
     const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
 
     for (const timing of itemTimings) {
       // Convert database format to display format
@@ -3234,10 +3251,12 @@ export class BuyerService {
         radius,
       );
 
-      // Get restaurants with their average ratings
+      // Get restaurants with their average ratings (only active locations)
       const restaurants = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin(
           RestaurantReview,
           "rr",
@@ -3419,6 +3438,25 @@ export class BuyerService {
         return { isOpen: false };
       }
 
+      // Check location schedule_holidays: if today (IST) is in any active location's holidays, store is closed
+      const istComponents = TimezoneUtil.getISTComponents();
+      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+      const locationsWithHolidays = await this.storeLocationRepository.find({
+        where: { store: { id: storeId }, status: true },
+        select: ["id", "schedule_holidays"],
+      });
+      const isHolidayToday = locationsWithHolidays.some(
+        (loc) =>
+          Array.isArray(loc.schedule_holidays) &&
+          loc.schedule_holidays.includes(todayYYYYMMDD),
+      );
+      if (isHolidayToday) {
+        this.logger.log(
+          `🕐 Store ${storeId} closed today: ${todayYYYYMMDD} is in location schedule_holidays`,
+        );
+        return { isOpen: false };
+      }
+
       return { isOpen: true };
     } catch (error) {
       this.logger.warn(
@@ -3563,8 +3601,9 @@ export class BuyerService {
     peakType?: "lunch" | "dinner";
     multiplier: number;
   } {
-    const hour = now.getHours();
-    const minutes = now.getMinutes();
+    // now from getCurrentISTTime() stores IST in UTC fields - use getUTC* methods
+    const hour = now.getUTCHours();
+    const minutes = now.getUTCMinutes();
     const currentTime = hour * 60 + minutes;
 
     // Lunch peak: 12:00 PM - 2:00 PM (720 - 840 minutes)
@@ -3620,7 +3659,8 @@ export class BuyerService {
     }
 
     // Off-peak hours (early morning, late night, mid-afternoon)
-    const hour = now.getHours();
+    // now from getCurrentISTTime() stores IST in UTC fields - use getUTC* methods
+    const hour = now.getUTCHours();
     if (
       (hour >= 9 && hour < 11) ||
       (hour >= 15 && hour < 18) ||
@@ -3790,11 +3830,13 @@ export class BuyerService {
           `🏪 Searching nearby restaurants with location: ${userLocation.lat}, ${userLocation.lng}`,
         );
 
-        // Get nearby restaurants sorted by distance
+        // Get nearby restaurants sorted by distance (only active locations)
         // Search restaurants by name OR restaurants that have items matching the query
         const restaurantRows = await this.storeRepository
           .createQueryBuilder("s")
-          .leftJoin("s.locations", "sl")
+          .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+            locStatus: true,
+          })
           .leftJoin("s.items", "i") // Join with items to search by item names
           .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
             deliveryType: "Delivery",
@@ -3827,6 +3869,7 @@ export class BuyerService {
           .setParameters({
             userLat: userLocation.lat,
             userLng: userLocation.lng,
+            locStatus: true,
           })
           .groupBy(
             "s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality, sf.id",

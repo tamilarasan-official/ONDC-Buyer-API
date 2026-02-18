@@ -129,6 +129,15 @@ export class RestaurantLocationDto {
     type: "number",
   })
   delivery_radius: number;
+
+  @ApiProperty({
+    description:
+      "Holiday dates when this location is closed (YYYY-MM-DD). If today's date is in this list, the store is closed.",
+    example: ["2025-01-26", "2025-08-15"],
+    type: [String],
+    required: false,
+  })
+  schedule_holidays?: string[];
 }
 
 export class RestaurantOfferDto {
