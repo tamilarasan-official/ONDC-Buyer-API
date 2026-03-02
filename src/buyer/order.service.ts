@@ -931,11 +931,24 @@ export class OrderService {
 
 
       if (cancelOrderDto.cancelled_by === "buyer") {
-        blockedStatuses = ["confirmed", "preparing", "billed", "packed", "agent-assigned", "agent-arrived-restaurant", "picked", "out_for_delivery", "delivered", "cancelled"]
-      }
-      
-      else if(cancelOrderDto.cancelled_by === "seller" || cancelOrderDto.cancelled_by === "system") {
-        blockedStatuses = [ "delivered", "cancelled"]
+        // Allow buyer to cancel when status is "confirmed"
+        // Block only after order moves into preparation / logistics flow
+        blockedStatuses = [
+          "preparing",
+          "billed",
+          "packed",
+          "agent-assigned",
+          "agent-arrived-restaurant",
+          "picked",
+          "out_for_delivery",
+          "delivered",
+          "cancelled",
+        ];
+      } else if (
+        cancelOrderDto.cancelled_by === "seller" ||
+        cancelOrderDto.cancelled_by === "system"
+      ) {
+        blockedStatuses = ["delivered", "cancelled"];
       }
 
       // Use atomic update with WHERE clause to prevent race conditions
@@ -962,12 +975,36 @@ export class OrderService {
           throw new NotFoundException("Order not found");
         }
 
-        if (blockedStatuses.includes(currentOrder.status)) {
-          throw new BadRequestException("Order cannot be cancelled");
+        // Provide more specific reasons why cancellation is not allowed
+        if (currentOrder.status === "delivered") {
+          throw new BadRequestException(
+            "Order has already been delivered and cannot be cancelled.",
+          );
         }
 
-        // This shouldn't happen, but handle it anyway
-        throw new BadRequestException("Order cannot be cancelled at this time");
+        if (currentOrder.status === "cancelled") {
+          throw new BadRequestException(
+            "Order has already been cancelled.",
+          );
+        }
+
+        if (cancelOrderDto.cancelled_by === "buyer") {
+          throw new BadRequestException(
+            `Order is currently in '${currentOrder.status}' status and cannot be cancelled by the buyer.`,
+          );
+        }
+
+        if (
+          cancelOrderDto.cancelled_by === "seller" ||
+          cancelOrderDto.cancelled_by === "system"
+        ) {
+          throw new BadRequestException(
+            `Order is currently in '${currentOrder.status}' status and cannot be cancelled at this stage.`,
+          );
+        }
+
+        // Fallback message (should rarely be hit)
+        throw new BadRequestException("Order cannot be cancelled at this time.");
       }
 
       if(cancelOrderDto.cancelled_by === "buyer") {
@@ -1063,10 +1100,18 @@ export class OrderService {
         message: "Order cancelled successfully",
       };
     } catch (error) {
-      this.logger.error(
-        `❌ Error cancelling order: ${error.message}`,
-        error.stack,
-      );
+      // For expected business / validation errors (4xx), avoid noisy error logs
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        this.logger.warn(
+          `⚠️ Order cancellation rejected: ${error.message}`,
+        );
+      } else {
+        // Log unexpected errors with stack trace
+        this.logger.error(
+          `❌ Error cancelling order: ${error.message}`,
+          error.stack,
+        );
+      }
       throw error;
     }
   }

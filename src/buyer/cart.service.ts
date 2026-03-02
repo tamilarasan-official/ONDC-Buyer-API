@@ -90,7 +90,9 @@ export class CartService {
       const cart = await this.cartRepository
         .createQueryBuilder("c")
         .leftJoinAndSelect("c.store", "s")
-        .leftJoinAndSelect("s.locations", "sl")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("c.cart_items", "ci")
         .leftJoinAndSelect("ci.item", "i")
         .leftJoinAndSelect("i.attributes", "ia")
@@ -1504,11 +1506,14 @@ export class CartService {
       0,
     );
 
-    // Get cart with store and user relations for delivery fee calculation
+    // Get cart with store and user relations for delivery fee calculation (only active locations)
     const cart = await this.cartRepository.findOne({
       where: { id: cartId },
       relations: ["store", "store.locations", "user"],
     });
+    if (cart?.store?.locations) {
+      cart.store.locations = cart.store.locations.filter((l) => l.status !== false);
+    }
 
     let deliveryFee = 0;
     let deliveryTax = 0;
@@ -1762,8 +1767,10 @@ export class CartService {
     
     try {
       if (cart.store && cart.user) {
-        // Ensure we have store + location + user
-        const storeLocations = cart.store.locations || [];
+        // Ensure we have store + location + user (only active locations)
+        const storeLocations = (cart.store.locations || []).filter(
+          (l) => l.status !== false,
+        );
         const storeLocation =
           storeLocations.length > 0 ? storeLocations[0] : null;
 
@@ -1979,12 +1986,16 @@ export class CartService {
           const storeLocations = cart.store.locations || [];
           let storeLocation = storeLocations.length > 0 ? storeLocations[0] : null;
 
-          // If store locations not loaded, fetch them
+          // If store locations not loaded, fetch them (only active locations)
           if (!storeLocation) {
             const cartWithRelations = await this.cartRepository.findOne({
               where: { id: cart.id },
               relations: ["store", "store.locations", "user"],
             });
+            if (cartWithRelations?.store?.locations) {
+              cartWithRelations.store.locations =
+                cartWithRelations.store.locations.filter((l) => l.status !== false);
+            }
 
             if (
               cartWithRelations?.store?.locations &&

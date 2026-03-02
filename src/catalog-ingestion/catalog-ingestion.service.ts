@@ -248,10 +248,25 @@ export class CatalogIngestionService {
     stats.stores_upserted++;
 
     // 2. Upsert Store Locations
-    if (provider.locations) {
+    if (provider.locations && provider.locations.length > 0) {
+      // First, mark all existing locations as inactive
+      await queryRunner.manager.update(
+        StoreLocation,
+        { store: { id: store.id } },
+        { status: false },
+      );
+
+      // Then process current locations and mark them as active
       for (const location of provider.locations) {
         await this.upsertStoreLocation(location, store, queryRunner);
       }
+    } else {
+      // If no locations in payload, mark all existing locations as inactive
+      await queryRunner.manager.update(
+        StoreLocation,
+        { store: { id: store.id } },
+        { status: false },
+      );
     }
 
     // 3. Upsert Store Fulfillments

@@ -252,7 +252,9 @@ export class BuyerService {
 
       const storesWithLocations = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .where("s.status = :status", { status: true })
         .andWhere("sl.gps_lat IS NOT NULL")
         .andWhere("sl.gps_lng IS NOT NULL")
@@ -275,7 +277,9 @@ export class BuyerService {
 
       const queryBuilder = this.storeRepository
         .createQueryBuilder("s")
-        .innerJoin("s.locations", "sl")
+        .innerJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
           deliveryType: "Delivery",
         })
@@ -369,6 +373,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store.id),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const storesWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        allStoreIds,
+      );
+
       // Calculate ratings, open status, and delivery times for ALL restaurants
       const allStoresWithRatings = await Promise.all(
         allStores.map(async (store, index) => {
@@ -408,7 +417,12 @@ export class BuyerService {
           );
 
           const hasActiveCloseTiming = storesWithActiveCloseTimings.has(store.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = storesWithHolidayToday.has(store.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: store.s_id,
@@ -640,7 +654,9 @@ export class BuyerService {
       const queryBuilder = this.itemRepository
         .createQueryBuilder("i")
         .leftJoin("i.store", "s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("i.prices", "p")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
@@ -981,7 +997,9 @@ export class BuyerService {
 
       let queryBuilder = this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("s.items", "i")
         .leftJoin("i.prices", "p")
         .leftJoin("i.attributes", "a")
@@ -1091,6 +1109,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store?.id).filter(id => id !== undefined),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        restaurantIds,
+      );
+
       // Calculate ratings and additional data for each restaurant
       const restaurantsWithData = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -1126,7 +1149,12 @@ export class BuyerService {
           });
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: restaurant.s_id,
@@ -1193,7 +1221,9 @@ export class BuyerService {
       let queryBuilder = this.itemRepository
         .createQueryBuilder("i")
         .leftJoin("i.store", "s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin("i.prices", "p")
         .leftJoin("i.quantities", "q")
         .leftJoin("i.attributes", "a")
@@ -1617,10 +1647,12 @@ export class BuyerService {
           source: "device_location",
         };
 
-      // Get restaurant basic info
+      // Get restaurant basic info (only active locations)
       const restaurant = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoinAndSelect("s.locations", "sl")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("s.timings", "st")
         .leftJoinAndSelect("s.closeTimings", "sct")
         .leftJoinAndSelect("s.offers", "o")
@@ -1712,6 +1744,10 @@ export class BuyerService {
             area_code: location.address_area_code,
             state: location.address_state,
             delivery_radius: location.delivery_radius_km,
+            schedule_holidays:
+              Array.isArray(location.schedule_holidays) ?
+                location.schedule_holidays
+              : [],
           })) || [],
         timings: restaurant.timings
           ? (() => {
@@ -1721,7 +1757,20 @@ export class BuyerService {
               (ct) =>
                 ct.close_start_datetime <= now && ct.close_end_datetime >= now,
             ) || false;
-            return this.expandTimingsToDays(restaurant.timings, hasActiveCloseTiming);
+            // Check if today is a holiday (in any location's schedule_holidays)
+            const istComponents = TimezoneUtil.getISTComponents();
+            const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+            const isHolidayToday =
+              (restaurant.locations || []).some(
+                (loc) =>
+                  Array.isArray(loc.schedule_holidays) &&
+                  loc.schedule_holidays.includes(todayYYYYMMDD),
+              ) || false;
+            return this.expandTimingsToDays(
+              restaurant.timings,
+              hasActiveCloseTiming,
+              isHolidayToday,
+            );
           })()
           : [],
         offers:
@@ -1931,11 +1980,13 @@ export class BuyerService {
    * Days are converted to display format: 1=Sunday, 2=Monday, ..., 7=Saturday
    * @param timings - Array of timing objects with day_from, day_to, time_from, time_to (in database format)
    * @param hasActiveCloseTiming - Whether the store has an active close timing (pre-computed to avoid N+1 queries)
+   * @param isHolidayToday - If true, today's entry will have is_open=false (from location schedule_holidays)
    * @returns Array of expanded timing entries, one per day (in display format)
    */
   private expandTimingsToDays(
     timings: StoreTimings[],
     hasActiveCloseTiming: boolean = false,
+    isHolidayToday: boolean = false,
   ): Array<{
     day: number;
     open_time: string;
@@ -1951,12 +2002,12 @@ export class BuyerService {
 
     // Use IST timezone for current day and time calculation
     const now = TimezoneUtil.getCurrentISTTime();
-    // Convert JavaScript's getDay() to display format (1=Sunday, 7=Saturday)
-    // JS getDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+    // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
+    // JS getUTCDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
     // Display format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-    const jsDay = now.getDay();
+    const jsDay = now.getUTCDay();
     const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
 
     for (const timing of timings) {
       // Database format: 1=Monday, 7=Sunday
@@ -1990,7 +2041,7 @@ export class BuyerService {
         let isOpen = false;
 
         // Check if this day entry is today (compare in display format)
-        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming) {
+        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming && !isHolidayToday) {
           // Check if current time is within operating hours for this timing entry
           const openTime = parseInt(timing.time_from);
           const closeTime = parseInt(timing.time_to);
@@ -2128,10 +2179,11 @@ export class BuyerService {
     }> = [];
 
     // Use IST timezone for current day and time calculation
+    // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
     const now = TimezoneUtil.getCurrentISTTime();
-    const jsDay = now.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const jsDay = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
     const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
-    const currentTime = now.getHours() * 100 + now.getMinutes(); // HHMM format
+    const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
 
     for (const timing of itemTimings) {
       // Convert database format to display format
@@ -3234,10 +3286,12 @@ export class BuyerService {
         radius,
       );
 
-      // Get restaurants with their average ratings
+      // Get restaurants with their average ratings (only active locations)
       const restaurants = await this.storeRepository
         .createQueryBuilder("s")
-        .leftJoin("s.locations", "sl")
+        .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoin(
           RestaurantReview,
           "rr",
@@ -3289,6 +3343,11 @@ export class BuyerService {
         activeCloseTimings.map((ct) => ct.store.id),
       );
 
+      // Batch fetch store IDs where today is a holiday (schedule_holidays)
+      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
+        restaurantIds,
+      );
+
       // Process and enrich restaurant data
       const topRatedRestaurants = await Promise.all(
         restaurants.map(async (restaurant) => {
@@ -3320,7 +3379,12 @@ export class BuyerService {
           });
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(store_timings, hasActiveCloseTiming);
+          const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
+          const timings = this.expandTimingsToDays(
+            store_timings,
+            hasActiveCloseTiming,
+            isHolidayToday,
+          );
 
           return {
             id: restaurant.s_id,
@@ -3359,6 +3423,30 @@ export class BuyerService {
       );
       return [];
     }
+  }
+
+  /**
+   * Get store IDs where today (IST) is in any active location's schedule_holidays
+   */
+  private async getStoreIdsWithHolidayToday(
+    storeIds: number[],
+  ): Promise<Set<number>> {
+    if (storeIds.length === 0) return new Set();
+    const istComponents = TimezoneUtil.getISTComponents();
+    const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+    const locations = await this.storeLocationRepository.find({
+      where: { store: { id: In(storeIds) }, status: true },
+      relations: ["store"],
+    });
+    return new Set(
+      locations
+        .filter(
+          (loc) =>
+            Array.isArray(loc.schedule_holidays) &&
+            loc.schedule_holidays.includes(todayYYYYMMDD),
+        )
+        .map((loc) => loc.store.id),
+    );
   }
 
   /**
@@ -3416,6 +3504,25 @@ export class BuyerService {
         .getOne();
 
       if (specialClosure) {
+        return { isOpen: false };
+      }
+
+      // Check location schedule_holidays: if today (IST) is in any active location's holidays, store is closed
+      const istComponents = TimezoneUtil.getISTComponents();
+      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+      const locationsWithHolidays = await this.storeLocationRepository.find({
+        where: { store: { id: storeId }, status: true },
+        select: ["id", "schedule_holidays"],
+      });
+      const isHolidayToday = locationsWithHolidays.some(
+        (loc) =>
+          Array.isArray(loc.schedule_holidays) &&
+          loc.schedule_holidays.includes(todayYYYYMMDD),
+      );
+      if (isHolidayToday) {
+        this.logger.log(
+          `🕐 Store ${storeId} closed today: ${todayYYYYMMDD} is in location schedule_holidays`,
+        );
         return { isOpen: false };
       }
 
@@ -3563,8 +3670,9 @@ export class BuyerService {
     peakType?: "lunch" | "dinner";
     multiplier: number;
   } {
-    const hour = now.getHours();
-    const minutes = now.getMinutes();
+    // now from getCurrentISTTime() stores IST in UTC fields - use getUTC* methods
+    const hour = now.getUTCHours();
+    const minutes = now.getUTCMinutes();
     const currentTime = hour * 60 + minutes;
 
     // Lunch peak: 12:00 PM - 2:00 PM (720 - 840 minutes)
@@ -3620,7 +3728,8 @@ export class BuyerService {
     }
 
     // Off-peak hours (early morning, late night, mid-afternoon)
-    const hour = now.getHours();
+    // now from getCurrentISTTime() stores IST in UTC fields - use getUTC* methods
+    const hour = now.getUTCHours();
     if (
       (hour >= 9 && hour < 11) ||
       (hour >= 15 && hour < 18) ||
@@ -3790,11 +3899,13 @@ export class BuyerService {
           `🏪 Searching nearby restaurants with location: ${userLocation.lat}, ${userLocation.lng}`,
         );
 
-        // Get nearby restaurants sorted by distance
+        // Get nearby restaurants sorted by distance (only active locations)
         // Search restaurants by name OR restaurants that have items matching the query
-        const restaurantSuggestions = await this.storeRepository
+        const restaurantRows = await this.storeRepository
           .createQueryBuilder("s")
-          .leftJoin("s.locations", "sl")
+          .leftJoin("s.locations", "sl", "sl.status = :locStatus", {
+            locStatus: true,
+          })
           .leftJoin("s.items", "i") // Join with items to search by item names
           .leftJoin("s.fulfillments", "sf", "sf.type = :deliveryType", {
             deliveryType: "Delivery",
@@ -3827,15 +3938,26 @@ export class BuyerService {
           .setParameters({
             userLat: userLocation.lat,
             userLng: userLocation.lng,
+            locStatus: true,
           })
           .groupBy(
             "s.id, sl.gps_lat, sl.gps_lng, sl.address_city, sl.address_locality, sf.id",
-          ) // Group to avoid duplicates
+          )
           .orderBy("distance", "ASC")
-          .limit(remainingLimit)
+          .limit(remainingLimit * 20) // Fetch extra rows to deduplicate (same store can have multiple locations)
           .getRawMany();
 
-        this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants`);
+        // Deduplicate by store id - keep only the closest location per store (results are already ordered by distance)
+        const seenStoreIds = new Set<number>();
+        const restaurantSuggestions: typeof restaurantRows = [];
+        for (const row of restaurantRows) {
+          if (seenStoreIds.has(row.s_id)) continue;
+          seenStoreIds.add(row.s_id);
+          restaurantSuggestions.push(row);
+          if (restaurantSuggestions.length >= remainingLimit) break;
+        }
+
+        this.logger.log(`🏪 Found ${restaurantSuggestions.length} restaurants (deduplicated from ${restaurantRows.length} rows)`);
 
         // Add restaurant suggestions
         for (const restaurant of restaurantSuggestions) {
