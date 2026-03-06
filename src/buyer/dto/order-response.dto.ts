@@ -277,6 +277,59 @@ export class DeliveryAddressDto {
   alternate_phone_number?: string;
 }
 
+export class PickupAddressDto {
+  @ApiProperty({
+    description: "Store location ID",
+    example: 1,
+    type: "number",
+  })
+  id: number;
+
+  @ApiProperty({
+    description: "Pickup location latitude",
+    example: 9.93523,
+    type: "number",
+  })
+  latitude: number;
+
+  @ApiProperty({
+    description: "Pickup location longitude",
+    example: 78.130404,
+    type: "number",
+  })
+  longitude: number;
+
+  @ApiProperty({
+    description: "Locality",
+    example: "Koramangala",
+  })
+  locality: string;
+
+  @ApiProperty({
+    description: "Street address",
+    example: "5th Block",
+  })
+  street: string;
+
+  @ApiProperty({
+    description: "City",
+    example: "Bangalore",
+  })
+  city: string;
+
+  @ApiProperty({
+    description: "Area code / pincode",
+    example: "560034",
+  })
+  area_code: string;
+
+  @ApiProperty({
+    description: "State",
+    example: "KA",
+  })
+  state: string;
+}
+
 export class RestaurantInfoDto {
   @ApiProperty({
     description: "Restaurant ID",
@@ -454,6 +507,14 @@ export class OrderDataDto {
     type: RestaurantInfoDto,
   })
   restaurant: RestaurantInfoDto;
+
+  @ApiProperty({
+    description: "Store pickup address (location with lat/long). Null if store has no active location.",
+    type: PickupAddressDto,
+    nullable: true,
+    required: false,
+  })
+  pickup_address: PickupAddressDto | null;
 
   @ApiProperty({
     description: "Delivery address",

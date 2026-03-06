@@ -118,6 +118,14 @@ export class OrderService {
         throw new BadRequestException("Cart is empty");
       }
 
+      // Validate store is still accepting orders (seller may have closed after user added items)
+      if (!cart.store || cart.store.status === false) {
+        await this.cartRepository.update(cart.id, { is_active: false });
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
+        );
+      }
+
       // CRITICAL: Recalculate cart totals before creating order to ensure latest pricing
       // This ensures platform fee setting changes are reflected immediately
       await this.cartService.recalculateCartTotals(cart.id);
@@ -627,12 +635,16 @@ export class OrderService {
       const order = await this.orderRepository
         .createQueryBuilder("o")
         .leftJoinAndSelect("o.store", "s")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("o.order_items", "oi")
         .leftJoinAndSelect("oi.item", "i")
         .leftJoinAndSelect("o.tracking", "t")
         .leftJoin("o.user", "u")
         .where("o.id = :orderId", { orderId })
         .andWhere("u.id = :userId", { userId })
+        .setParameters({ orderId, userId, locStatus: true })
         .orderBy("t.timestamp", "ASC")
         .getOne();
 
@@ -725,10 +737,14 @@ export class OrderService {
       const orders = await this.orderRepository
         .createQueryBuilder("o")
         .leftJoinAndSelect("o.store", "s")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("o.order_items", "oi")
         .leftJoinAndSelect("oi.item", "i")
         .leftJoinAndSelect("o.tracking", "t")
         .where("o.id IN (:...ids)", { ids })
+        .setParameters({ ids, locStatus: true })
         .orderBy("o.created_at", "DESC")
         .addOrderBy("t.timestamp", "ASC")
         .getMany();
@@ -1558,6 +1574,9 @@ export class OrderService {
       const orders = await this.orderRepository
         .createQueryBuilder("o")
         .leftJoinAndSelect("o.store", "s")
+        .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", {
+          locStatus: true,
+        })
         .leftJoinAndSelect("o.order_items", "oi")
         .leftJoinAndSelect("oi.item", "i")
         .leftJoin("o.user", "u")
@@ -1566,6 +1585,7 @@ export class OrderService {
         .andWhere("o.payment_status = :paymentStatus", {
           paymentStatus: "pending",
         })
+        .setParameters({ userId, status: "created", paymentStatus: "pending", locStatus: true })
         .orderBy("o.created_at", "DESC")
         .getMany();
 
@@ -2118,9 +2138,23 @@ export class OrderService {
         fssai_license: order.store.fssai_license_no,
         gst_number: order.store.gst_number,
       },
-      pickup_address:{
-        
-      },
+      pickup_address: (() => {
+        const locations = order.store?.locations?.filter((l) => l.status !== false) || [];
+        const loc = locations[0];
+        if (!loc) {
+          return null;
+        }
+        return {
+          id: loc.id,
+          latitude: Number(loc.gps_lat),
+          longitude: Number(loc.gps_lng),
+          locality: loc.address_locality,
+          street: loc.address_street,
+          city: loc.address_city,
+          area_code: loc.address_area_code,
+          state: loc.address_state,
+        };
+      })(),
       delivery_address: {
         address1: order.delivery_address_line1,
         address2: order.delivery_address_line2,
