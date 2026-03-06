@@ -181,6 +181,17 @@ export class CartService {
         );
       }
 
+      if (!item.store.status) {
+        // Deactivate user's active cart for this store so cart is cleared
+        await this.cartRepository.update(
+          { user: { id: userId }, store: { id: addToCartDto.restaurant_id }, is_active: true },
+          { is_active: false },
+        );
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
+        );
+      }
+
       // NEW: Validate app operation hours before allowing cart operations
       // This is separate from restaurant timings - it's a global app-level control
       await this.appOperationHoursService.validateAppIsOpen();
@@ -797,6 +808,7 @@ export class CartService {
         .leftJoinAndSelect("ci.cart", "c")
         .leftJoinAndSelect("ci.item", "i")
         .leftJoinAndSelect("i.prices", "p")
+        .leftJoinAndSelect("i.store", "itemStore")
         .leftJoinAndSelect("c.store", "s")
         .leftJoin("c.user", "u")
         .where("ci.id = :cartItemId", {
@@ -808,6 +820,15 @@ export class CartService {
 
       if (!cartItem) {
         throw new NotFoundException("Cart item not found");
+      }
+
+      if (!cartItem.item.store.status) {
+        await this.cartRepository.update(cartItem.cart.id, {
+          is_active: false,
+        });
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
+        );
       }
 
       // Validate quantity is provided for item update

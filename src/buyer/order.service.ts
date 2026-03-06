@@ -139,6 +139,14 @@ export class OrderService {
       // Use updated cart for order creation
       const cartToUse = updatedCart;
 
+      // Validate store is still accepting orders (seller may have closed after user added items)
+      if (!cartToUse.store || cartToUse.store.status === false) {
+        await this.cartRepository.update(cartToUse.id, { is_active: false });
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
+        );
+      }
+
       // NEW: Validate app operation hours before allowing order creation
       // This is separate from restaurant timings - it's a global app-level control
       await this.appOperationHoursService.validateAppIsOpen();
@@ -2091,6 +2099,8 @@ export class OrderService {
       }
     }
 
+    // 
+
     const orderData: any = {
       id: order.id,
       order_number: order.order_number,
@@ -2107,6 +2117,9 @@ export class OrderService {
         logo_url: order.store.logo_url,
         fssai_license: order.store.fssai_license_no,
         gst_number: order.store.gst_number,
+      },
+      pickup_address:{
+        
       },
       delivery_address: {
         address1: order.delivery_address_line1,
