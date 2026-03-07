@@ -38,6 +38,7 @@ import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
 import { Coupon } from "../coupon/entities/coupon.entity";
+import { CouponRedemption, RedemptionStatus } from "../coupon/entities/coupon-redemption.entity";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType, CouponStatus, ValueType } from "../coupon/entities/coupon.entity";
 import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
@@ -95,6 +96,8 @@ export class BuyerService {
     private readonly bannerRepository: Repository<Banner>,
     @InjectRepository(Coupon)
     private readonly couponRepository: Repository<Coupon>,
+    @InjectRepository(CouponRedemption)
+    private readonly couponRedemptionRepository: Repository<CouponRedemption>,
     private readonly redisCouponService: RedisCouponService,
     private readonly locationService: LocationService,
     private readonly appOperationHoursService: AppOperationHoursService,
@@ -1385,11 +1388,14 @@ export class BuyerService {
   }
 
   /**
-   * Enrich item with preorder campaign info
+   * Enrich item with preorder campaign info.
+   * If userId is provided and user has already reached user_usage_limit for this preorder coupon,
+   * the item is shown as a normal product (no is_preorder_available / preorder_campaign).
    */
   private async enrichItemWithPreorderInfo(
     item: any,
-    storeId: number
+    storeId: number,
+    userId?: number,
   ): Promise<void> {
     try {
       this.logger.debug(
@@ -1458,6 +1464,25 @@ export class BuyerService {
           `⏰ Preorder campaign ${preorderCoupon.id} is not active (time-based check failed) for item_id=${item.id}`
         );
         return;
+      }
+
+      // If user is logged in, check if they have already reached user_usage_limit for this coupon.
+      // If so, show item as normal product (no preorder) for this user.
+      if (userId != null) {
+        const userRedeemedCount = await this.couponRedemptionRepository.count({
+          where: {
+            coupon_id: preorderCoupon.id,
+            user_id: userId,
+            status: In([RedemptionStatus.REDEEMED]),
+          },
+        });
+        const limit = preorderCoupon.user_usage_limit ?? 1;
+        if (userRedeemedCount >= limit) {
+          this.logger.log(
+            `ℹ️ User ${userId} has already redeemed preorder coupon ${preorderCoupon.id} (${userRedeemedCount}/${limit}). Showing item ${item.id} as normal product.`
+          );
+          return;
+        }
       }
 
       // Get available slots
@@ -1844,6 +1869,7 @@ export class BuyerService {
           dietaryPreference,
           favoriteItemIds,
           restaurant, // Pass store information for food_type and tags
+          userId, // Pass userId so preorder is hidden for users who already redeemed
         );
 
         restaurantDetails.categories = categorizedItems;
@@ -2422,6 +2448,7 @@ export class BuyerService {
         restaurantId,
         menuParams,
         favoriteItemIds,
+        userId,
       );
 
       // Calculate totals
@@ -2484,6 +2511,7 @@ export class BuyerService {
     restaurantId: number,
     menuParams: any,
     favoriteItemIds: Set<number> = new Set(),
+    userId?: number,
   ) {
     try {
       let categoryQuery = this.categoryRepository
@@ -2519,6 +2547,7 @@ export class BuyerService {
             category.id,
             menuParams,
             favoriteItemIds,
+            userId,
           );
 
           return {
@@ -2554,6 +2583,7 @@ export class BuyerService {
     categoryId: number,
     params: any,
     favoriteItemIds: Set<number> = new Set(),
+    userId?: number,
   ) {
     try {
       // Get all items in category (including variant items)
@@ -2653,8 +2683,8 @@ export class BuyerService {
           dietary_preference: dietaryAttr?.attribute_value || null,
         };
 
-        // NEW: Enrich with preorder info
-        await this.enrichItemWithPreorderInfo(menuItem, restaurantId);
+        // NEW: Enrich with preorder info (pass userId so redeemed users see item as normal)
+        await this.enrichItemWithPreorderInfo(menuItem, restaurantId, userId);
 
         processedItems.push(menuItem);
       }
@@ -2789,8 +2819,8 @@ export class BuyerService {
           dietary_preference: dietaryAttr?.attribute_value || null,
         };
 
-        // NEW: Enrich with preorder info
-        await this.enrichItemWithPreorderInfo(variantMenuItem, restaurantId);
+        // NEW: Enrich with preorder info (pass userId so redeemed users see item as normal)
+        await this.enrichItemWithPreorderInfo(variantMenuItem, restaurantId, userId);
 
         processedItems.push(variantMenuItem);
       }
@@ -4092,7 +4122,8 @@ export class BuyerService {
   }
 
   /**
-   * Get categorized items for a restaurant with filtering and sorting
+   * Get categorized items for a restaurant with filtering and sorting.
+   * userId is optional; when provided, preorder items are hidden as preorder for users who have already redeemed (user_usage_limit).
    */
   private async getCategorizedItems(
     restaurantId: number,
@@ -4100,6 +4131,7 @@ export class BuyerService {
     dietaryPreference?: string,
     favoriteItemIds: Set<number> = new Set(),
     store?: any,
+    userId?: number,
   ) {
     try {
       this.logger.log(
@@ -4275,8 +4307,8 @@ export class BuyerService {
             timings: itemTimings,
           };
 
-          // NEW: Enrich with preorder info
-          await this.enrichItemWithPreorderInfo(restaurantItem, restaurantId);
+          // NEW: Enrich with preorder info (pass userId so redeemed users see item as normal)
+          await this.enrichItemWithPreorderInfo(restaurantItem, restaurantId, userId);
 
           processedItems.push(restaurantItem);
         }
@@ -4414,8 +4446,8 @@ export class BuyerService {
             is_favorite: favoriteItemIds.has(baseItem.id),
           };
 
-          // NEW: Enrich with preorder info
-          await this.enrichItemWithPreorderInfo(variantRestaurantItem, restaurantId);
+          // NEW: Enrich with preorder info (pass userId so redeemed users see item as normal)
+          await this.enrichItemWithPreorderInfo(variantRestaurantItem, restaurantId, userId);
 
           processedItems.push(variantRestaurantItem);
         }
