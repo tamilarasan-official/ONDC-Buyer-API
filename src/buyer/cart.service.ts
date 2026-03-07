@@ -1774,21 +1774,24 @@ export class CartService {
     tax: number;
     isEnabled: boolean;
   }> {
-    const includeFee = await this.appSettingsService.getBoolean(
+    // Read directly from DB so GET cart always reflects current platform fee
+    // (avoids stale cache when admin updates fee after cart was created)
+    const includeFeeRaw = await this.appSettingsService.getFromDb(
       "INCLUDE_PLATFORM_FEE",
-      false,
     );
-    const platformFeeAmount = await this.appSettingsService.getNumber(
+    const includeFee =
+      includeFeeRaw?.toLowerCase() === "true" || includeFeeRaw === "1";
+    const platformFeeRaw = await this.appSettingsService.getFromDb(
       "PLATFORM_FEE",
-      0,
     );
+    const platformFeeAmount =
+      platformFeeRaw != null ? parseFloat(platformFeeRaw) : 0;
     const platformFeeTax = Number(((platformFeeAmount || 0) * 0.18).toFixed(2));
-    // Always return the platform fee amount (for display), regardless of includeFee
 
     return {
       amount: Number((platformFeeAmount || 0).toFixed(2)),
       tax: platformFeeTax,
-      isEnabled: includeFee, // This determines if it's included in final_amount
+      isEnabled: includeFee,
     };
   }
 
@@ -1826,6 +1829,10 @@ export class CartService {
     if (platformFeeConfig.isEnabled) {
       platformFee = platformFeeConfig.amount;
       platformFeeTax = platformFeeConfig.tax;
+      platformPercent = 18.00;
+    }else{
+      platformFee = 0;
+      platformFeeTax = 0;
       platformPercent = 18.00;
     }
 
@@ -1979,12 +1986,12 @@ export class CartService {
       });
 
       if (coupon && coupon.type === CouponType.PREORDER) {
-        // If free delivery is included, set delivery fee to 0
+        // If free delivery is included, set delivery fee and tax to 0
         if (coupon.type_meta?.free_delivery === true) {
           deliveryFee = 0;
-          // Update cart delivery fee if needed
-          if (cart.delivery_fee !== 0) {
-            await this.cartRepository.update(cart.id, { delivery_fee: 0 });
+          deliveryFeeTax = 0;
+          if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
+            await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
           }
         }
       }
@@ -2001,9 +2008,8 @@ export class CartService {
           if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
             deliveryFee = 0;
             deliveryFeeTax = 0;
-            // Update cart delivery fee if needed
-            if (cart.delivery_fee !== 0) {
-              await this.cartRepository.update(cart.id, { delivery_fee: deliveryFee, delivery_fee_tax: deliveryFeeTax });
+            if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
+              await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
             }
             this.logger.log(
               `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,
