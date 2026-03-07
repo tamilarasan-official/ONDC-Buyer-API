@@ -1711,9 +1711,12 @@ export class CartService {
 
     // Get platform fee configuration
     const platformFeeConfig = await this.getPlatformFee();
-    // Only include platform fee in calculation if enabled
+    // Only include platform fee and its tax in calculation when enabled
     const platformFeeForCalculation = platformFeeConfig.isEnabled
       ? platformFeeConfig.amount
+      : 0;
+    const platformFeeTaxForCalculation = platformFeeConfig.isEnabled
+      ? platformFeeConfig.tax
       : 0;
 
     taxAmount = Number(taxAmount.toFixed(2));
@@ -1726,12 +1729,12 @@ export class CartService {
         taxAmount +
         tipAmount +
         platformFeeForCalculation +
-        platformFeeConfig.tax -
+        platformFeeTaxForCalculation -
         discountAmount
       ).toFixed(2),
     );
 
-    const totalTaxAmount = taxAmount + deliveryTax + platformFeeConfig.tax;
+    const totalTaxAmount = taxAmount + deliveryTax + platformFeeTaxForCalculation;
 
     this.logger.log(`💰 Cart Calculation Breakdown:`);
     this.logger.log(`  subtotal: ${Number(subtotal)}`);
@@ -1741,9 +1744,9 @@ export class CartService {
     this.logger.log(`  tipAmount: ${Number(tipAmount)}`);
     this.logger.log(`  platformFee (display): ${platformFeeConfig.amount}`);
     this.logger.log(`  platformFee (included in total): ${platformFeeForCalculation}`);
-    this.logger.log(`  platformFeeTax: ${platformFeeConfig.tax}`);
+    this.logger.log(`  platformFeeTax: ${platformFeeTaxForCalculation}`);
     this.logger.log(`  discountAmount: ${Number(discountAmount)}`);
-    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${deliveryTax} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} + ${platformFeeConfig.tax} - ${discountAmount} = ${finalAmount}`);
+    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${deliveryTax} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} + ${platformFeeTaxForCalculation} - ${discountAmount} = ${finalAmount}`);
     this.logger.log(`  totalTaxAmount: ${Number(totalTaxAmount)}`);
     this.logger.log(`  finalAmount: ${Number(finalAmount)}`);
 
@@ -1753,7 +1756,7 @@ export class CartService {
       delivery_fee_tax: deliveryTax,
       delivery_percent: deliveryPercent,
       platform_fee: platformFeeForCalculation,
-      platform_fee_tax: platformFeeConfig.tax,
+      platform_fee_tax: platformFeeTaxForCalculation,
       platform_percent:18.00,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
@@ -1774,13 +1777,14 @@ export class CartService {
     tax: number;
     isEnabled: boolean;
   }> {
-    // Read directly from DB so GET cart always reflects current platform fee
+    // Read directly from DB so GET cart and create order use current platform fee
     // (avoids stale cache when admin updates fee after cart was created)
-    const includeFeeRaw = await this.appSettingsService.getFromDb(
-      "INCLUDE_PLATFORM_FEE",
+    const includeFeeRaw =
+      (await this.appSettingsService.getFromDb("INCLUDE_PLATFORM_FEE"))?.trim() ??
+      "";
+    const includeFee = ["true", "1", "yes", "on"].includes(
+      includeFeeRaw.toLowerCase(),
     );
-    const includeFee =
-      includeFeeRaw?.toLowerCase() === "true" || includeFeeRaw === "1";
     const platformFeeRaw = await this.appSettingsService.getFromDb(
       "PLATFORM_FEE",
     );
