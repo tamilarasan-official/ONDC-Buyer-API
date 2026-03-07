@@ -39,7 +39,7 @@ import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference
 import { VegMode } from "../shared/enums/veg-mode.enum";
 import { Coupon } from "../coupon/entities/coupon.entity";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
-import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
+import { CouponType, CouponStatus, ValueType } from "../coupon/entities/coupon.entity";
 import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
@@ -1480,7 +1480,7 @@ export class BuyerService {
         `✅ Setting is_preorder_available=true for item_id=${item.id}, store_id=${storeId}, coupon_id=${preorderCoupon.id}`
       );
 
-      // Calculate discount_amount so that: slashed_price = base_price - discount_amount = final_order_total
+      // Calculate discount_amount from coupon value/value_type so that: slashed_price = base_price - discount_amount = final_order_price
       // Handle both number and string formats for base_price
       const basePrice = item.price?.base_price
         ? (typeof item.price.base_price === 'string'
@@ -1488,24 +1488,28 @@ export class BuyerService {
           : parseFloat(item.price.base_price.toString()))
         : 0;
 
-      // Final order price to show (12 as per requirement)
-      // This is the price after discount, which should equal: base_price - discount_amount
-      const finalOrderPrice = 12.0;
+      const couponValue = Number(preorderCoupon.value ?? 0);
+      const valueType = (preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType;
+      const maxDiscount = preorderCoupon.max_discount_amount != null ? Number(preorderCoupon.max_discount_amount) : Infinity;
 
       let discountAmount = 0;
       let discountAmountString = "0.00";
+      let finalOrderPrice = basePrice;
 
       if (basePrice > 0) {
-        // Calculate discount_amount so that: base_price - discount_amount = final_order_price
-        // Therefore: discount_amount = base_price - final_order_price
-        discountAmount = parseFloat((basePrice - finalOrderPrice).toFixed(2));
-        discountAmountString = discountAmount.toFixed(2); // Convert to string with 2 decimal places
-
-        // Verify: slashed_price = base_price - discount_amount should equal final_order_price
-        const slashedPrice = basePrice - discountAmount;
+        if (valueType === ValueType.PERCENT) {
+          const percentDiscount = (basePrice * couponValue) / 100;
+          discountAmount = Math.min(percentDiscount, maxDiscount, basePrice);
+        } else {
+          // RUPEES: flat discount, capped at item price
+          discountAmount = Math.min(couponValue, basePrice);
+        }
+        discountAmount = parseFloat(Math.max(0, discountAmount).toFixed(2));
+        discountAmountString = discountAmount.toFixed(2);
+        finalOrderPrice = parseFloat((basePrice - discountAmount).toFixed(2));
 
         this.logger.log(
-          `💰 Preorder item ${item.id}: base_price=${basePrice}, final_order_price=${finalOrderPrice}, discount_amount=${discountAmountString}, slashed_price=${slashedPrice}`
+          `💰 Preorder item ${item.id}: base_price=${basePrice}, coupon value=${couponValue} ${valueType}, discount_amount=${discountAmountString}, final_order_price=${finalOrderPrice}`
         );
       }
 
