@@ -369,10 +369,10 @@ export class CartService {
       }
 
       // NEW: Preorder validation and get coupon BEFORE calculating price
-      // For preorder items: store base_price in cart_item, calculate discount separately
+      // For preorder items: store base_price in cart_item, discount from coupon value/value_type
       let preorderCoupon: Coupon | null = null;
-      let preorderDiscountAmount = 0; // Discount amount for preorder items
-      const finalOrderPrice = 0.00; // Final order price after discount
+      let preorderDiscountAmount = 0; // Discount amount for preorder items (line total)
+      let finalOrderPrice = 0; // Total final price for this line after discount
 
       if (addToCartDto.is_preorder) {
         this.logger.log(
@@ -392,16 +392,40 @@ export class CartService {
           `✅ Preorder validation passed: coupon_id=${preorderCoupon.id}, code=${preorderCoupon.code}`,
         );
 
-        // Calculate discount amount: (Subtotal + Tax) - Final
-        // For preorder: discount = (base_price + tax_on_base_price) - final_order_price
-        // Tax is calculated on base_price (subtotal), not on final_order_price
+        // Compute final order price per unit from coupon (same logic as calculateCartSummary / buyer.service)
+        const couponValue = Number(preorderCoupon.value ?? 0);
+        const valueType = (preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType;
+        const maxDiscount =
+          preorderCoupon.max_discount_amount != null
+            ? Number(preorderCoupon.max_discount_amount)
+            : Infinity;
+
+        let itemDiscountPerUnit = 0;
+        if (unitPrice > 0) {
+          if (valueType === ValueType.PERCENT) {
+            const percentDiscount = (unitPrice * couponValue) / 100;
+            itemDiscountPerUnit = Math.min(percentDiscount, maxDiscount, unitPrice);
+          } else {
+            itemDiscountPerUnit = Math.min(couponValue, unitPrice);
+          }
+          itemDiscountPerUnit = Math.max(0, parseFloat(itemDiscountPerUnit.toFixed(2)));
+        }
+
+        const finalOrderPricePerUnit = Math.max(0, unitPrice - itemDiscountPerUnit);
+        finalOrderPrice = parseFloat(
+          (finalOrderPricePerUnit * addToCartDto.quantity).toFixed(2),
+        );
+
+        // Discount for cart = (Subtotal + Tax) - Final; tax is on full subtotal
         const taxRate = item.tax_rate || 0;
-        const taxOnSubtotal = (unitPrice * taxRate) / 100;
-        const subtotalWithTax = unitPrice + taxOnSubtotal;
-        preorderDiscountAmount = parseFloat((subtotalWithTax - finalOrderPrice).toFixed(2));
+        const taxOnSubtotal = (unitPrice * addToCartDto.quantity * taxRate) / 100;
+        const subtotalWithTax = unitPrice * addToCartDto.quantity + taxOnSubtotal;
+        preorderDiscountAmount = parseFloat(
+          Math.max(0, subtotalWithTax - finalOrderPrice).toFixed(2),
+        );
 
         this.logger.log(
-          `💰 Preorder item pricing: base_price=₹${unitPrice}, tax_rate=${taxRate}%, tax_on_subtotal=₹${taxOnSubtotal}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount} (calculated as: (₹${unitPrice} + ₹${taxOnSubtotal}) - ₹${finalOrderPrice})`,
+          `💰 Preorder item pricing: base_price=₹${unitPrice}, coupon value=${couponValue} ${valueType}, final_per_unit=₹${finalOrderPricePerUnit}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount}`,
         );
       }
 
@@ -446,9 +470,8 @@ export class CartService {
             await this.removeCoupon(userId);
           }
 
-          // Calculate preorder discount amount for the cart
-          // Discount = (Subtotal + Tax) - Final (already calculated in preorderDiscountAmount)
-          const preorderDiscountForCart = preorderDiscountAmount * addToCartDto.quantity;
+          // Preorder discount for cart (already total for this line, includes quantity)
+          const preorderDiscountForCart = preorderDiscountAmount;
 
           // Apply preorder coupon with correct cart total and discount
           await this.applyPreorderCouponWithDiscount(
