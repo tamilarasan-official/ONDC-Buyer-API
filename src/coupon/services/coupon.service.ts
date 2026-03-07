@@ -1055,11 +1055,15 @@ export class CouponService {
 
   /**
    * Get current quota for a coupon
+   * - current_quota: remaining slots from Redis (used by reserve/release)
+   * - global_usage_limit: max limit from DB (coupon config)
+   * - redeemed_count: number of successful redemptions from DB (paid uses)
    */
   async getCouponQuota(couponId: number): Promise<{
     coupon_id: number;
     current_quota: number | null;
     global_usage_limit: number | null;
+    redeemed_count: number;
   }> {
     const coupon = await this.couponRepository.findOne({
       where: { id: couponId },
@@ -1071,11 +1075,16 @@ export class CouponService {
     }
 
     const currentQuota = await this.redisCouponService.getQuota(couponId);
+    const counter = await this.counterRepository.findOne({
+      where: { coupon_id: couponId },
+      select: ["redeemed_count"],
+    });
 
     return {
       coupon_id: couponId,
       current_quota: currentQuota,
       global_usage_limit: coupon.global_usage_limit ?? null,
+      redeemed_count: counter?.redeemed_count ?? 0,
     };
   }
 
@@ -1117,7 +1126,8 @@ export class CouponService {
   }
 
   /**
-   * Reset quota for a coupon to a specific value
+   * Reset quota for a coupon to a specific value.
+   * Overwrites Redis quota only; DB global_usage_limit is unchanged.
    */
   async resetCouponQuota(
     couponId: number,
@@ -1126,7 +1136,12 @@ export class CouponService {
     coupon_id: number;
     previous_quota: number | null;
     new_quota: number;
+    global_usage_limit: number | null;
   }> {
+    if (newQuota < 0) {
+      throw new BadRequestException("quota must not be less than 0");
+    }
+
     const coupon = await this.couponRepository.findOne({
       where: { id: couponId },
       select: ["id", "global_usage_limit"],
@@ -1139,6 +1154,15 @@ export class CouponService {
     const previousQuota = await this.redisCouponService.getQuota(couponId);
     await this.redisCouponService.initializeQuota(couponId, newQuota);
 
+    if (
+      coupon.global_usage_limit != null &&
+      newQuota > Number(coupon.global_usage_limit)
+    ) {
+      this.logger.warn(
+        `⚠️ Reset quota ${newQuota} for coupon ${couponId} exceeds DB global_usage_limit (${coupon.global_usage_limit}). Redis updated; DB limit unchanged.`,
+      );
+    }
+
     this.logger.log(
       `✅ Reset quota for coupon ${couponId}: ${previousQuota} → ${newQuota}`,
     );
@@ -1147,6 +1171,7 @@ export class CouponService {
       coupon_id: couponId,
       previous_quota: previousQuota,
       new_quota: newQuota,
+      global_usage_limit: coupon.global_usage_limit ?? null,
     };
   }
 }
