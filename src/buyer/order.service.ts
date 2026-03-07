@@ -409,31 +409,43 @@ export class OrderService {
 
       await this.orderItemRepository.save(orderItems);
 
-      // NEW: If preorder, redeem coupon after order is created
-      // FIX: Only redeem for COD orders. Online payment orders will be redeemed on payment success.
-      const preorderCartItemsForRedemption = cartToUse.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
+      // Link preorder CouponRedemption to order (so verifyPayment/webhook can find by order_id).
+      // COD: redeem immediately. Online: redeem only on payment success (verifyPayment or webhook).
+      const preorderCartItemsWithToken = cartToUse.cart_items.filter(
+        (ci) => ci.is_preorder && ci.preorder_reservation_token,
+      );
 
-      for (const cartItem of preorderCartItemsForRedemption) {
-        if (cartItem.preorder_reservation_token) {
-          // Only redeem for COD orders immediately
-          if (createOrderDto.payment_method === "cod") {
-            try {
-              await this.couponService.redeemCoupon({
-                reservation_token: cartItem.preorder_reservation_token,
-                order_id: savedOrder.id,
-                user_id: userId,
-                payment_status: PaymentStatus.PAID,
-                // Note: idempotency_key is optional but recommended for idempotency
-              });
-            } catch (redeemError) {
-              // Log error but don't fail order creation
-              // Quota will be restored when reservation expires or on payment failure
-              this.logger.error(
-                `❌ Failed to redeem coupon for COD order: ${redeemError.message}. Order created but coupon not redeemed.`
-              );
-            }
+      for (const cartItem of preorderCartItemsWithToken) {
+        if (!cartItem.preorder_reservation_token) continue;
+
+        const redemption = await this.couponRedemptionRepository.findOne({
+          where: { reserved_token: cartItem.preorder_reservation_token },
+        });
+        if (redemption) {
+          redemption.order_id = savedOrder.id;
+          await this.couponRedemptionRepository.save(redemption);
+          this.logger.log(
+            `🔗 Linked preorder redemption to order ${savedOrder.id} (reserved_token)`,
+          );
+        }
+
+        // Redeem immediately only for COD. Online orders redeem on payment success.
+        if (createOrderDto.payment_method === "cod") {
+          try {
+            await this.couponService.redeemCoupon({
+              reservation_token: cartItem.preorder_reservation_token,
+              order_id: savedOrder.id,
+              user_id: userId,
+              payment_status: PaymentStatus.PAID,
+            });
+            this.logger.log(
+              `✅ Redeemed preorder coupon for COD order ${savedOrder.order_number}`,
+            );
+          } catch (redeemError) {
+            this.logger.error(
+              `❌ Failed to redeem coupon for COD order: ${redeemError.message}. Order created but coupon not redeemed.`,
+            );
           }
-          // For online payment, coupon will be redeemed when payment succeeds (in verifyPayment)
         }
       }
 
@@ -1256,39 +1268,8 @@ export class OrderService {
       // Update payment status
       await this.updatePaymentStatus(order.id, "paid", razorpay_payment_id);
 
-      // FIX: Redeem preorder coupon when payment succeeds for online payments
-      const orderItems = await this.orderItemRepository.find({
-        where: { order: { id: order.id } },
-      });
-
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: order.id },
-          });
-
-          if (couponRedemption && couponRedemption.reserved_token) {
-            try {
-              await this.couponService.redeemCoupon({
-                reservation_token: couponRedemption.reserved_token,
-                order_id: order.id,
-                user_id: userId,
-                payment_status: PaymentStatus.PAID,
-              });
-              this.logger.log(
-                `✅ Redeemed preorder coupon for order ${order.order_number} after payment success`
-              );
-            } catch (redeemError) {
-              // Log error but don't fail payment verification
-              // The reservation will expire and quota will be restored
-              this.logger.error(
-                `❌ Failed to redeem coupon after payment success: ${redeemError.message}. Reservation will expire.`
-              );
-            }
-          }
-        }
-      }
+      // Redeem preorder coupon on payment success (online only; COD is redeemed at order creation)
+      await this.redeemPreorderCouponForOrder(order.id, userId);
 
       // Update order status
       await this.updateOrderStatus(order.id, "confirmed");
@@ -1325,6 +1306,47 @@ export class OrderService {
         error.stack,
       );
       throw error;
+    }
+  }
+
+  /**
+   * Redeem preorder coupon for an order (used after payment success: verifyPayment or webhook).
+   * Finds CouponRedemption by order_id and calls redeemCoupon. Idempotent if already redeemed.
+   * @returns userId from redemption if found (for e.g. cart clear in webhook); otherwise undefined
+   */
+  async redeemPreorderCouponForOrder(
+    orderId: number,
+    userId?: number,
+  ): Promise<{ userId?: number }> {
+    const couponRedemption = await this.couponRedemptionRepository.findOne({
+      where: { order_id: orderId },
+    });
+    if (!couponRedemption || !couponRedemption.reserved_token) {
+      return {};
+    }
+    const redeemUserId = userId ?? couponRedemption.user_id;
+    if (redeemUserId == null) {
+      this.logger.warn(
+        `⚠️ Preorder redemption for order ${orderId} has no user_id; skipping redeem`,
+      );
+      return {};
+    }
+    try {
+      await this.couponService.redeemCoupon({
+        reservation_token: couponRedemption.reserved_token,
+        order_id: orderId,
+        user_id: redeemUserId,
+        payment_status: PaymentStatus.PAID,
+      });
+      this.logger.log(
+        `✅ Redeemed preorder coupon for order ${orderId} (payment success)`,
+      );
+      return { userId: redeemUserId };
+    } catch (redeemError) {
+      this.logger.error(
+        `❌ Failed to redeem preorder coupon for order ${orderId}: ${redeemError.message}`,
+      );
+      return {};
     }
   }
 
