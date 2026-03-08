@@ -2605,7 +2605,7 @@ export class CartService {
         .getOne();
 
       if (!cart) {
-        throw new NotFoundException("Active cart not found");
+        throw new BadRequestException("Active cart not found");
       }
 
       // Get user location for pincode
@@ -2722,7 +2722,7 @@ export class CartService {
         .getOne();
 
       if (!cart) {
-        throw new NotFoundException("Active cart not found");
+        throw new BadRequestException("Active cart not found");
       }
 
       // Get user location for pincode
@@ -2838,7 +2838,7 @@ export class CartService {
         .getOne();
 
       if (!cart) {
-        throw new NotFoundException("Active cart not found");
+        throw new BadRequestException("Active cart not found");
       }
 
       // Get user location for pincode
@@ -2913,7 +2913,7 @@ export class CartService {
         .getOne();
 
       if (!cart) {
-        throw new NotFoundException("Active cart not found");
+        throw new BadRequestException("Active cart not found");
       }
 
       if (!cart.coupon_code) {
