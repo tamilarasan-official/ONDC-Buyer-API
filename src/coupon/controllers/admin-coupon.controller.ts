@@ -642,7 +642,7 @@ export class AdminCouponController {
   @ApiOperation({
     summary: "Get coupon quota",
     description:
-      "Get current available quota (slots) for a coupon. Returns current quota from Redis and the original global_usage_limit from database.",
+      "Get current available quota (slots) for a coupon. current_quota = remaining slots from Redis; global_usage_limit = max from DB; redeemed_count = successful redemptions (paid uses) from DB.",
   })
   @ApiParam({ name: "id", type: Number, description: "Coupon ID" })
   @ApiResponse({
@@ -657,8 +657,9 @@ export class AdminCouponController {
           type: "object",
           properties: {
             coupon_id: { type: "number", example: 123 },
-            current_quota: { type: "number", example: 45, nullable: true },
-            global_usage_limit: { type: "number", example: 100, nullable: true },
+            current_quota: { type: "number", example: 45, nullable: true, description: "Remaining slots (Redis)" },
+            global_usage_limit: { type: "number", example: 100, nullable: true, description: "Max limit (DB)" },
+            redeemed_count: { type: "number", example: 5, description: "Successful redemptions / paid uses (DB)" },
           },
         },
       },
@@ -802,6 +803,7 @@ export class AdminCouponController {
             coupon_id: { type: "number", example: 123 },
             previous_quota: { type: "number", example: 5, nullable: true },
             new_quota: { type: "number", example: 100 },
+            global_usage_limit: { type: "number", example: 100, nullable: true, description: "DB limit (unchanged by reset)" },
           },
         },
       },

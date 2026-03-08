@@ -2808,6 +2808,24 @@ export class BuyerController {
 
       // Update order status to confirmed after payment success
       await this.orderService.updateOrderStatus(order.id, "confirmed");
+
+      // Redeem preorder coupon on payment success (same as verifyPayment)
+      await this.orderService.redeemPreorderCouponForOrder(order.id);
+      // Clear cart for order's user so webhook-only success matches verifyPayment behaviour
+      const orderWithUser =
+        await this.orderService.getOrderWithUser(order.id);
+      if (orderWithUser?.user?.id != null) {
+        try {
+          await this.cartService.clearCart(orderWithUser.user.id);
+          this.logger.log(
+            `🗑️ Cart cleared for user ${orderWithUser.user.id} after payment.captured webhook`,
+          );
+        } catch (clearCartError) {
+          this.logger.error(
+            `❌ Failed to clear cart after webhook: ${clearCartError.message}`,
+          );
+        }
+      }
     } catch (error) {
       this.logger.error(
         `❌ Error handling payment captured: ${error.message}`,
