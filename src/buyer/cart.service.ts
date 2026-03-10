@@ -29,7 +29,7 @@ import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { CouponService } from "../coupon/services/coupon.service";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { Coupon } from "../coupon/entities/coupon.entity";
-import { CouponType, CouponStatus } from "../coupon/entities/coupon.entity";
+import { CouponType, CouponStatus, ValueType } from "../coupon/entities/coupon.entity";
 import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { ApplyCouponDto } from "./dto/apply-coupon.dto";
 import { ConfigService } from "@nestjs/config";
@@ -178,6 +178,21 @@ export class CartService {
       if (!item) {
         throw new NotFoundException(
           "Item not found in the specified restaurant",
+        );
+      }
+
+      if (!item.store.status) {
+        // Release preorder quota and deactivate user's active cart for this store
+        const cartToDeactivate = await this.cartRepository.findOne({
+          where: { user: { id: userId }, store: { id: addToCartDto.restaurant_id }, is_active: true },
+          select: ["id"],
+        });
+        if (cartToDeactivate) {
+          await this.releasePreorderQuotaForCart(cartToDeactivate.id);
+          await this.cartRepository.update(cartToDeactivate.id, { is_active: false });
+        }
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
         );
       }
 
@@ -354,10 +369,10 @@ export class CartService {
       }
 
       // NEW: Preorder validation and get coupon BEFORE calculating price
-      // For preorder items: store base_price in cart_item, calculate discount separately
+      // For preorder items: store base_price in cart_item, discount from coupon value/value_type
       let preorderCoupon: Coupon | null = null;
-      let preorderDiscountAmount = 0; // Discount amount for preorder items
-      const finalOrderPrice = 0.00; // Final order price after discount
+      let preorderDiscountAmount = 0; // Discount amount for preorder items (line total)
+      let finalOrderPrice = 0; // Total final price for this line after discount
 
       if (addToCartDto.is_preorder) {
         this.logger.log(
@@ -377,16 +392,40 @@ export class CartService {
           `✅ Preorder validation passed: coupon_id=${preorderCoupon.id}, code=${preorderCoupon.code}`,
         );
 
-        // Calculate discount amount: (Subtotal + Tax) - Final
-        // For preorder: discount = (base_price + tax_on_base_price) - final_order_price
-        // Tax is calculated on base_price (subtotal), not on final_order_price
+        // Compute final order price per unit from coupon (same logic as calculateCartSummary / buyer.service)
+        const couponValue = Number(preorderCoupon.value ?? 0);
+        const valueType = (preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType;
+        const maxDiscount =
+          preorderCoupon.max_discount_amount != null
+            ? Number(preorderCoupon.max_discount_amount)
+            : Infinity;
+
+        let itemDiscountPerUnit = 0;
+        if (unitPrice > 0) {
+          if (valueType === ValueType.PERCENT) {
+            const percentDiscount = (unitPrice * couponValue) / 100;
+            itemDiscountPerUnit = Math.min(percentDiscount, maxDiscount, unitPrice);
+          } else {
+            itemDiscountPerUnit = Math.min(couponValue, unitPrice);
+          }
+          itemDiscountPerUnit = Math.max(0, parseFloat(itemDiscountPerUnit.toFixed(2)));
+        }
+
+        const finalOrderPricePerUnit = Math.max(0, unitPrice - itemDiscountPerUnit);
+        finalOrderPrice = parseFloat(
+          (finalOrderPricePerUnit * addToCartDto.quantity).toFixed(2),
+        );
+
+        // Discount for cart = (Subtotal + Tax) - Final; tax is on full subtotal
         const taxRate = item.tax_rate || 0;
-        const taxOnSubtotal = (unitPrice * taxRate) / 100;
-        const subtotalWithTax = unitPrice + taxOnSubtotal;
-        preorderDiscountAmount = parseFloat((subtotalWithTax - finalOrderPrice).toFixed(2));
+        const taxOnSubtotal = (unitPrice * addToCartDto.quantity * taxRate) / 100;
+        const subtotalWithTax = unitPrice * addToCartDto.quantity + taxOnSubtotal;
+        preorderDiscountAmount = parseFloat(
+          Math.max(0, subtotalWithTax - finalOrderPrice).toFixed(2),
+        );
 
         this.logger.log(
-          `💰 Preorder item pricing: base_price=₹${unitPrice}, tax_rate=${taxRate}%, tax_on_subtotal=₹${taxOnSubtotal}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount} (calculated as: (₹${unitPrice} + ₹${taxOnSubtotal}) - ₹${finalOrderPrice})`,
+          `💰 Preorder item pricing: base_price=₹${unitPrice}, coupon value=${couponValue} ${valueType}, final_per_unit=₹${finalOrderPricePerUnit}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount}`,
         );
       }
 
@@ -431,9 +470,8 @@ export class CartService {
             await this.removeCoupon(userId);
           }
 
-          // Calculate preorder discount amount for the cart
-          // Discount = (Subtotal + Tax) - Final (already calculated in preorderDiscountAmount)
-          const preorderDiscountForCart = preorderDiscountAmount * addToCartDto.quantity;
+          // Preorder discount for cart (already total for this line, includes quantity)
+          const preorderDiscountForCart = preorderDiscountAmount;
 
           // Apply preorder coupon with correct cart total and discount
           await this.applyPreorderCouponWithDiscount(
@@ -663,26 +701,28 @@ export class CartService {
       throw new BadRequestException("Preorder campaign has ended");
     }
 
-    // Check quota available
-    const quota = await this.redisCouponService.getQuota(coupon.id);
+    // Check quota available (stored in Redis; may be null if never initialized or Redis was flushed)
+    let quota = await this.redisCouponService.getQuota(coupon.id);
 
-    // Log quota details for debugging
+    // Auto-initialize quota from global_usage_limit when Redis has no value (e.g. new coupon, Redis flush, or code generated before init existed)
+    if (quota === null && coupon.global_usage_limit) {
+      const limit = Number(coupon.global_usage_limit);
+      await this.redisCouponService.initializeQuota(coupon.id, limit);
+      quota = limit;
+      this.logger.log(
+        `🔄 Auto-initialized preorder quota for coupon ${coupon.id}: ${limit} (from global_usage_limit)`,
+      );
+    }
+
     this.logger.log(
       `🔍 Preorder quota check: coupon_id=${coupon.id}, global_usage_limit=${coupon.global_usage_limit}, current_quota=${quota}`,
     );
 
     // Validate quota
-    if (quota === null && coupon.global_usage_limit) {
-      // Quota not initialized - this should have been done during code generation
-      this.logger.error(
-        `❌ Quota not initialized for coupon ${coupon.id} with global_usage_limit=${coupon.global_usage_limit}. Please initialize quota using the admin API.`,
-      );
-      throw new BadRequestException(
-        "Preorder quota not initialized. Please contact support or use the admin API to initialize quota.",
-      );
-    } else if (quota !== null && quota <= 0) {
+    if (quota !== null && quota <= 0) {
       throw new BadRequestException("All preorder slots are taken");
-    } else if (quota === null && !coupon.global_usage_limit) {
+    }
+    if (quota === null && !coupon.global_usage_limit) {
       // No quota limit set - allow unlimited (for testing/development)
       this.logger.warn(
         `⚠️ Preorder coupon ${coupon.id} has no global_usage_limit set - allowing unlimited usage`,
@@ -734,7 +774,10 @@ export class CartService {
           .map((c) => c.id);
 
         if (cartIdsToDeactivate.length > 0) {
-          // Use TypeORM query builder syntax for IN clause
+          // Release preorder quota for each cart before deactivating
+          for (const cid of cartIdsToDeactivate) {
+            await this.releasePreorderQuotaForCart(cid);
+          }
           await this.cartRepository
             .createQueryBuilder()
             .update()
@@ -797,6 +840,7 @@ export class CartService {
         .leftJoinAndSelect("ci.cart", "c")
         .leftJoinAndSelect("ci.item", "i")
         .leftJoinAndSelect("i.prices", "p")
+        .leftJoinAndSelect("i.store", "itemStore")
         .leftJoinAndSelect("c.store", "s")
         .leftJoin("c.user", "u")
         .where("ci.id = :cartItemId", {
@@ -808,6 +852,16 @@ export class CartService {
 
       if (!cartItem) {
         throw new NotFoundException("Cart item not found");
+      }
+
+      if (!cartItem.item.store.status) {
+        await this.releasePreorderQuotaForCart(cartItem.cart.id);
+        await this.cartRepository.update(cartItem.cart.id, {
+          is_active: false,
+        });
+        throw new BadRequestException(
+          "Sorry, Restaurant is not accepting orders right now. Please try with another restaurant.",
+        );
       }
 
       // Validate quantity is provided for item update
@@ -1146,7 +1200,59 @@ export class CartService {
   }
 
   /**
+   * Release preorder coupon quota and cart-level coupon reservation for a cart.
+   * Call this before deactivating a cart so reserved slots and cart coupon are released.
+   */
+  private async releasePreorderQuotaForCart(cartId: number): Promise<void> {
+    const cartWithItems = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: ["cart_items"],
+    });
+    if (!cartWithItems) return;
+    // Release per-item preorder reservations
+    const preorderItems = (cartWithItems.cart_items || []).filter(
+      (ci) => ci.is_preorder && ci.preorder_campaign_id && ci.preorder_reservation_token,
+    );
+    for (const cartItem of preorderItems) {
+      try {
+        await this.redisCouponService.releaseReservation(
+          cartItem.preorder_campaign_id!,
+          cartItem.preorder_reservation_token!,
+        );
+        this.logger.log(
+          `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id} (cart ${cartId} deactivated)`,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `Failed to release preorder quota for cart ${cartId}, coupon ${cartItem.preorder_campaign_id}: ${err.message}`,
+        );
+      }
+    }
+    // Rollback cart-level coupon reservation if present
+    if (cartWithItems.coupon_reservation_token) {
+      try {
+        await this.couponService.rollbackCoupon({
+          reservation_token: cartWithItems.coupon_reservation_token,
+          reason: "Cart deactivated",
+        });
+        await this.cartRepository.update(cartId, {
+          coupon_id: undefined,
+          coupon_code: undefined,
+          coupon_reservation_token: undefined,
+          discount_amount: 0,
+        });
+        this.logger.log(`✅ Rolled back cart-level coupon for cart ${cartId}`);
+      } catch (err) {
+        this.logger.warn(
+          `Failed to rollback cart coupon for cart ${cartId}: ${err.message}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Clear entire cart
+   * Uses releasePreorderQuotaForCart to release preorder item reservations and cart-level coupon (same as other deactivation paths).
    */
   async clearCart(userId: number) {
     try {
@@ -1160,48 +1266,11 @@ export class CartService {
         .getOne();
 
       if (cart) {
-        // Load cart items with relations
-        const cartWithItems = await this.cartRepository.findOne({
-          where: { id: cart.id },
-          relations: ["cart_items"],
-        });
-
-        // NEW: Release reservations for preorder items
-        if (cartWithItems && cartWithItems.cart_items) {
-          const preorderItems = cartWithItems.cart_items.filter(ci =>
-            ci.is_preorder && ci.preorder_campaign_id
-          );
-
-          for (const cartItem of preorderItems) {
-            // Release reservation and restore quota
-            if (cartItem.preorder_campaign_id) {
-              if (cartItem.preorder_reservation_token) {
-                // Release reservation and restore quota
-                // releaseReservation() always restores quota, even if reservation expired
-                await this.redisCouponService.releaseReservation(
-                  cartItem.preorder_campaign_id,
-                  cartItem.preorder_reservation_token
-                );
-                this.logger.log(
-                  `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id}`
-                );
-              } else {
-                // No reservation token - quota was never consumed (item added but checkout never happened)
-                this.logger.log(
-                  `ℹ️ Preorder item cleared but no reservation token found. Quota was not consumed (item was not checked out).`
-                );
-              }
-            }
-          }
-        }
+        // Release preorder item reservations and cart-level coupon (Redis quota + rollback) before clearing
+        await this.releasePreorderQuotaForCart(cart.id);
 
         // Remove all cart items
         await this.cartItemRepository.delete({ cart: { id: cart.id } });
-
-        // NEW: Remove coupon if exists
-        if (cart.coupon_id) {
-          await this.removeCoupon(userId);
-        }
 
         // Deactivate cart
         await this.cartRepository.update(cart.id, { is_active: false });
@@ -1642,9 +1711,12 @@ export class CartService {
 
     // Get platform fee configuration
     const platformFeeConfig = await this.getPlatformFee();
-    // Only include platform fee in calculation if enabled
+    // Only include platform fee and its tax in calculation when enabled
     const platformFeeForCalculation = platformFeeConfig.isEnabled
       ? platformFeeConfig.amount
+      : 0;
+    const platformFeeTaxForCalculation = platformFeeConfig.isEnabled
+      ? platformFeeConfig.tax
       : 0;
 
     taxAmount = Number(taxAmount.toFixed(2));
@@ -1657,12 +1729,12 @@ export class CartService {
         taxAmount +
         tipAmount +
         platformFeeForCalculation +
-        platformFeeConfig.tax -
+        platformFeeTaxForCalculation -
         discountAmount
       ).toFixed(2),
     );
 
-    const totalTaxAmount = taxAmount + deliveryTax + platformFeeConfig.tax;
+    const totalTaxAmount = taxAmount + deliveryTax + platformFeeTaxForCalculation;
 
     this.logger.log(`💰 Cart Calculation Breakdown:`);
     this.logger.log(`  subtotal: ${Number(subtotal)}`);
@@ -1672,9 +1744,9 @@ export class CartService {
     this.logger.log(`  tipAmount: ${Number(tipAmount)}`);
     this.logger.log(`  platformFee (display): ${platformFeeConfig.amount}`);
     this.logger.log(`  platformFee (included in total): ${platformFeeForCalculation}`);
-    this.logger.log(`  platformFeeTax: ${platformFeeConfig.tax}`);
+    this.logger.log(`  platformFeeTax: ${platformFeeTaxForCalculation}`);
     this.logger.log(`  discountAmount: ${Number(discountAmount)}`);
-    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${deliveryTax} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} + ${platformFeeConfig.tax} - ${discountAmount} = ${finalAmount}`);
+    this.logger.log(`  📊 Calculation: ${subtotal} + ${deliveryFee} + ${deliveryTax} + ${taxAmount} + ${tipAmount} + ${platformFeeForCalculation} + ${platformFeeTaxForCalculation} - ${discountAmount} = ${finalAmount}`);
     this.logger.log(`  totalTaxAmount: ${Number(totalTaxAmount)}`);
     this.logger.log(`  finalAmount: ${Number(finalAmount)}`);
 
@@ -1684,7 +1756,7 @@ export class CartService {
       delivery_fee_tax: deliveryTax,
       delivery_percent: deliveryPercent,
       platform_fee: platformFeeForCalculation,
-      platform_fee_tax: platformFeeConfig.tax,
+      platform_fee_tax: platformFeeTaxForCalculation,
       platform_percent:18.00,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
@@ -1705,21 +1777,25 @@ export class CartService {
     tax: number;
     isEnabled: boolean;
   }> {
-    const includeFee = await this.appSettingsService.getBoolean(
-      "INCLUDE_PLATFORM_FEE",
-      false,
+    // Read directly from DB so GET cart and create order use current platform fee
+    // (avoids stale cache when admin updates fee after cart was created)
+    const includeFeeRaw =
+      (await this.appSettingsService.getFromDb("INCLUDE_PLATFORM_FEE"))?.trim() ??
+      "";
+    const includeFee = ["true", "1", "yes", "on"].includes(
+      includeFeeRaw.toLowerCase(),
     );
-    const platformFeeAmount = await this.appSettingsService.getNumber(
+    const platformFeeRaw = await this.appSettingsService.getFromDb(
       "PLATFORM_FEE",
-      0,
     );
+    const platformFeeAmount =
+      platformFeeRaw != null ? parseFloat(platformFeeRaw) : 0;
     const platformFeeTax = Number(((platformFeeAmount || 0) * 0.18).toFixed(2));
-    // Always return the platform fee amount (for display), regardless of includeFee
 
     return {
       amount: Number((platformFeeAmount || 0).toFixed(2)),
       tax: platformFeeTax,
-      isEnabled: includeFee, // This determines if it's included in final_amount
+      isEnabled: includeFee,
     };
   }
 
@@ -1757,6 +1833,10 @@ export class CartService {
     if (platformFeeConfig.isEnabled) {
       platformFee = platformFeeConfig.amount;
       platformFeeTax = platformFeeConfig.tax;
+      platformPercent = 18.00;
+    }else{
+      platformFee = 0;
+      platformFeeTax = 0;
       platformPercent = 18.00;
     }
 
@@ -1822,28 +1902,73 @@ export class CartService {
     const hasPreorderItems = cart.cart_items?.some((item) => item.is_preorder === true);
 
     // Calculate preorder discount if not already set in cart
-    // For preorder items: discount = (Subtotal + Tax) - Final
-    // This ensures discount includes both price reduction and tax adjustment
-    if (hasPreorderItems && discountAmount === 0) {
+    // For preorder items: discount = (Subtotal + Tax) - Final, where Final comes from coupon value/value_type
+    if (hasPreorderItems && discountAmount === 0 && cart.store?.id) {
       try {
-        const finalOrderPrice = 12.0; // Final order price after discount
         let calculatedDiscount = 0;
 
         for (const cartItem of cart.cart_items || []) {
-          if (cartItem.is_preorder) {
-            const itemSubtotal = Number(cartItem.total_price || 0); // Base price (₹190)
-            const taxRate = cartItem.item.tax_rate || 0;
-            const itemTax = (itemSubtotal * taxRate) / 100; // Tax on subtotal (₹9.5)
-            const itemFinal = finalOrderPrice * cartItem.quantity; // Final order price (₹12)
-
-            // Discount = (Subtotal + Tax) - Final
-            const itemDiscount = (itemSubtotal + itemTax) - itemFinal;
-            calculatedDiscount += itemDiscount;
-
-            this.logger.log(
-              `💰 Preorder discount calculation: item_id=${cartItem.item.id}, subtotal=₹${itemSubtotal}, tax=₹${itemTax}, final=₹${itemFinal}, discount=₹${itemDiscount}`,
-            );
+          if (!cartItem.is_preorder || !cartItem.item) {
+            continue;
           }
+          // Resolve coupon: by preorder_campaign_id first, then by item + store (same as formatCartData fallback)
+          let preorderCoupon: Coupon | null = null;
+          if (cartItem.preorder_campaign_id) {
+            const id = cartItem.preorder_campaign_id;
+            preorderCoupon = await this.couponRepository.findOne({
+              where: { id: typeof id === "string" ? Number(id) : id },
+            });
+          }
+          if (!preorderCoupon && cartItem.item?.id != null) {
+            const preorderCoupons = await this.couponRepository
+              .createQueryBuilder("coupon")
+              .leftJoinAndSelect("coupon.campaign", "campaign")
+              .where("coupon.type = :type", { type: CouponType.PREORDER })
+              .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+              .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
+              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: String(cartItem.item.id) })
+              .andWhere(
+                "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+                { storeId: cart.store.id },
+              )
+              .orderBy("coupon.priority", "DESC", "NULLS LAST")
+              .addOrderBy("coupon.created_at", "DESC")
+              .take(1)
+              .getMany();
+            preorderCoupon = preorderCoupons[0] ?? null;
+          }
+          if (!preorderCoupon || preorderCoupon.type !== CouponType.PREORDER) {
+            continue;
+          }
+
+          const itemSubtotal = Number(cartItem.total_price ?? 0) / (cartItem.quantity || 1);
+          const basePrice = itemSubtotal;
+          const couponValue = Number(preorderCoupon.value ?? 0);
+          const valueType = (preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType;
+          const maxDiscount = preorderCoupon.max_discount_amount != null ? Number(preorderCoupon.max_discount_amount) : Infinity;
+
+          let itemDiscountAmount = 0;
+          if (basePrice > 0) {
+            if (valueType === ValueType.PERCENT) {
+              const percentDiscount = (basePrice * couponValue) / 100;
+              itemDiscountAmount = Math.min(percentDiscount, maxDiscount, basePrice);
+            } else {
+              itemDiscountAmount = Math.min(couponValue, basePrice);
+            }
+            itemDiscountAmount = Math.max(0, itemDiscountAmount);
+          }
+
+          const finalOrderPricePerUnit = Math.max(0, basePrice - itemDiscountAmount);
+          const itemFinal = finalOrderPricePerUnit * (cartItem.quantity || 1);
+          const itemSubtotalTotal = Number(cartItem.total_price || 0);
+          const taxRate = cartItem.item?.tax_rate ?? 0;
+          const itemTax = (itemSubtotalTotal * taxRate) / 100;
+          const itemDiscount = (itemSubtotalTotal + itemTax) - itemFinal;
+          calculatedDiscount += Math.max(0, itemDiscount);
+
+          this.logger.log(
+            `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, subtotal=₹${itemSubtotalTotal}, tax=₹${itemTax.toFixed(2)}, final=₹${itemFinal.toFixed(2)}, discount=₹${itemDiscount.toFixed(2)} (coupon value=${couponValue} ${valueType})`,
+          );
         }
 
         if (calculatedDiscount > 0) {
@@ -1865,12 +1990,12 @@ export class CartService {
       });
 
       if (coupon && coupon.type === CouponType.PREORDER) {
-        // If free delivery is included, set delivery fee to 0
+        // If free delivery is included, set delivery fee and tax to 0
         if (coupon.type_meta?.free_delivery === true) {
           deliveryFee = 0;
-          // Update cart delivery fee if needed
-          if (cart.delivery_fee !== 0) {
-            await this.cartRepository.update(cart.id, { delivery_fee: 0 });
+          deliveryFeeTax = 0;
+          if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
+            await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
           }
         }
       }
@@ -1887,9 +2012,8 @@ export class CartService {
           if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
             deliveryFee = 0;
             deliveryFeeTax = 0;
-            // Update cart delivery fee if needed
-            if (cart.delivery_fee !== 0) {
-              await this.cartRepository.update(cart.id, { delivery_fee: deliveryFee, delivery_fee_tax: deliveryFeeTax });
+            if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
+              await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
             }
             this.logger.log(
               `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,

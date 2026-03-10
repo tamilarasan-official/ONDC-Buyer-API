@@ -50,6 +50,18 @@ export class AppSettingsService {
   }
 
   /**
+   * Get a setting value by key directly from DB (bypasses cache).
+   * Use for settings that must always reflect latest value (e.g. platform fee for cart).
+   */
+  async getFromDb(key: string): Promise<string | null> {
+    const setting = await this.appSettingsRepository.findOne({
+      where: { key, is_active: true },
+      select: ["value"],
+    });
+    return setting?.value ?? null;
+  }
+
+  /**
    * Get a setting value by key with caching
    */
   async get(
