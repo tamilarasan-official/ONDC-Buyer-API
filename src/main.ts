@@ -10,6 +10,9 @@ import { ConfigService } from "@nestjs/config";
 import * as express from "express";
 
 async function bootstrap() {
+  process.stdout.write(
+    `[Main] bootstrap() started APP_ROLE=${process.env.APP_ROLE ?? "undefined"}\n`,
+  );
   const app = await NestFactory.create(AppModule, {
     bodyParser: false, // Disable NestJS default body parser to use custom Express middleware
   });
@@ -133,6 +136,15 @@ async function bootstrap() {
       .swagger-ui .auth-btn-wrapper { margin: 10px 0; }
     `,
   });
+
+  const appRole = (process.env.APP_ROLE ?? "api").trim().toLowerCase();
+  if (appRole === "worker") {
+    await app.init();
+    process.stdout.write(
+      "[Main] Worker-only mode: no HTTP server, seller-sync worker running.\n",
+    );
+    return;
+  }
 
   const port = process.env.PORT ?? 3008;
   await app.listen(port);

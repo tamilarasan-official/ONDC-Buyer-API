@@ -28,8 +28,9 @@ import { CouponModule } from "./coupon/coupon.module";
 import { AppSettingsModule } from "./shared/app-settings.module";
 import { AdminAccessModule } from './super-admin-access/super-admin-access.module';
 import { CancelReasonModule } from './cancel-reason/cancel-reason.module';
+import { SellerSyncModule } from "./seller-sync/seller-sync.module";
+import { RedisModule } from "./redis/redis.module";
 import "dotenv/config";
-import Redis from "ioredis";
 
 @Module({
   imports: [
@@ -105,25 +106,10 @@ import Redis from "ioredis";
     AppSettingsModule,
     AdminAccessModule,
     CancelReasonModule,
+    SellerSyncModule,
+    RedisModule,
   ],
   controllers: [AppController],
-  providers: [
-    AppService,
-    {
-      provide: 'REDIS_CLIENT',
-      useFactory: (configService: ConfigService) => {
-        return new Redis({
-          host: configService.get<string>('REDIS_HOST') || 'localhost',
-          port: configService.get<number>('REDIS_PORT') || 6379,
-          password: configService.get<string>('REDIS_PASSWORD') || undefined,
-          retryStrategy: (times) => {
-            const delay = Math.min(times * 50, 2000);
-            return delay;
-          },
-        });
-      },
-      inject: [ConfigService],
-    },
-  ],
+  providers: [AppService],
 })
 export class AppModule {}
