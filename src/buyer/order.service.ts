@@ -5,7 +5,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { DataSource, Repository } from "typeorm";
 import { Order } from "../order/entities/order.entity";
 import { OrderItem } from "../order/entities/order-item.entity";
 import { OrderTracking } from "../order/entities/order-tracking.entity";
@@ -45,6 +45,7 @@ import { HttpService } from "@nestjs/axios";
 import { firstValueFrom } from "rxjs";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
+import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 
 @Injectable()
 export class OrderService {
@@ -91,10 +92,11 @@ export class OrderService {
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
     private readonly httpService: HttpService,
-
+    private readonly sellerSyncQueueService: SellerSyncQueueService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
-  ) { }
+    private readonly dataSource: DataSource,
+  ) {}
 
   /**
    * Create order from cart (without payment processing)
@@ -350,47 +352,86 @@ export class OrderService {
       let totalTaxAmount = Number(cartToUse.tax_amount || 0) + Number(cartToUse.delivery_fee_tax || 0) + Number(cartToUse.platform_fee_tax || 0);
       totalTaxAmount = Number(totalTaxAmount.toFixed(2));
 
-      const order = this.orderRepository.create({
-        order_number: orderNumber,
-        user: { id: userId },
-        store: { id: cartToUse.store.id },
-        // Copy address data for historical record keeping
-        delivery_address_line1: deliveryAddress.address1,
-        delivery_address_line2: deliveryAddress.address2,
-        delivery_address_line3: deliveryAddress.address3,
-        delivery_city: deliveryAddress.city,
-        delivery_state: deliveryAddress.state,
-        delivery_pincode: deliveryAddress.pincode,
-        delivery_latitude: deliveryAddress.latitude,
-        delivery_longitude: deliveryAddress.longitude,
-        delivery_address_type: deliveryAddress.type,
-        delivery_alternate_phone: deliveryAddress.alternate_phone_number,
-        status: orderStatus,
-        subtotal: cartToUse.total_amount,
-        tax_amount: cartToUse.tax_amount,
-        delivery_fee: cartToUse.delivery_fee,
-        delivery_fee_tax: cartToUse.delivery_fee_tax || 0,
-        delivery_percent: cartToUse.delivery_percent || 18.00,
-        platform_fee: cartToUse.platform_fee || 0,
-        platform_fee_tax: cartToUse.platform_fee_tax || 0,
-        platform_percent: cartToUse.platform_percent || 18.00,
-        discount_amount: cartToUse.discount_amount,
-        tip_amount: cartToUse.tip_amount || 0,
-        total_tax_amount: totalTaxAmount || 0,
-        total_amount: cartToUse.final_amount,
-        payment_method: createOrderDto.payment_method,
-        payment_status: paymentStatus,
-        notes: createOrderDto.notes,
-        estimated_delivery_time: estimatedDeliveryTime,
+      const savedOrder = await this.dataSource.transaction(async (manager) => {
+        const order = manager.getRepository(Order).create({
+          order_number: orderNumber,
+          user: { id: userId },
+          store: { id: cartToUse.store.id },
+          delivery_address_line1: deliveryAddress.address1,
+          delivery_address_line2: deliveryAddress.address2,
+          delivery_address_line3: deliveryAddress.address3,
+          delivery_city: deliveryAddress.city,
+          delivery_state: deliveryAddress.state,
+          delivery_pincode: deliveryAddress.pincode,
+          delivery_latitude: deliveryAddress.latitude,
+          delivery_longitude: deliveryAddress.longitude,
+          delivery_address_type: deliveryAddress.type,
+          delivery_alternate_phone: deliveryAddress.alternate_phone_number,
+          status: orderStatus,
+          subtotal: cartToUse.total_amount,
+          tax_amount: cartToUse.tax_amount,
+          delivery_fee: cartToUse.delivery_fee,
+          delivery_fee_tax: cartToUse.delivery_fee_tax || 0,
+          delivery_percent: cartToUse.delivery_percent || 18.00,
+          platform_fee: cartToUse.platform_fee || 0,
+          platform_fee_tax: cartToUse.platform_fee_tax || 0,
+          platform_percent: cartToUse.platform_percent || 18.00,
+          discount_amount: cartToUse.discount_amount,
+          tip_amount: cartToUse.tip_amount || 0,
+          total_tax_amount: totalTaxAmount || 0,
+          total_amount: cartToUse.final_amount,
+          payment_method: createOrderDto.payment_method,
+          payment_status: paymentStatus,
+          notes: createOrderDto.notes,
+          estimated_delivery_time: estimatedDeliveryTime,
+        });
+
+        const saved = await manager.getRepository(Order).save(order);
+
+        const orderItems = cartToUse.cart_items.map((cartItem) =>
+          manager.getRepository(OrderItem).create({
+            order: { id: saved.id },
+            item: { id: cartItem.item.id },
+            quantity: cartItem.quantity,
+            unit_price: cartItem.unit_price,
+            total_price: cartItem.total_price,
+            customizations: cartItem.customizations,
+            variants: cartItem.variants,
+            special_instructions: cartItem.special_instructions,
+            is_preorder: cartItem.is_preorder || false,
+            preorder_campaign_id: cartItem.preorder_campaign_id,
+          }),
+        );
+        await manager.getRepository(OrderItem).save(orderItems);
+
+        if (orderStatus === "confirmed") {
+          const orderWithRelations = await manager.getRepository(Order).findOne({
+            where: { id: saved.id },
+            relations: ["user", "store", "order_items", "order_items.item"],
+          });
+          if (orderWithRelations) {
+            const payload = await this.sellerPushService.transformOrderToSellerPayload(
+              orderWithRelations,
+            );
+            await this.sellerSyncQueueService.addOutboxRowInTransaction(
+              manager,
+              "order.push",
+              saved.order_number,
+              payload as Record<string, unknown>,
+            );
+          }
+        }
+
+        return saved;
       });
 
-      const savedOrder = await this.orderRepository.save(order);
-
-      // FIX: Log order values after saving to verify what was stored
       this.logger.log(
         `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
       );
 
+      // NEW: If preorder, redeem coupon after order is created
+      // FIX: Only redeem for COD orders. Online payment orders will be redeemed on payment success.
+      const preorderCartItemsForRedemption = cartToUse.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
       // Create order items from cart items
       const orderItems = cartToUse.cart_items.map((cartItem) =>
         this.orderItemRepository.create({
@@ -482,10 +523,9 @@ export class OrderService {
         .getOne();
         
         if (orderWithRelations && orderWithRelations.status === "confirmed") {
-          const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
-          console.log("SELLER PUSH RESPONSE:", response);
+          await this.sellerPushService.pushOrderToSeller(orderWithRelations);
           this.logger.log(
-            `✅ Order ${savedOrder.order_number} pushed to seller successfully`,
+            `✅ Order ${savedOrder.order_number} enqueued for seller sync`,
           );
         }
       } catch (sellerPushError) {
@@ -1043,40 +1083,27 @@ export class OrderService {
         throw new BadRequestException("Order cannot be cancelled at this time.");
       }
 
-      if(cancelOrderDto.cancelled_by === "buyer") {
+      if (cancelOrderDto.cancelled_by === "buyer") {
         try {
-          const sellerApiUrl =
-            process.env.SELLER_API_URL || "http://localhost:3000";
-    
-          const invoiceUpdateEndpoint = `${sellerApiUrl}/orders/cancel-by-order`;
-    
-          this.logger.log(`🧪 Testing seller push to: ${invoiceUpdateEndpoint}`);
-    
           const payload = {
             external_order_id: order.order_number,
             cancel_code: cancelOrderDto.code,
           };
-    
-          const response = await firstValueFrom(
-            this.httpService.post(invoiceUpdateEndpoint, payload, {
-              headers: {
-                "Content-Type": "application/json",
-                Accept: "application/json",
-              },
-              timeout: 10000,
-            }),
+
+          const row = await this.sellerSyncQueueService.addOutboxRow(
+            "order.cancel",
+            order.order_number,
+            payload as Record<string, unknown>,
           );
-    
-          this.logger.log(
-            `✅ Test seller push successful. Status: ${response.status}`,
+          const jobId = await this.sellerSyncQueueService.enqueueOrderCancel(
+            payload,
+          );
+          await this.sellerSyncQueueService.updateOutboxToQueued(
+            row.id,
+            jobId ?? undefined,
           );
         } catch (error) {
-          this.logger.error(`❌ Test seller push failed: ${error.message}`);
-          if (error.response) {
-            this.logger.error(
-              `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
-            );
-          }
+          this.logger.error(`❌ Seller cancel push failed: ${error.message}`);
         }
       }
 
@@ -1904,10 +1931,9 @@ export class OrderService {
         // Another thread might have changed status between update and this query
         if (orderWithRelations && orderWithRelations.status === "confirmed") {
           try {
-            const response = await this.sellerPushService.pushOrderToSeller(orderWithRelations);
-            console.log("SELLER PUSH RESPONSE:", response);
+            await this.sellerPushService.pushOrderToSeller(orderWithRelations);
             this.logger.log(
-              `✅ Order ${orderId} status updated to ${status} and pushed to seller successfully`,
+              `✅ Order ${orderId} status updated to ${status} and enqueued for seller sync`,
             );
           } catch (error) {
             this.logger.error(

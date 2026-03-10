@@ -22,6 +22,7 @@ import { SharedNotificationModule } from "../shared/notification.module";
 import { StoreModule } from "../store/store.module";
 import { CouponModule } from "../coupon/coupon.module";
 import { AppSettingsModule } from "../shared/app-settings.module";
+import { SellerSyncModule } from "../seller-sync/seller-sync.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -110,6 +111,7 @@ import { AppSettings } from "../shared/entities/app-settings.entity";
       maxRedirects: 5,
     }),
     SharedNotificationModule,
+    SellerSyncModule,
   ],
   controllers: [BuyerController, InvoiceController],
   providers: [
