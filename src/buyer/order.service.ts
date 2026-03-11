@@ -431,24 +431,9 @@ export class OrderService {
 
       // NEW: If preorder, redeem coupon after order is created
       // FIX: Only redeem for COD orders. Online payment orders will be redeemed on payment success.
-      const preorderCartItemsForRedemption = cartToUse.cart_items.filter(ci => ci.is_preorder && ci.preorder_reservation_token);
-      // Create order items from cart items
-      const orderItems = cartToUse.cart_items.map((cartItem) =>
-        this.orderItemRepository.create({
-          order: { id: savedOrder.id },
-          item: { id: cartItem.item.id },
-          quantity: cartItem.quantity,
-          unit_price: cartItem.unit_price,
-          total_price: cartItem.total_price,
-          customizations: cartItem.customizations,
-          variants: cartItem.variants,
-          special_instructions: cartItem.special_instructions, // Include special instructions
-          is_preorder: cartItem.is_preorder || false, // NEW
-          preorder_campaign_id: cartItem.preorder_campaign_id, // NEW
-        }),
+      const preorderCartItemsForRedemption = cartToUse.cart_items.filter(
+        (ci) => ci.is_preorder && ci.preorder_reservation_token,
       );
-
-      await this.orderItemRepository.save(orderItems);
 
       // Link preorder CouponRedemption to order (so verifyPayment/webhook can find by order_id).
       // COD: redeem immediately. Online: redeem only on payment success (verifyPayment or webhook).

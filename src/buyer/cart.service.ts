@@ -3,6 +3,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
   Inject,
   forwardRef,
 } from "@nestjs/common";
@@ -2270,6 +2271,9 @@ export class CartService {
                 delivery_date: preorderCoupon.type_meta.delivery_date,
                 available_slots: availableSlots,
                 free_delivery: preorderCoupon.type_meta?.free_delivery === true,
+                final_price: preorderCoupon.type_meta?.final_price
+                  ? Number(preorderCoupon.type_meta.final_price)
+                  : undefined,
               };
 
               this.logger.log(
@@ -2326,6 +2330,9 @@ export class CartService {
                 delivery_date: cartCoupon.type_meta.delivery_date,
                 available_slots: availableSlots,
                 free_delivery: cartCoupon.type_meta?.free_delivery === true,
+                final_price: cartCoupon.type_meta?.final_price
+                  ? Number(cartCoupon.type_meta.final_price)
+                  : undefined,
               };
 
               this.logger.log(
@@ -2420,6 +2427,9 @@ export class CartService {
                   delivery_date: preorderCoupon.type_meta?.delivery_date,
                   available_slots: availableSlots,
                   free_delivery: preorderCoupon.type_meta?.free_delivery === true,
+                  final_price: preorderCoupon.type_meta?.final_price
+                    ? Number(preorderCoupon.type_meta.final_price)
+                    : undefined,
                 };
 
                 this.logger.log(
@@ -2628,7 +2638,90 @@ export class CartService {
         0,
       );
 
-      // Validate and reserve coupon
+      const existingToken = cart.coupon_reservation_token;
+      const existingCode = cart.coupon_code;
+
+      // If the same coupon is already applied and the reservation is still valid,
+      // reuse the existing reservation instead of creating a new one.
+      if (existingToken && existingCode === applyCouponDto.coupon_code) {
+        const isValid = await this.couponService.isReservationValid(
+          existingToken,
+        );
+
+        if (isValid) {
+          const validation = await this.couponService.validateCoupon({
+            code: applyCouponDto.coupon_code,
+            user_id: userId,
+            cart_total: subtotal,
+            pincode: pincode,
+            store_id: cart.store.id,
+            reserve: false, // Do not create a new reservation
+          });
+
+          if (!validation.valid) {
+            throw new BadRequestException(
+              validation.message || "Invalid coupon code",
+            );
+          }
+
+          const coupon = await this.couponRepository.findOne({
+            where: { code: applyCouponDto.coupon_code },
+          });
+
+          cart.coupon_code = applyCouponDto.coupon_code;
+          cart.coupon_reservation_token = existingToken;
+          cart.coupon_id = coupon?.id;
+          cart.discount_amount = validation.discount_amount || 0;
+
+          if (validation.delivery_waived) {
+            cart.delivery_fee = 0;
+            cart.delivery_fee_tax = 0;
+          }
+
+          await this.cartRepository.save(cart);
+          await this.updateCartTotals(cart.id);
+
+          const updatedCart = await this.cartRepository.findOne({
+            where: { id: cart.id },
+            relations: ["store", "cart_items", "cart_items.item"],
+          });
+
+          const cartSummary = await this.calculateCartSummary(updatedCart!);
+
+          this.logger.log(
+            `✅ Coupon reapplied using existing reservation. Discount: ₹${validation.discount_amount}`,
+          );
+
+          return {
+            success: true,
+            message: "Coupon applied successfully",
+            data: {
+              coupon_code: applyCouponDto.coupon_code,
+              discount_amount: validation.discount_amount || 0,
+              delivery_waived: validation.delivery_waived || false,
+              reservation_token: existingToken,
+              cart_summary: cartSummary,
+            },
+          };
+        }
+      }
+
+      // If there is an old reservation (different coupon or expired token),
+      // attempt to roll it back before creating a new reservation.
+      if (existingToken) {
+        try {
+          await this.couponService.rollbackCoupon({
+            reservation_token: existingToken,
+            reason: "Reapplying or replacing coupon",
+          });
+        } catch (rollbackError) {
+          this.logger.warn(
+            `⚠️ Failed to rollback previous coupon reservation ${existingToken}: ${rollbackError.message}`,
+          );
+        }
+      }
+
+      // Validate and reserve coupon (new reservation)
       const validation = await this.couponService.validateCoupon({
         code: applyCouponDto.coupon_code,
         user_id: userId,
@@ -2734,7 +2827,108 @@ export class CartService {
         );
       }
 
-      // Validate and reserve coupon with proposed cart total
+      const existingToken = cart.coupon_reservation_token;
+      const existingCode = cart.coupon_code;
+
+      // If the same coupon is already applied and reservation is still valid,
+      // reuse the existing reservation while validating with the proposed total.
+      if (existingToken && existingCode === applyCouponDto.coupon_code) {
+        const isValid = await this.couponService.isReservationValid(
+          existingToken,
+        );
+
+        if (isValid) {
+          const validation = await this.couponService.validateCoupon({
+            code: applyCouponDto.coupon_code,
+            user_id: userId,
+            cart_total: proposedCartTotal, // Use proposed total
+            pincode: pincode,
+            store_id: cart.store.id,
+            reserve: false, // Do not create a new reservation
+          });
+
+          if (!validation.valid) {
+            throw new BadRequestException(
+              validation.message || "Invalid coupon code",
+            );
+          }
+
+          const coupon = await this.couponRepository.findOne({
+            where: { code: applyCouponDto.coupon_code },
+          });
+
+          cart.coupon_code = applyCouponDto.coupon_code;
+          cart.coupon_reservation_token = existingToken;
+          cart.coupon_id = coupon?.id;
+
+          if (coupon?.type === CouponType.PREORDER) {
+            // Final preorder price per unit must come from coupon metadata
+            const finalOrderPrice = Number(coupon.type_meta?.final_price);
+            if (!Number.isFinite(finalOrderPrice) || finalOrderPrice <= 0) {
+              this.logger.error(
+                `Invalid final_price for preorder coupon ${coupon.id} (code=${coupon.code}). Expected positive number in type_meta.final_price, got=${coupon.type_meta?.final_price}`,
+              );
+              throw new InternalServerErrorException(
+                "Preorder configuration is invalid. Please contact support.",
+              );
+            }
+            let preorderDiscount = 0;
+
+            const cartItems = await this.cartItemRepository.find({
+              where: { cart: { id: cart.id } },
+              relations: ["item"],
+            });
+
+            for (const cartItem of cartItems) {
+              if (cartItem.is_preorder) {
+                const itemSubtotal = Number(cartItem.total_price || 0);
+                const taxRate = cartItem.item.tax_rate || 0;
+                const itemTax = (itemSubtotal * taxRate) / 100;
+                const itemFinal = finalOrderPrice * cartItem.quantity;
+                const itemDiscount = (itemSubtotal + itemTax) - itemFinal;
+                preorderDiscount += itemDiscount;
+              }
+            }
+
+            cart.discount_amount = Number(preorderDiscount.toFixed(2));
+            this.logger.log(
+              `💰 Preorder coupon discount (reuse): ₹${cart.discount_amount} ((Subtotal + Tax) - Final)`,
+            );
+          } else {
+            cart.discount_amount = validation.discount_amount || 0;
+          }
+
+          if (validation.delivery_waived) {
+            cart.delivery_fee = 0;
+            cart.delivery_fee_tax = 0;
+          }
+
+          await this.cartRepository.save(cart);
+
+          this.logger.log(
+            `✅ Coupon reapplied with proposed total using existing reservation. Discount: ₹${cart.discount_amount}`,
+          );
+
+          return;
+        }
+      }
+
+      // If there is an old reservation (different coupon or expired token),
+      // attempt to roll it back before creating a new reservation.
+      if (existingToken) {
+        try {
+          await this.couponService.rollbackCoupon({
+            reservation_token: existingToken,
+            reason: "Reapplying or replacing coupon (proposed total)",
+          });
+        } catch (rollbackError) {
+          this.logger.warn(
+            `⚠️ Failed to rollback previous coupon reservation ${existingToken}: ${rollbackError.message}`,
+          );
+        }
+      }
+
+      // Validate and reserve coupon with proposed cart total (new reservation)
       const validation = await this.couponService.validateCoupon({
         code: applyCouponDto.coupon_code,
         user_id: userId,
@@ -2764,7 +2958,16 @@ export class CartService {
       // This ensures discount includes both price reduction and tax adjustment
       if (coupon?.type === CouponType.PREORDER) {
         // Calculate discount from preorder items in cart
-        const finalOrderPrice = 12.0;
+        // Final preorder price per unit must come from coupon metadata
+        const finalOrderPrice = Number(coupon.type_meta?.final_price);
+        if (!Number.isFinite(finalOrderPrice) || finalOrderPrice <= 0) {
+          this.logger.error(
+            `Invalid final_price for preorder coupon ${coupon.id} (code=${coupon.code}). Expected positive number in type_meta.final_price, got=${coupon.type_meta?.final_price}`,
+          );
+          throw new InternalServerErrorException(
+            "Preorder configuration is invalid. Please contact support.",
+          );
+        }
         let preorderDiscount = 0;
 
         const cartItems = await this.cartItemRepository.find({

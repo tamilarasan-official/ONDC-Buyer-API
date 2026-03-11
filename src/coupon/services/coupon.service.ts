@@ -206,8 +206,25 @@ export class CouponService {
         );
       }
 
+      // Validate final_price for preorder (per-campaign selling price)
+      if (
+        dto.type_meta.final_price === undefined ||
+        dto.type_meta.final_price === null
+      ) {
+        throw new BadRequestException(
+          "final_price is required in type_meta for preorder coupons",
+        );
+      }
+
+      const finalPrice = Number(dto.type_meta.final_price);
+      if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
+        throw new BadRequestException(
+          "final_price in type_meta for preorder coupons must be a positive number",
+        );
+      }
+
       this.logger.log(
-        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}`,
+        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}, final_price=${dto.type_meta.final_price}`,
       );
     }
 
@@ -976,29 +993,62 @@ export class CouponService {
       dto.reservation_token,
     );
 
-    if (!reservation) {
-      throw new NotFoundException("Reservation not found or expired");
-    }
-
-    // Update redemption status
+    // Find matching redemption row (if any)
     const redemption = await this.redemptionRepository.findOne({
       where: { reserved_token: dto.reservation_token },
     });
 
+    // If neither Redis reservation nor DB redemption exists, treat as not found/expired
+    if (!reservation && !redemption) {
+      throw new NotFoundException("Reservation not found or expired");
+    }
+
+    // If already redeemed, treat rollback as a no-op (idempotent)
+    if (redemption && redemption.status === RedemptionStatus.REDEEMED) {
+      this.logger.log(
+        `Rollback requested for already redeemed reservation ${dto.reservation_token}, skipping.`,
+      );
+      return { success: true };
+    }
+
+    // Mark redemption as rolled back if present
     if (redemption) {
       redemption.status = RedemptionStatus.ROLLED_BACK;
       await this.redemptionRepository.save(redemption);
     }
 
-    // Release reservation and increment quota
-    await this.redisCouponService.releaseReservation(
-      reservation.coupon_id,
-      dto.reservation_token,
-    );
+    // Determine coupon id for quota restoration
+    const couponId =
+      reservation?.coupon_id ?? redemption?.coupon_id ?? null;
+
+    if (couponId) {
+      if (reservation) {
+        // Active reservation exists in Redis – release normally
+        await this.redisCouponService.releaseReservation(
+          couponId,
+          dto.reservation_token,
+        );
+      } else {
+        // Redis key expired but DB redemption exists – manually restore quota
+        await this.redisCouponService.incrementQuota(couponId, 1);
+        // Best-effort cleanup in case a stale key still exists
+        await this.redisCouponService.deleteReservation(dto.reservation_token);
+      }
+    }
 
     this.logger.log(`Rolled back reservation ${dto.reservation_token}`);
 
     return { success: true };
+  }
+
+  /**
+   * Check if a reservation token is still valid in Redis.
+   * Used by cart service to decide whether to reuse an existing reservation.
+   */
+  async isReservationValid(reservationToken: string): Promise<boolean> {
+    const reservation =
+      await this.redisCouponService.getReservation(reservationToken);
+    return reservation != null;
   }
 
   /**
