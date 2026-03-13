@@ -2369,7 +2369,7 @@ export class OrderService {
       if (sellerStatusUpdateDto.status === "delivered") {
         updateData.delivered_at = new Date();
         // When seller sends payment_status 'paid' (e.g. COD collected), update order payment_status
-        if (sellerStatusUpdateDto.payment_status === "paid") {
+        if (order.payment_method === "cod" && sellerStatusUpdateDto.payment_status === "paid") {
           updateData.payment_status = "paid";
         }
       }
