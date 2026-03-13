@@ -6,10 +6,11 @@ import {
   InternalServerErrorException,
   ConflictException,
 } from "@nestjs/common";
-import { Cron } from "@nestjs/schedule";
+import { SchedulerRegistry } from "@nestjs/schedule";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, DataSource, In, LessThan, MoreThan } from "typeorm";
+import { CronJob } from "cron";
 import { v4 as uuidv4 } from "uuid";
 import { CouponCampaign, CampaignStatus } from "../entities/coupon-campaign.entity";
 import {
@@ -55,7 +56,38 @@ export class CouponService {
     private readonly redisCouponService: RedisCouponService,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
-  ) {}
+    private readonly schedulerRegistry: SchedulerRegistry,
+  ) {
+    this.registerAutoRollbackCron();
+  }
+
+  /**
+   * Register the auto-rollback cron job with an expression from env.
+   * Env: COUPON_RESERVATION_CRON_EXPRESSION (for example, a pattern that runs every 10 minutes).
+   */
+  private registerAutoRollbackCron() {
+    const expr =
+      this.configService.get<string>("COUPON_RESERVATION_CRON_EXPRESSION") ||
+      "*/10 * * * *"; // default: every 10 minutes
+
+    const job = new CronJob(
+      expr,
+      () => this.autoRollbackStaleReservations(),
+      null,
+      false,
+      "Asia/Kolkata",
+    );
+
+    this.schedulerRegistry.addCronJob(
+      "auto_rollback_stale_preorder_reservations",
+      job,
+    );
+    job.start();
+
+    this.logger.log(
+      `Registered auto-rollback cron with expression "${expr}" (Asia/Kolkata)`,
+    );
+  }
 
   // ==================== Campaign Management ====================
 
@@ -209,25 +241,12 @@ export class CouponService {
         );
       }
 
-      // Validate final_price for preorder (per-campaign selling price)
-      if (
-        dto.type_meta.final_price === undefined ||
-        dto.type_meta.final_price === null
-      ) {
-        throw new BadRequestException(
-          "final_price is required in type_meta for preorder coupons",
-        );
-      }
-
-      const finalPrice = Number(dto.type_meta.final_price);
-      if (!Number.isFinite(finalPrice) || finalPrice <= 0) {
-        throw new BadRequestException(
-          "final_price in type_meta for preorder coupons must be a positive number",
-        );
-      }
+      // NOTE: We no longer require type_meta.final_price for preorder coupons.
+      // Discount and effective final price are derived from coupon.value and value_type,
+      // together with max_discount_amount, in the cart and order flows.
 
       this.logger.log(
-        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}, final_price=${dto.type_meta.final_price}`,
+        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}`,
       );
     }
 
@@ -1060,14 +1079,6 @@ export class CouponService {
     return reservation != null;
   }
 
-  /**
-   * Auto-rollback stale reservations whose TTL has effectively expired.
-   * Runs periodically and restores quota for RESERVED redemptions older than the configured TTL.
-   */
-  @Cron("*/10 * * * *", {
-    name: "auto_rollback_stale_preorder_reservations",
-    timeZone: "Asia/Kolkata",
-  })
   async autoRollbackStaleReservations() {
     try {
       const ttlSeconds =
