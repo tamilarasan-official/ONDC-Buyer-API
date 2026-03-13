@@ -215,6 +215,7 @@ export class SellerSyncQueueService {
   async enqueueOrderCancel(payload: {
     external_order_id: string;
     cancel_code: string;
+    cancelled_by: string;
   }): Promise<string | null> {
     this.logger.log(
       `Enqueuing seller order cancel job for external_order_id=${payload.external_order_id}`,
