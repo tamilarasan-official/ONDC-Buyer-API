@@ -158,22 +158,33 @@ export class BuyerService {
         `🔍 Fetching nearby restaurants for location: ${userLocation.lat}, ${userLocation.lng}`,
       );
 
-      const [restaurantsResult, whatsOnYourMind, promotionalBanner, appOperationStatus, homeScreenCardStyle] =
-        await Promise.all([
-          this.getFeaturedRestaurants(
-            userLocation.lat,
-            userLocation.lng,
-            radiusKm,
-            vegMode,
-            userId,
-            page,
-            limit,
-          ),
-          this.getWhatsOnYourMind(vegMode),
-          this.getPromotionalBanner(),
-          this.appOperationHoursService.checkAppOperationStatus(),
-          this.appSettingsService.getRestaurantCardConfig(),
-        ]);
+      const [
+        restaurantsResult,
+        whatsOnYourMind,
+        promotionalBanner,
+        appOperationStatus,
+        homeScreenCardStyle,
+        codEnabled,
+        codMinAmount,
+        codMaxAmount,
+      ] = await Promise.all([
+        this.getFeaturedRestaurants(
+          userLocation.lat,
+          userLocation.lng,
+          radiusKm,
+          vegMode,
+          userId,
+          page,
+          limit,
+        ),
+        this.getWhatsOnYourMind(vegMode),
+        this.getPromotionalBanner(),
+        this.appOperationHoursService.checkAppOperationStatus(),
+        this.appSettingsService.getRestaurantCardConfig(),
+        this.appSettingsService.getBoolean("COD_ENABLED", false),
+        this.appSettingsService.getNumber("COD_MIN_AMOUNT", 0),
+        this.appSettingsService.getNumber("COD_MAX_AMOUNT", 0),
+      ]);
 
       this.logger.log(
         `📊 Results - Restaurants: ${restaurantsResult.restaurants.length}/${restaurantsResult.total}, Dishes: ${whatsOnYourMind.length}`,
@@ -200,6 +211,11 @@ export class BuyerService {
           next_open_time: appOperationStatus.nextOpenTime || null,
         },
         home_screen_restaurant_card_style: homeScreenCardStyle || "1",
+        cod_settings: {
+          cod_enabled: codEnabled,
+          cod_min_amount: codMinAmount ?? 0,
+          cod_max_amount: codMaxAmount ?? 0,
+        },
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);
