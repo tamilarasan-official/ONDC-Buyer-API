@@ -2379,6 +2379,10 @@ export class OrderService {
       // Set delivered_at timestamp if status is delivered
       if (sellerStatusUpdateDto.status === "delivered") {
         updateData.delivered_at = new Date();
+        // When seller sends payment_status 'paid' (e.g. COD collected), update order payment_status
+        if (order.payment_method === "cod" && sellerStatusUpdateDto.payment_status === "paid") {
+          updateData.payment_status = "paid";
+        }
       }
 
       // Update estimated delivery time if provided
