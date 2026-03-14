@@ -835,7 +835,8 @@ export class CouponService {
     reason?: string;
   }> {
     const reservationToken = uuidv4();
-    const ttl = 900; // 15 minutes default
+    const ttlRaw = this.configService.get<string>("COUPON_RESERVATION_TTL");
+    const ttl = ttlRaw ? Number(ttlRaw) || 900 : 900; // default: 15 minutes
 
     const metadata = {
       coupon_id: coupon.id,
@@ -1081,8 +1082,11 @@ export class CouponService {
 
   async autoRollbackStaleReservations() {
     try {
-      const ttlSeconds =
-        this.configService.get<number>("COUPON_RESERVATION_TTL") || 900;
+      this.logger.log(
+        "⏰ Running autoRollbackStaleReservations cron to check for stale coupon reservations",
+      );
+      const ttlRaw = this.configService.get<string>("COUPON_RESERVATION_TTL");
+      const ttlSeconds = ttlRaw ? Number(ttlRaw) || 900 : 900;
       // Add a small safety buffer so we only touch clearly expired reservations
       const bufferSeconds = 60;
       const cutoff = new Date(
