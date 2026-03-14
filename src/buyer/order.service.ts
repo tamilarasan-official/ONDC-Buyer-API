@@ -47,6 +47,26 @@ import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 
+/**
+ * Statuses for which buyer receives an order notification; all others use skipNotification.
+ * - created/pending: order placed (payment pending or being processed).
+ * - confirmed: seller accepted the order → buyer sees "Order confirmed by the restaurant".
+ * - billed, packed, agent-assigned, out_for_delivery, delivered: fulfillment updates.
+ * - cancelled, refunded: order cancelled or refunded.
+ */
+const BUYER_ORDER_NOTIFICATION_STATUSES = [
+  "created",
+  "pending",
+  "confirmed",
+  "billed",
+  "packed",
+  "agent-assigned",
+  "out_for_delivery",
+  "delivered",
+  "cancelled",
+  "refunded",
+] as const;
+
 @Injectable()
 export class OrderService {
   private readonly logger = new Logger(OrderService.name);
@@ -488,7 +508,7 @@ export class OrderService {
         undefined,
         undefined,
         undefined,
-        true, // skipNotification = true
+        !BUYER_ORDER_NOTIFICATION_STATUSES.includes(orderStatus as any),
       );
 
       // Note: Cart will be cleared after order confirmation (COD) or payment success (online)
@@ -1132,6 +1152,11 @@ export class OrderService {
         order.id,
         "cancelled",
         `Order cancelled: ${cancelOrderDto.reason || "Customer request"}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        !BUYER_ORDER_NOTIFICATION_STATUSES.includes("cancelled"),
       );
 
       // If payment was made, initiate refund
@@ -1583,7 +1608,7 @@ export class OrderService {
         undefined,
         undefined,
         undefined,
-        false, // Send notification about refund
+        !BUYER_ORDER_NOTIFICATION_STATUSES.includes("refunded"),
       );
 
       this.logger.log(
@@ -1722,6 +1747,11 @@ export class OrderService {
         orderId,
         paymentStatus,
         `Payment ${paymentStatus}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        !BUYER_ORDER_NOTIFICATION_STATUSES.includes(paymentStatus as any),
       );
 
       this.logger.log(`✅ Payment status updated for order ${orderId}`);
@@ -1934,7 +1964,16 @@ export class OrderService {
       }
 
       // Create tracking entry
-      await this.createOrderTracking(orderId, status, `Order ${status}`);
+      await this.createOrderTracking(
+        orderId,
+        status,
+        `Order ${status}`,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        !BUYER_ORDER_NOTIFICATION_STATUSES.includes(status as any),
+      );
 
       this.logger.log(`✅ Order status updated for order ${orderId}`);
     } catch (error) {
@@ -2468,20 +2507,27 @@ export class OrderService {
         sellerStatusUpdateDto.status === "cancelled"
           ? sellerStatusUpdateDto.cancel_reason
           : undefined,
+        true, // skipNotification: only send via createNotification below when status is allowed
       );
 
-      // Send notification to user
-      await this.notificationService.createNotification({
-        user_id: order.user.id,
-        title: `Order ${sellerStatusUpdateDto.status}`,
-        message: fullMessage,
-        type: "order",
-        data: {
-          order_number: order.order_number,
-          previous_status: previousStatus,
-          new_status: sellerStatusUpdateDto.status,
-        },
-      });
+      // Send notification to user only for allowed statuses.
+      // Exclude "created" and "pending" so "Order Placed Successfully" is sent only once (at order creation).
+      const status = sellerStatusUpdateDto.status;
+      const isAllowed = BUYER_ORDER_NOTIFICATION_STATUSES.includes(status as any);
+      const isPlacementStatus = status === "created" || status === "pending";
+      if (isAllowed && !isPlacementStatus) {
+        await this.notificationService.createNotification({
+          user_id: order.user.id,
+          title: `Order ${sellerStatusUpdateDto.status}`,
+          message: fullMessage,
+          type: "order",
+          data: {
+            order_number: order.order_number,
+            previous_status: previousStatus,
+            new_status: sellerStatusUpdateDto.status,
+          },
+        });
+      }
 
       this.logger.log(
         `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${sellerStatusUpdateDto.status}`,
