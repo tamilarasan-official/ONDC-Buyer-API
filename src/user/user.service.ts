@@ -93,18 +93,38 @@ export class UserService {
 
   async login(loginDto: LoginDto) {
     try {
-      // Convert phone number to string format for OTP service
-      const phoneNumberString = `+91${loginDto.phone_number}`;
+      const phoneStr = String(loginDto.phone_number).trim();
+      const bypassEnabled =
+        (this.configService.get<string>("IOS_REVIEW_BYPASS_ENABLED") ?? "")
+          .trim()
+          .toLowerCase() === "true";
+      const bypassPhone = (
+        this.configService.get<string>("IOS_REVIEW_BYPASS_PHONE_NUMBER") ?? ""
+      )
+        .trim()
+        .replace(/\D/g, "");
 
-      // Verify OTP using the new OTP service
-      const otpResponse = await this.otpService.verifyOtp({
-        phone_number: phoneNumberString,
-        otp: loginDto.otp.toString(),
-        purpose: OtpPurpose.REGISTRATION,
-      });
+      const isIosReviewBypass =
+        bypassEnabled && bypassPhone && phoneStr === bypassPhone;
 
-      if (!otpResponse.success || !otpResponse.verified) {
-        throw new BadRequestException(otpResponse.message);
+      if (!isIosReviewBypass) {
+        // Convert phone number to string format for OTP service
+        const phoneNumberString = `+91${loginDto.phone_number}`;
+
+        // Verify OTP using the new OTP service
+        const otpResponse = await this.otpService.verifyOtp({
+          phone_number: phoneNumberString,
+          otp: loginDto.otp.toString(),
+          purpose: OtpPurpose.REGISTRATION,
+        });
+
+        if (!otpResponse.success || !otpResponse.verified) {
+          throw new BadRequestException(otpResponse.message);
+        }
+      } else {
+        this.logger.log(
+          `iOS review bypass: login allowed for phone ${phoneStr} without OTP verification`,
+        );
       }
 
       // Find user
