@@ -800,7 +800,7 @@ export class NotificationService {
     const titles = {
       pending: "Order Placed Successfully",
       created: "Order Placed Successfully",
-      confirmed: "Order Placed Successfully",
+      confirmed: "Order Confirmed",
       preparing: "Order Being Prepared",
       out_for_delivery: "Order Out for Delivery",
       delivered: "Order Delivered",
