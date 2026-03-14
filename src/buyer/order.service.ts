@@ -55,13 +55,11 @@ import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service
  * - cancelled, refunded: order cancelled or refunded.
  */
 const BUYER_ORDER_NOTIFICATION_STATUSES = [
-  "created",
-  "pending",
   "confirmed",
   "billed",
   "packed",
   "agent-assigned",
-  "out_for_delivery",
+  "out-for-delivery",
   "delivered",
   "cancelled",
   "refunded",
@@ -2403,6 +2401,30 @@ export class OrderService {
         );
       }
 
+      // Reassignment when order is already past agent-assigned (picked, out_for_delivery, delivered):
+      // seller may send agent-assigned again with new rider. Do not move status backward or create duplicate tracking/notification.
+      const statusAlreadyPastAgentAssigned = [
+        "picked",
+        "out_for_delivery",
+        "out-for-delivery",
+        "delivered",
+      ].includes(order.status);
+      if (
+        sellerStatusUpdateDto.status === "agent-assigned" &&
+        statusAlreadyPastAgentAssigned
+      ) {
+        this.logger.log(
+          `⏭️ Order ${sellerStatusUpdateDto.order_number} already ${order.status} (past agent-assigned); ignoring agent-assigned (reassign) update`,
+        );
+        return {
+          success: true,
+          message: "Order status updated successfully",
+          order_number: sellerStatusUpdateDto.order_number,
+          previous_status: order.status,
+          new_status: order.status,
+        };
+      }
+
       // Validate status transition (before atomic update)
       this.sellerStatusService.validateSellerStatusUpdate(
         sellerStatusUpdateDto.order_number,
@@ -2477,11 +2499,25 @@ export class OrderService {
       }
 
       const previousStatus = order.status;
+      const newStatus = sellerStatusUpdateDto.status;
+
+      // Idempotency: when status unchanged (e.g. agent-assigned → agent-assigned on reassign),
+      // skip tracking and notification to avoid duplicates from multiple webhook deliveries.
+      if (previousStatus === newStatus) {
+        this.logger.log(
+          `⏭️ Order ${sellerStatusUpdateDto.order_number} status unchanged (${previousStatus}), skipping tracking and notification`,
+        );
+        return {
+          success: true,
+          message: "Order status updated successfully",
+          order_number: sellerStatusUpdateDto.order_number,
+          previous_status: previousStatus,
+          new_status: newStatus,
+        };
+      }
 
       // Create tracking entry
-      const statusMessage = this.sellerStatusService.getStatusMessage(
-        sellerStatusUpdateDto.status,
-      );
+      const statusMessage = this.sellerStatusService.getStatusMessage(newStatus);
       const fullMessage = sellerStatusUpdateDto.message
         ? `${statusMessage}. ${sellerStatusUpdateDto.message}`
         : statusMessage;
@@ -2499,7 +2535,7 @@ export class OrderService {
 
       await this.createOrderTracking(
         order.id,
-        sellerStatusUpdateDto.status,
+        newStatus,
         fullMessage,
         agentDetails,
         sellerStatusUpdateDto.tracking_url,
@@ -2512,7 +2548,7 @@ export class OrderService {
 
       // Send notification to user only for allowed statuses.
       // Exclude "created" and "pending" so "Order Placed Successfully" is sent only once (at order creation).
-      const status = sellerStatusUpdateDto.status;
+      const status = newStatus;
       const isAllowed = BUYER_ORDER_NOTIFICATION_STATUSES.includes(status as any);
       const isPlacementStatus = status === "created" || status === "pending";
       if (isAllowed && !isPlacementStatus) {
@@ -2530,7 +2566,7 @@ export class OrderService {
       }
 
       this.logger.log(
-        `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${sellerStatusUpdateDto.status}`,
+        `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${newStatus}`,
       );
 
       return {

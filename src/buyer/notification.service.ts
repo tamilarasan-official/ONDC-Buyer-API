@@ -258,36 +258,42 @@ export class NotificationService {
   /**
    * Create order status notification
    */
-  async createOrderNotification(
-    userId: number,
-    orderId: number,
-    status: string,
-    message: string,
-    additionalData?: any,
-  ): Promise<Notification> {
-    const title = this.getOrderNotificationTitle(status);
-    const notificationMessage = this.getOrderNotificationMessage(
-      status,
-      message,
-      additionalData,
-    );
+ async createOrderNotification(
+  userId: number,
+  orderId: number,
+  status: string,
+  message: string,
+  additionalData?: any,
+): Promise<Notification> {
 
-    const notification = await this.createNotification({
-      user_id: userId,
-      title,
-      message: notificationMessage,
-      type: "order",
-      data: {
-        order_id: orderId,
-        status,
-        ...additionalData,
-      },
-    });
-    
-    this.logger.log(`📦 ORDER NOTIFICATION | User: ${userId} | Order: ${orderId} | Status: ${status} | Title: "${title}" | Message: "${notificationMessage}" | Data: ${JSON.stringify(additionalData || {})}`);
-    
-    return notification;
-  }
+  const normalizedStatus = status === "out-for-delivery" ? "out_for_delivery" : status;
+
+  const title = this.getOrderNotificationTitle(normalizedStatus);
+
+  const notificationMessage = this.getOrderNotificationMessage(
+    normalizedStatus,
+    message,
+    additionalData,
+  );
+
+  const notification = await this.createNotification({
+    user_id: userId,
+    title,
+    message: notificationMessage,
+    type: "order",
+    data: {
+      order_id: orderId,
+      status,
+      ...additionalData,
+    },
+  });
+
+  this.logger.log(
+    `📦 ORDER NOTIFICATION | User: ${userId} | Order: ${orderId} | Status: ${status} | Title: "${title}" | Message: "${notificationMessage}" | Data: ${JSON.stringify(additionalData || {})}`
+  );
+
+  return notification;
+}
 
   /**
    * Create review reminder notification
@@ -800,7 +806,7 @@ export class NotificationService {
     const titles = {
       pending: "Order Placed Successfully",
       created: "Order Placed Successfully",
-      confirmed: "Order Confirmed",
+      confirmed: "Order Placed Successfully",
       preparing: "Order Being Prepared",
       out_for_delivery: "Order Out for Delivery",
       delivered: "Order Delivered",
@@ -838,9 +844,9 @@ export class NotificationService {
       return baseMessage;
     }
 
-    if (additionalData?.estimated_time) {
-      return `${baseMessage} Estimated delivery time: ${additionalData.estimated_time}`;
-    }
+    // if (additionalData?.estimated_time) {
+    //   return `${baseMessage} Estimated delivery time: ${additionalData.estimated_time}`;
+    // }
 
     return baseMessage;
   }
