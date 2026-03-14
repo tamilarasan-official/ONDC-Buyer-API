@@ -324,15 +324,6 @@ export class CouponService {
       }
     }
 
-    // Initialize counters
-    const counters = coupons.map((coupon) =>
-      this.counterRepository.create({
-        coupon_id: coupon.id,
-        redeemed_count: 0,
-      }),
-    );
-    await this.counterRepository.save(counters);
-
     this.logger.log(
       `Generated ${codes.length} codes for campaign ${campaignId}`,
     );
@@ -556,12 +547,13 @@ export class CouponService {
           message: "Coupon quota exhausted",
         };
       }
-      // Enforce limit using redeemed_count so reserves are blocked even if Redis was reset incorrectly
-      const counter = await this.counterRepository.findOne({
-        where: { coupon_id: coupon.id },
-        select: ["redeemed_count"],
+      // Enforce limit using actual redemption count (source of truth) so reserves are blocked even if Redis was reset incorrectly
+      const redeemedCount = await this.redemptionRepository.count({
+        where: {
+          coupon_id: coupon.id,
+          status: RedemptionStatus.REDEEMED,
+        },
       });
-      const redeemedCount = counter?.redeemed_count ?? 0;
       if (redeemedCount >= limit) {
         return {
           valid: false,
@@ -970,22 +962,6 @@ export class CouponService {
 
       await queryRunner.manager.save(redemption);
 
-      // Update counter
-      let counter = await queryRunner.manager.findOne(CouponCounter, {
-        where: { coupon_id: coupon.id },
-      });
-
-      if (!counter) {
-        counter = queryRunner.manager.create(CouponCounter, {
-          coupon_id: coupon.id,
-          redeemed_count: 1,
-        });
-      } else {
-        counter.redeemed_count += 1;
-      }
-
-      await queryRunner.manager.save(counter);
-
       // If single-use, update coupon status
       if (coupon.global_usage_limit === 1) {
         coupon.status = CouponStatus.REVOKED;
@@ -1209,12 +1185,14 @@ export class CouponService {
     }
 
     const currentQuota = await this.redisCouponService.getQuota(couponId);
-    const counter = await this.counterRepository.findOne({
-      where: { coupon_id: couponId },
-      select: ["redeemed_count"],
+    // Use coupon_redemptions as source of truth for redeemed_count so quota API
+    // is never out of sync with actual redemption rows (coupon_counters can drift).
+    const redeemedCount = await this.redemptionRepository.count({
+      where: {
+        coupon_id: couponId,
+        status: RedemptionStatus.REDEEMED,
+      },
     });
-
-    const redeemedCount = counter?.redeemed_count ?? 0;
     const globalLimit =
       coupon.global_usage_limit != null
         ? Number(coupon.global_usage_limit)
