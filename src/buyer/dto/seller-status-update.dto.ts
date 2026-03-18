@@ -241,6 +241,16 @@ export class SellerStatusUpdateDto {
   delivery_code?: string;
 
   @ApiProperty({
+    description: "Payment status (e.g. 'paid' when seller sends delivered + COD collected)",
+    example: "paid",
+    type: "string",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
+
+  @ApiProperty({
     description: "Cancel reason details (required when status is 'cancelled')",
     type: CancelReasonDto,
     required: false,

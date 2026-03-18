@@ -6,6 +6,7 @@ import {
   forwardRef,
   Optional,
   NotFoundException,
+  UnauthorizedException,
   Logger,
   ServiceUnavailableException,
 } from "@nestjs/common";
@@ -158,7 +159,7 @@ export class UserService {
       });
 
       if (!profile) {
-        throw new NotFoundException("User profile not found");
+        throw new UnauthorizedException("User profile not found");
       }
 
       profile.phone_number = Number(profile.phone_number);
@@ -184,6 +185,9 @@ export class UserService {
 
       return profileData;
     } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
       throw new BadRequestException("Failed to retrieve user profile", error);
     }
   }
@@ -195,7 +199,7 @@ export class UserService {
       });
 
       if (!profile) {
-        throw new NotFoundException("User profile not found");
+        throw new UnauthorizedException("User profile not found");
       }
 
       if (updateUserDto.phone_number) {
@@ -225,7 +229,7 @@ export class UserService {
 
       return updatedUser;
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof UnauthorizedException || error instanceof NotFoundException) {
         throw error;
       }
       throw new ConflictException("Failed to update user profile", error);
@@ -240,7 +244,7 @@ export class UserService {
       });
 
       if (!profile) {
-        throw new NotFoundException("User profile not found");
+        throw new UnauthorizedException("User profile not found");
       }
 
       // Validate that coordinates are not the default values (location permissions disabled)
@@ -303,7 +307,7 @@ export class UserService {
 
       return address;
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof UnauthorizedException || error instanceof NotFoundException) {
         throw error;
       }
       // Handle serviceable area validation errors with proper message
@@ -377,7 +381,7 @@ export class UserService {
       });
 
       if (!profile) {
-        throw new NotFoundException("User profile not found");
+        throw new UnauthorizedException("User profile not found");
       }
 
       const address = await this.userAddressRepository.findOne({
@@ -489,7 +493,7 @@ export class UserService {
 
       return updatedAddress;
     } catch (error) {
-      if (error instanceof NotFoundException) {
+      if (error instanceof UnauthorizedException || error instanceof NotFoundException) {
         throw error;
       }
       // Handle serviceable area validation errors with proper message

@@ -9,6 +9,7 @@ import { Item } from "../item/entities/item.entity";
 import { Order } from "../order/entities/order.entity";
 import { firstValueFrom } from "rxjs";
 import { HttpService } from "@nestjs/axios";
+import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 
 export interface UpdateReviewDto {
   rating?: number;
@@ -57,6 +58,7 @@ export class ReviewService {
     @InjectRepository(Order)
     private readonly orderRepository: Repository<Order>,
     private readonly httpService: HttpService,
+    private readonly sellerSyncQueueService: SellerSyncQueueService,
   ) { }
 
   /**
@@ -240,21 +242,30 @@ export class ReviewService {
           }) || [],
       };
 
-      const sellerApiUrl =
-      process.env.SELLER_API_URL || "http://localhost:3000";
-      const endpoint = `${sellerApiUrl}/reviews`;
-      console.log('sellerApiUrl: ', sellerApiUrl);
-
-      const response = await firstValueFrom(
-        this.httpService.post(endpoint, payload, {
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          timeout: 10000, // 10 second timeout
-        }),
+      const row = await this.sellerSyncQueueService.addOutboxRow(
+        "review.push",
+        String(createReviewDto.order_id),
+        payload as Record<string, unknown>,
       );
-      console.log('response: ', response.data);
+      const jobId = await this.sellerSyncQueueService.enqueueReviewPush(payload);
+      await this.sellerSyncQueueService.updateOutboxToQueued(
+        row.id,
+        jobId ?? undefined,
+      );
+
+      // Previous direct HTTP call – kept for reference
+      // const sellerApiUrl =
+      //   process.env.SELLER_API_URL || "http://localhost:3000";
+      // const endpoint = `${sellerApiUrl}/reviews`;
+      // const response = await firstValueFrom(
+      //   this.httpService.post(endpoint, payload, {
+      //     headers: {
+      //       "Content-Type": "application/json",
+      //       Accept: "application/json",
+      //     },
+      //     timeout: 10000,
+      //   }),
+      // );
 
       this.logger.log(
         `Saved overall rating ${createReviewDto.overall_rating} to order ${createReviewDto.order_id}`,
@@ -273,6 +284,7 @@ export class ReviewService {
         `Failed to create unified review: ${error.message}`,
         error.stack,
       );
+      // Keep throwing so caller sees review failure; seller sync failures are handled in the worker
       throw error;
     }
   }

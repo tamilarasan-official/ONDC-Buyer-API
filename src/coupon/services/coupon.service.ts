@@ -6,8 +6,11 @@ import {
   InternalServerErrorException,
   ConflictException,
 } from "@nestjs/common";
+import { SchedulerRegistry } from "@nestjs/schedule";
+import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, DataSource, In, LessThan, MoreThan } from "typeorm";
+import { CronJob } from "cron";
 import { v4 as uuidv4 } from "uuid";
 import { CouponCampaign, CampaignStatus } from "../entities/coupon-campaign.entity";
 import {
@@ -52,7 +55,39 @@ export class CouponService {
     private readonly itemRepository: Repository<Item>,
     private readonly redisCouponService: RedisCouponService,
     private readonly dataSource: DataSource,
-  ) {}
+    private readonly configService: ConfigService,
+    private readonly schedulerRegistry: SchedulerRegistry,
+  ) {
+    this.registerAutoRollbackCron();
+  }
+
+  /**
+   * Register the auto-rollback cron job with an expression from env.
+   * Env: COUPON_RESERVATION_CRON_EXPRESSION (for example, a pattern that runs every 10 minutes).
+   */
+  private registerAutoRollbackCron() {
+    const expr =
+      this.configService.get<string>("COUPON_RESERVATION_CRON_EXPRESSION") ||
+      "*/10 * * * *"; // default: every 10 minutes
+
+    const job = new CronJob(
+      expr,
+      () => this.autoRollbackStaleReservations(),
+      null,
+      false,
+      "Asia/Kolkata",
+    );
+
+    this.schedulerRegistry.addCronJob(
+      "auto_rollback_stale_preorder_reservations",
+      job,
+    );
+    job.start();
+
+    this.logger.log(
+      `Registered auto-rollback cron with expression "${expr}" (Asia/Kolkata)`,
+    );
+  }
 
   // ==================== Campaign Management ====================
 
@@ -206,6 +241,10 @@ export class CouponService {
         );
       }
 
+      // NOTE: We no longer require type_meta.final_price for preorder coupons.
+      // Discount and effective final price are derived from coupon.value and value_type,
+      // together with max_discount_amount, in the cart and order flows.
+
       this.logger.log(
         `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${dto.type_meta.delivery_date}`,
       );
@@ -284,15 +323,6 @@ export class CouponService {
         );
       }
     }
-
-    // Initialize counters
-    const counters = coupons.map((coupon) =>
-      this.counterRepository.create({
-        coupon_id: coupon.id,
-        redeemed_count: 0,
-      }),
-    );
-    await this.counterRepository.save(counters);
 
     this.logger.log(
       `Generated ${codes.length} codes for campaign ${campaignId}`,
@@ -506,10 +536,25 @@ export class CouponService {
       }
     }
 
-    // Check global quota (via Redis)
+    // Check global quota: both Redis and DB (redeemed_count) so we never over-sell when Redis is out of sync
     if (coupon.global_usage_limit) {
+      const limit = Number(coupon.global_usage_limit);
       const quota = await this.redisCouponService.getQuota(coupon.id);
       if (quota !== null && quota <= 0) {
+        return {
+          valid: false,
+          reason_code: "QUOTA_EXCEEDED",
+          message: "Coupon quota exhausted",
+        };
+      }
+      // Enforce limit using actual redemption count (source of truth) so reserves are blocked even if Redis was reset incorrectly
+      const redeemedCount = await this.redemptionRepository.count({
+        where: {
+          coupon_id: coupon.id,
+          status: RedemptionStatus.REDEEMED,
+        },
+      });
+      if (redeemedCount >= limit) {
         return {
           valid: false,
           reason_code: "QUOTA_EXCEEDED",
@@ -782,7 +827,8 @@ export class CouponService {
     reason?: string;
   }> {
     const reservationToken = uuidv4();
-    const ttl = 900; // 15 minutes default
+    const ttlRaw = this.configService.get<string>("COUPON_RESERVATION_TTL");
+    const ttl = ttlRaw ? Number(ttlRaw) || 900 : 900; // default: 15 minutes
 
     const metadata = {
       coupon_id: coupon.id,
@@ -916,22 +962,6 @@ export class CouponService {
 
       await queryRunner.manager.save(redemption);
 
-      // Update counter
-      let counter = await queryRunner.manager.findOne(CouponCounter, {
-        where: { coupon_id: coupon.id },
-      });
-
-      if (!counter) {
-        counter = queryRunner.manager.create(CouponCounter, {
-          coupon_id: coupon.id,
-          redeemed_count: 1,
-        });
-      } else {
-        counter.redeemed_count += 1;
-      }
-
-      await queryRunner.manager.save(counter);
-
       // If single-use, update coupon status
       if (coupon.global_usage_limit === 1) {
         coupon.status = CouponStatus.REVOKED;
@@ -972,33 +1002,109 @@ export class CouponService {
    * Rollback reservation
    */
   async rollbackCoupon(dto: RollbackCouponDto): Promise<{ success: boolean }> {
+    // Try to get reservation metadata from Redis (may have expired)
     const reservation = await this.redisCouponService.getReservation(
       dto.reservation_token,
     );
 
-    if (!reservation) {
-      throw new NotFoundException("Reservation not found or expired");
-    }
-
-    // Update redemption status
+    // Update redemption status (DB is the source of truth even if Redis expired)
     const redemption = await this.redemptionRepository.findOne({
       where: { reserved_token: dto.reservation_token },
     });
+
+    if (!reservation && !redemption) {
+      throw new NotFoundException("Reservation not found or already rolled back");
+    }
+
+    // If already redeemed, treat rollback as a no-op (idempotent)
+    if (redemption && redemption.status === RedemptionStatus.REDEEMED) {
+      this.logger.log(
+        `Rollback requested for already redeemed reservation ${dto.reservation_token}, skipping.`,
+      );
+      return { success: true };
+    }
 
     if (redemption) {
       redemption.status = RedemptionStatus.ROLLED_BACK;
       await this.redemptionRepository.save(redemption);
     }
 
-    // Release reservation and increment quota
-    await this.redisCouponService.releaseReservation(
-      reservation.coupon_id,
-      dto.reservation_token,
-    );
+    // Determine coupon_id for quota restoration
+    const couponId =
+      reservation?.coupon_id ?? redemption?.coupon_id;
+
+    if (couponId) {
+      // releaseReservation always restores quota even if the Redis key has already expired.
+      await this.redisCouponService.releaseReservation(
+        couponId,
+        dto.reservation_token,
+      );
+    }
 
     this.logger.log(`Rolled back reservation ${dto.reservation_token}`);
 
     return { success: true };
+  }
+
+  /**
+   * Check if a reservation token is still valid in Redis.
+   * Used by cart service to decide whether to reuse an existing reservation.
+   */
+  async isReservationValid(reservationToken: string): Promise<boolean> {
+    const reservation =
+      await this.redisCouponService.getReservation(reservationToken);
+    return reservation != null;
+  }
+
+  async autoRollbackStaleReservations() {
+    try {
+      this.logger.log(
+        "⏰ Running autoRollbackStaleReservations cron to check for stale coupon reservations",
+      );
+      const ttlRaw = this.configService.get<string>("COUPON_RESERVATION_TTL");
+      const ttlSeconds = ttlRaw ? Number(ttlRaw) || 900 : 900;
+      // Add a small safety buffer so we only touch clearly expired reservations
+      const bufferSeconds = 60;
+      const cutoff = new Date(
+        Date.now() - (ttlSeconds + bufferSeconds) * 1000,
+      );
+
+      const staleRedemptions = await this.redemptionRepository.find({
+        where: {
+          status: RedemptionStatus.RESERVED,
+          created_at: LessThan(cutoff),
+        },
+      });
+
+      if (!staleRedemptions.length) {
+        return;
+      }
+
+      this.logger.log(
+        `🧹 Auto-rollback: found ${staleRedemptions.length} stale reservations older than TTL`,
+      );
+
+      for (const redemption of staleRedemptions) {
+        if (!redemption.reserved_token) {
+          continue;
+        }
+        try {
+          await this.rollbackCoupon({
+            reservation_token: redemption.reserved_token,
+            reason: "Auto-rollback after TTL expiry",
+          });
+        } catch (error) {
+          this.logger.warn(
+            `⚠️ Failed auto-rollback for reservation ${redemption.reserved_token}: ${error.message}`,
+          );
+        }
+      }
+    } catch (error) {
+      this.logger.error(
+        `❌ Error during auto-rollback of stale reservations: ${error.message}`,
+        error.stack,
+      );
+    }
   }
 
   /**
@@ -1055,15 +1161,19 @@ export class CouponService {
 
   /**
    * Get current quota for a coupon
-   * - current_quota: remaining slots from Redis (used by reserve/release)
+   * - current_quota: remaining slots from Redis (used by reserve/release; can be stale if Redis was reset)
    * - global_usage_limit: max limit from DB (coupon config)
    * - redeemed_count: number of successful redemptions from DB (paid uses)
+   * - effective_remaining: max(0, global_usage_limit - redeemed_count); true remaining slots by config
+   * - quota_out_of_sync: true when Redis current_quota disagrees with effective_remaining (e.g. Redis reset without accounting for redeemed_count)
    */
   async getCouponQuota(couponId: number): Promise<{
     coupon_id: number;
     current_quota: number | null;
     global_usage_limit: number | null;
     redeemed_count: number;
+    effective_remaining: number;
+    quota_out_of_sync: boolean;
   }> {
     const coupon = await this.couponRepository.findOne({
       where: { id: couponId },
@@ -1075,16 +1185,33 @@ export class CouponService {
     }
 
     const currentQuota = await this.redisCouponService.getQuota(couponId);
-    const counter = await this.counterRepository.findOne({
-      where: { coupon_id: couponId },
-      select: ["redeemed_count"],
+    // Use coupon_redemptions as source of truth for redeemed_count so quota API
+    // is never out of sync with actual redemption rows (coupon_counters can drift).
+    const redeemedCount = await this.redemptionRepository.count({
+      where: {
+        coupon_id: couponId,
+        status: RedemptionStatus.REDEEMED,
+      },
     });
+    const globalLimit =
+      coupon.global_usage_limit != null
+        ? Number(coupon.global_usage_limit)
+        : null;
+    const effectiveRemaining =
+      globalLimit != null
+        ? Math.max(0, globalLimit - redeemedCount)
+        : currentQuota ?? 0;
+    const outOfSync =
+      globalLimit != null &&
+      (currentQuota === null || currentQuota !== effectiveRemaining);
 
     return {
       coupon_id: couponId,
       current_quota: currentQuota,
       global_usage_limit: coupon.global_usage_limit ?? null,
-      redeemed_count: counter?.redeemed_count ?? 0,
+      redeemed_count: redeemedCount,
+      effective_remaining: effectiveRemaining,
+      quota_out_of_sync: outOfSync,
     };
   }
 

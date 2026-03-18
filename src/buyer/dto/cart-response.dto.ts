@@ -147,12 +147,18 @@ export class CartItemResponseDto {
   @ApiProperty({ description: "Is this a preorder item?", required: false })
   is_preorder?: boolean;
 
-  @ApiProperty({ description: "Preorder campaign info", required: false })
+  @ApiProperty({
+    description:
+      "Preorder campaign info (only present when is_preorder is true). final_price is the per-unit selling price for this preorder campaign.",
+    required: false,
+  })
   preorder_campaign?: {
     id: number;
     title: string;
     delivery_date: string;
     available_slots: number;
+    free_delivery?: boolean;
+    final_price?: number;
   };
 }
 

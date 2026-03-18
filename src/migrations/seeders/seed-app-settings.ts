@@ -133,6 +133,24 @@ async function seedAppSettings() {
         category: "app_config",
         description: "Minimum Android app version code required - users with lower versions will be forced to update",
       },
+      {
+        key: "COD_ENABLED",
+        value: "false",
+        category: "app_config",
+        description: "Enable or disable Cash on Delivery payment option",
+      },
+      {
+        key: "COD_MIN_AMOUNT",
+        value: "0",
+        category: "app_config",
+        description: "Minimum order amount (₹) for Cash on Delivery",
+      },
+      {
+        key: "COD_MAX_AMOUNT",
+        value: "5000",
+        category: "app_config",
+        description: "Maximum order amount (₹) for Cash on Delivery",
+      },
     ];
 
     console.log(`🌱 Seeding ${settings.length} app settings...`);

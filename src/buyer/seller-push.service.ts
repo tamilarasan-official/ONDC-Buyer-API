@@ -9,6 +9,7 @@ import { Coupon } from "../coupon/entities/coupon.entity";
 import { AppSettings } from "../shared/entities/app-settings.entity";
 import { platform } from "os";
 import { CartService } from "./cart.service";
+import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 
 @Injectable()
 export class SellerPushService {
@@ -23,45 +24,46 @@ export class SellerPushService {
     @InjectRepository(AppSettings)
     private readonly appSettingsRepository: Repository<AppSettings>,
     private readonly cartService: CartService,
+    private readonly sellerSyncQueueService: SellerSyncQueueService,
   ) { }
 
   /**
-   * Push order to seller immediately after order creation
+   * Push order to seller: insert outbox first (durable), then enqueue. On success mark queued.
+   * COD orders use a delay (SELLER_SYNC_COD_DELAY_MS, default 30s).
    */
   async pushOrderToSeller(order: Order): Promise<void> {
-    console.log('order: ', order);
     try {
-      this.logger.log(`🚀 Pushing order ${order.order_number} to seller`);
+      this.logger.log(
+        `Enqueuing order ${order.order_number} for seller sync`,
+      );
 
       const payload = await this.transformOrderToSellerPayload(order);
-      console.log('payload: ', payload);
 
-      // Get seller API URL from environment
-      const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3000";
-      const endpoint = `${sellerApiUrl}/orders`;
-      console.log('endpoint: ', endpoint);
-
-      this.logger.log(`Sending order to seller endpoint: ${endpoint}`);
-      this.logger.log(`📤 SELLER PUSH PAYLOAD:`);
-      this.logger.log(JSON.stringify(payload, null, 2));
-
-      // Send HTTP request to seller
-      const response = await firstValueFrom(
-        this.httpService.post(endpoint, payload, {
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          timeout: 10000, // 10 second timeout
-        }),
+      let row = await this.sellerSyncQueueService.getOutboxRow(
+        "order.push",
+        order.order_number,
       );
-      console.log('response: seller=============> ', response.data);
+      if (!row) {
+        row = await this.sellerSyncQueueService.addOutboxRow(
+          "order.push",
+          order.order_number,
+          payload as Record<string, unknown>,
+        );
+      }
 
-      this.logger.log(
-        `✅ Order ${order.order_number} pushed to seller successfully. Status: ${response.status}`,
+      const delayMs =
+        order.payment_method === "cod"
+          ? this.sellerSyncQueueService.getCodDelayMs()
+          : undefined;
+
+      const jobId = await this.sellerSyncQueueService.enqueueOrderPush(
+        payload,
+        delayMs != null ? { delayMs } : undefined,
       );
-      return response.data;
+      await this.sellerSyncQueueService.updateOutboxToQueued(
+        row.id,
+        jobId ?? undefined,
+      );
     } catch (error) {
       this.logger.error(
         `❌ Failed to push order ${order.order_number} to seller: ${error.message}`,
@@ -171,9 +173,10 @@ export class SellerPushService {
   }
 
   /**
-   * Transform order data to seller payload format
+   * Transform order data to seller payload format.
+   * Public so OrderService can build payload inside the same transaction as order creation.
    */
-  private async transformOrderToSellerPayload(order: Order) {
+  async transformOrderToSellerPayload(order: Order) {
     const address = {
       address1: order.delivery_address_line1,
       address2: order.delivery_address_line2,
@@ -380,32 +383,27 @@ export class SellerPushService {
     };
 
     try {
-      const sellerApiUrl =
-        process.env.SELLER_API_URL || "http://localhost:3001";
-      const endpoint = `${sellerApiUrl}/orders`;
+      // Route test payload through async seller sync queue as an order push
+      await this.sellerSyncQueueService.enqueueOrderPush(testPayload);
 
-      this.logger.log(`🧪 Testing seller push to: ${endpoint}`);
-
-      const response = await firstValueFrom(
-        this.httpService.post(endpoint, testPayload, {
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          timeout: 10000,
-        }),
-      );
-
-      this.logger.log(
-        `✅ Test seller push successful. Status: ${response.status}`,
-      );
+      // Previous direct HTTP call – kept for reference
+      // const sellerApiUrl =
+      //   process.env.SELLER_API_URL || "http://localhost:3001";
+      // const endpoint = `${sellerApiUrl}/orders`;
+      // const response = await firstValueFrom(
+      //   this.httpService.post(endpoint, testPayload, {
+      //     headers: {
+      //       "Content-Type": "application/json",
+      //       Accept: "application/json",
+      //     },
+      //     timeout: 10000,
+      //   }),
+      // );
+      // this.logger.log(
+      //   `✅ Test seller push successful. Status: ${response.status}`,
+      // );
     } catch (error) {
       this.logger.error(`❌ Test seller push failed: ${error.message}`);
-      if (error.response) {
-        this.logger.error(
-          `Seller API Error Response: ${JSON.stringify(error.response.data)}`,
-        );
-      }
     }
   }
 }
