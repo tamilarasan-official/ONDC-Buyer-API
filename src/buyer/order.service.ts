@@ -2283,6 +2283,19 @@ export class OrderService {
       tracking_url: order.tracking && order.tracking.length > 0
         ? order.tracking[order.tracking.length - 1].tracking_url
         : null,
+      tracking_id: order.tracking && order.tracking.length > 0
+        ? (() => {
+          const url = order.tracking[order.tracking.length - 1].tracking_url;
+          if (!url) return null;
+          const last = String(url)
+            .split(/[?#]/)[0]
+            .split("/")
+            .filter(Boolean)
+            .pop();
+          const n = last != null ? Number(last) : NaN;
+          return Number.isFinite(n) ? n : null;
+        })()
+        : null,
       delivery_code: order.tracking && order.tracking.length > 0
         ? (() => {
           // Find the most recent tracking event that has a delivery_code
