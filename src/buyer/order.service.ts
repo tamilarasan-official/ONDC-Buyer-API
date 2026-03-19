@@ -1093,6 +1093,7 @@ export class OrderService {
           const payload = {
             external_order_id: order.order_number,
             cancel_code: cancelOrderDto.code,
+            cancelled_by: cancelOrderDto.cancelled_by,
           };
 
           const row = await this.sellerSyncQueueService.addOutboxRow(
