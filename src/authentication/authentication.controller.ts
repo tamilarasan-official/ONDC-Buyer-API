@@ -1,20 +1,14 @@
 import {
   Controller,
-  Get,
   Post,
   Body,
-  Patch,
-  Param,
-  Delete,
-  Query,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from "@nestjs/swagger";
 import { AuthenticationService } from "./authentication.service";
 import { LoginDto } from "./dto/login.dto";
-import { PaginationDto } from "src/shared/dto/pagination.dto";
 import { RefreshTokenDto } from "./dto/refresh-token.dto";
 import { GenerateOtpDto } from "./dto/generate-otp.dto";
-import { generate } from "rxjs";
+import { GuestLoginDto } from "./dto/guest-login.dto";
 
 @ApiTags("Authentication")
 @Controller("authentication")
@@ -82,7 +76,7 @@ export class AuthenticationController {
   @ApiOperation({
     summary: "Login with phone number and OTP",
     description:
-      "Authenticate user using phone number and OTP. Returns access token and refresh token upon successful authentication.",
+      "Authenticate user using phone number and OTP. Returns access token and refresh token upon successful authentication.\n\nIf the client includes an optional `identity_token` (from `POST /authentication/guest-login`) in the request body, the server will link the guest identity for analytics attribution and invalidate active guest sessions for that identity.",
   })
   @ApiBody({ type: LoginDto })
   @ApiResponse({
@@ -141,6 +135,71 @@ export class AuthenticationController {
   })
   login(@Body() loginDto: LoginDto) {
     return this.authenticationService.login(loginDto);
+  }
+
+  @Post("guest-login")
+  @ApiOperation({
+    summary: "Guest login",
+    description:
+      "Issue a restricted guest JWT token for discovery APIs. OTP is not required. If `identity_token` is provided and valid, the server keeps the same guest identity for analytics; it only rotates the short-lived session (JWT).",
+  })
+  @ApiBody({ type: GuestLoginDto, required: false })
+  @ApiResponse({
+    status: 200,
+    description: "Guest token issued successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Guest login successful" },
+        data: {
+          type: "object",
+          properties: {
+            access_token: {
+              type: "string",
+              example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+            },
+            token_type: { type: "string", example: "Bearer" },
+            is_guest: { type: "boolean", example: true },
+            expires_in_seconds: { type: "number", example: 1800 },
+            identity_token: {
+              type: "string",
+              description:
+                "Long-lived identity token (opaque). Store it on the client to keep guest analytics stable across app restarts.",
+              nullable: true,
+              example: "aZxY...opaque...",
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 400,
+    description: "Bad request - Invalid guest login payload",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Invalid guest login payload" },
+        error: { type: "string", example: "BAD_REQUEST" },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 500,
+    description: "Internal server error",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        message: { type: "string", example: "Failed to issue guest token" },
+        error: { type: "string", example: "INTERNAL_SERVER_ERROR" },
+      },
+    },
+  })
+  guestLogin(@Body() guestLoginDto: GuestLoginDto = {}) {
+    return this.authenticationService.guestLogin(guestLoginDto);
   }
 
   @Post("refresh-token")

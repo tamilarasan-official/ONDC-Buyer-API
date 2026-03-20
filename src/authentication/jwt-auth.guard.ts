@@ -4,6 +4,7 @@ import {
   ExecutionContext,
   BadRequestException,
   UnauthorizedException,
+  ForbiddenException,
 } from "@nestjs/common";
 import { Request } from "express";
 import { verifyAccessToken } from "../shared/utils/jwt";
@@ -43,10 +44,17 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const user = verifyAccessToken(token);
+      // Guests are allowed only on discovery routes via GuestOrUserAuthGuard.
+      if (user && (user as any).type === "guest") {
+        throw new ForbiddenException("Guest token cannot access this API");
+      }
       (request as any).user = user;
       return true;
     } catch (error) {
       if (error instanceof BadRequestException) {
+        throw error;
+      }
+      if (error instanceof ForbiddenException) {
         throw error;
       }
       throw new UnauthorizedException("Invalid token");
