@@ -61,6 +61,8 @@ import { Coupon } from "../coupon/entities/coupon.entity";
 import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
 import { WebhookEvent } from "../payment/entities/webhook-event.entity";
 import { AppSettings } from "../shared/entities/app-settings.entity";
+import { GuestSession } from "../authentication/entities/guest-session.entity";
+import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard";
 
 @Module({
   imports: [
@@ -105,6 +107,7 @@ import { AppSettings } from "../shared/entities/app-settings.entity";
       CouponRedemption,
       WebhookEvent,
       AppSettings,
+      GuestSession,
     ]),
     HttpModule.register({
       timeout: 10000,
@@ -129,6 +132,7 @@ import { AppSettings } from "../shared/entities/app-settings.entity";
     AppServiceableAreaService,
     FCMService,
     InvoiceService,
+    GuestOrUserAuthGuard,
   ],
   exports: [
     BuyerService,

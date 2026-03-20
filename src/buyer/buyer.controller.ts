@@ -29,6 +29,7 @@ import {
 } from "@nestjs/swagger";
 import { BuyerService } from "./buyer.service";
 import { JwtAuthGuard } from "../authentication/jwt-auth.guard";
+import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard";
 import { HomeResponseDto } from "./dto/home-response.dto";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -117,12 +118,12 @@ export class BuyerController {
   ) { }
 
   @Get("home")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(GuestOrUserAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Get home page data",
     description:
-      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, promotional banners (dynamically fetched from banner management system - returns all active banners ordered by sequence), and app operation hours status. Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants. App operation status indicates if ordering is currently available.',
+      'Retrieve home page data including nearby restaurants, "What\'s On Your Mind?" dishes, promotional banners (dynamically fetched from banner management system - returns all active banners ordered by sequence), and app operation hours status. Uses location-based filtering with Haversine formula for distance calculation. Supports pagination for restaurants. App operation status indicates if ordering is currently available. Supports both user and guest JWTs.',
   })
   @ApiQuery({
     name: "lat",
@@ -286,12 +287,12 @@ export class BuyerController {
   }
 
   @Get("search")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(GuestOrUserAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Search restaurants, items, and categories",
     description:
-      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters. Items include preorder campaign info if available. Response includes app operation hours status.",
+      "Comprehensive search functionality with location-based filtering. Search across restaurants, food items, and categories with advanced filtering options including distance, rating, price, and category filters. Items include preorder campaign info if available. Response includes app operation hours status. Supports both user and guest JWTs.",
   })
   @ApiResponse({
     status: 200,
@@ -328,12 +329,12 @@ export class BuyerController {
   }
 
   @Post("search/suggestions")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(GuestOrUserAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Get search suggestions",
     description:
-      "Get real-time search suggestions based on dishes, restaurants, and categories with advanced filtering. Returns suggestions prioritized by dishes (60%), restaurants (30%), and categories (10%).",
+      "Get real-time search suggestions based on dishes, restaurants, and categories with advanced filtering. Returns suggestions prioritized by dishes (60%), restaurants (30%), and categories (10%). Supports both user and guest JWTs.",
   })
   @ApiBody({
     type: SearchSuggestionsRequestDto,
@@ -445,12 +446,12 @@ export class BuyerController {
   }
 
   @Get("restaurants/:id")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(GuestOrUserAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Get restaurant details",
     description:
-      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM). Items include preorder campaign info if available. Response includes app operation hours status.",
+      "Get detailed information about a specific restaurant including menu with item availability timings, offers, restaurant operating hours, locations, and statistics. Each menu item includes timing windows showing when the item is available (e.g., breakfast items 6AM-11AM). Items include preorder campaign info if available. Response includes app operation hours status. Supports both user and guest JWTs.",
   })
   @ApiParam({
     name: "id",
@@ -550,12 +551,12 @@ export class BuyerController {
   }
 
   @Get("restaurants/:id/menu")
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(GuestOrUserAuthGuard)
   @ApiBearerAuth("JWT-auth")
   @ApiOperation({
     summary: "Get restaurant menu",
     description:
-      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search. Items include preorder campaign info if available. Response includes app operation hours status.",
+      "Get restaurant menu with categories, items, pricing, customizations, and variants. Supports filtering by category, price range, dietary preferences, and search. Items include preorder campaign info if available. Response includes app operation hours status. Supports both user and guest JWTs.",
   })
   @ApiParam({
     name: "id",

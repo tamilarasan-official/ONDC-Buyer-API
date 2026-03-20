@@ -1,5 +1,5 @@
 import { Type } from "class-transformer";
-import { IsNumber, IsNotEmpty } from "class-validator";
+import { IsNumber, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
 import { ApiProperty } from "@nestjs/swagger";
 
 export class LoginDto {
@@ -26,4 +26,15 @@ export class LoginDto {
   @IsNotEmpty()
   @Type(() => Number)
   otp: number;
+
+  @ApiProperty({
+    description:
+      "Optional guest identity token from `POST /authentication/guest-login` to link guest analytics to this user login.",
+    example: "aZxY...opaque...",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(512)
+  identity_token?: string;
 }
