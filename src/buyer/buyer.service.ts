@@ -167,6 +167,7 @@ export class BuyerService {
         codEnabled,
         codMinAmount,
         codMaxAmount,
+        cancelTimerSecondsRaw,
       ] = await Promise.all([
         this.getFeaturedRestaurants(
           userLocation.lat,
@@ -184,6 +185,7 @@ export class BuyerService {
         this.appSettingsService.getBoolean("COD_ENABLED", false),
         this.appSettingsService.getNumber("COD_MIN_AMOUNT", 0),
         this.appSettingsService.getNumber("COD_MAX_AMOUNT", 0),
+        this.appSettingsService.getNumber("BUYER_CANCEL_TIMING_VALUE", 0),
       ]);
 
       this.logger.log(
@@ -216,6 +218,9 @@ export class BuyerService {
           cod_min_amount: codMinAmount ?? 0,
           cod_max_amount: codMaxAmount ?? 0,
         },
+        cancel_timer: Number.isFinite(cancelTimerSecondsRaw)
+          ? (cancelTimerSecondsRaw as number)
+          : 0,
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);

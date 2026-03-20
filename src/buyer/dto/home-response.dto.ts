@@ -561,6 +561,13 @@ export class HomeDataDto {
     type: "string",
   })
   home_screen_restaurant_card_style: string;
+
+  @ApiProperty({
+    description: "Buyer cancel timer in seconds (0 when disabled)",
+    example: 10,
+    type: "number",
+  })
+  cancel_timer: number;
 }
 
 export class HomeResponseDto {
