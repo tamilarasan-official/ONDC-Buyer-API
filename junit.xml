@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="jest tests" tests="16" failures="0" errors="0" time="8.513">
+  <testsuite name="FlowTestRunnerService" errors="0" failures="0" skipped="0" timestamp="2026-03-17T14:08:36" time="7.442" tests="6">
+    <testcase classname="FlowTestRunnerService should expose at least one whitelisted flow" name="FlowTestRunnerService should expose at least one whitelisted flow" time="0.002">
+    </testcase>
+    <testcase classname="FlowTestRunnerService should reject unknown flow id" name="FlowTestRunnerService should reject unknown flow id" time="0.01">
+    </testcase>
+    <testcase classname="FlowTestRunnerService should reject invalid numeric input type" name="FlowTestRunnerService should reject invalid numeric input type" time="0.001">
+    </testcase>
+    <testcase classname="FlowTestRunnerService should clean old reports before executing a flow" name="FlowTestRunnerService should clean old reports before executing a flow" time="0.002">
+    </testcase>
+    <testcase classname="FlowTestRunnerService should return passed run with test summary on success" name="FlowTestRunnerService should return passed run with test summary on success" time="0.001">
+    </testcase>
+    <testcase classname="FlowTestRunnerService should configure Jest to force exit" name="FlowTestRunnerService should configure Jest to force exit" time="0.001">
+    </testcase>
+  </testsuite>
+  <testsuite name="OrderService integration - percent coupon discount propagation" errors="0" failures="0" skipped="0" timestamp="2026-03-17T14:08:44" time="0.692" tests="1">
+    <testcase classname="OrderService integration - percent coupon discount propagation should persist cart discount and discounted final amount into order after coupon application" name="OrderService integration - percent coupon discount propagation should persist cart discount and discounted final amount into order after coupon application" time="0.003">
+    </testcase>
+  </testsuite>
+  <testsuite name="CouponService" errors="0" failures="0" skipped="0" timestamp="2026-03-17T14:08:45" time="0.278" tests="9">
+    <testcase classname="CouponService should be defined" name="CouponService should be defined" time="0.015">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - flat type should validate flat coupon successfully" name="CouponService validateCoupon - flat type should validate flat coupon successfully" time="0.004">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - flat type should reject if min cart value not met" name="CouponService validateCoupon - flat type should reject if min cart value not met" time="0.003">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - percent type should calculate percent discount with max cap" name="CouponService validateCoupon - percent type should calculate percent discount with max cap" time="0.003">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - percent type should never return discount greater than cart total" name="CouponService validateCoupon - percent type should never return discount greater than cart total" time="0.004">
+    </testcase>
+    <testcase classname="CouponService generateCodes - percent type safety should reject percent coupon when value_type is not percent" name="CouponService generateCodes - percent type safety should reject percent coupon when value_type is not percent" time="0.021">
+    </testcase>
+    <testcase classname="CouponService generateCodes - percent type safety should reject percent coupon when value is outside (0, 100]" name="CouponService generateCodes - percent type safety should reject percent coupon when value is outside (0, 100]" time="0.002">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - first_order type should validate first order coupon for new user" name="CouponService validateCoupon - first_order type should validate first order coupon for new user" time="0.003">
+    </testcase>
+    <testcase classname="CouponService validateCoupon - first_order type should reject first order coupon for existing user" name="CouponService validateCoupon - first_order type should reject first order coupon for existing user" time="0.011">
+    </testcase>
+  </testsuite>
+</testsuites>
