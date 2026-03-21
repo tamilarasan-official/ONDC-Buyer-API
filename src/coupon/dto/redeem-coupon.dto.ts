@@ -56,6 +56,7 @@ export class RedeemCouponDto {
     example: "order-12345-payment-abc123",
     required: false,
   })
+  // Optional for backward compatibility; service derives a deterministic fallback when omitted.
   @IsOptional()
   @IsString()
   idempotency_key?: string;

@@ -15,7 +15,7 @@ import {
   ApiTags,
   ApiOperation,
   ApiResponse,
-  ApiBearerAuth,
+  ApiSecurity,
   ApiParam,
   ApiQuery,
   ApiBody,
@@ -23,24 +23,27 @@ import {
 import { Response } from "express";
 import { CouponService } from "../services/coupon.service";
 import { CouponExportService } from "../services/coupon-export.service";
+import { CouponAnalyticsService } from "../services/coupon-analytics.service";
 import { CreateCampaignDto } from "../dto/create-campaign.dto";
 import { UpdateCampaignDto } from "../dto/update-campaign.dto";
 import { GenerateCodesDto } from "../dto/generate-codes.dto";
+import { CouponAnalyticsQueryDto } from "../dto/coupon-analytics-query.dto";
 import { ExportCodesDto, ExportFormat } from "../dto/export-codes.dto";
 import { IncrementQuotaDto, ResetQuotaDto } from "../dto/manage-quota.dto";
 import { CampaignStatus } from "../entities/coupon-campaign.entity";
-// import { JwtAuthGuard } from "../../authentication/jwt-auth.guard"; // Uncomment when auth is ready
+import { ApiKeyGuard } from "src/super-admin-access/api-key-auth-gaurd";
 
 @ApiTags("Admin - Coupon Management")
 @Controller("admin/coupons")
-// @UseGuards(JwtAuthGuard) // Uncomment when auth is ready
-// @ApiBearerAuth("JWT-auth")
+@UseGuards(ApiKeyGuard)
+@ApiSecurity("x-api-key")
 export class AdminCouponController {
   private readonly logger = new Logger(AdminCouponController.name);
 
   constructor(
     private readonly couponService: CouponService,
     private readonly exportService: CouponExportService,
+    private readonly couponAnalyticsService: CouponAnalyticsService,
   ) {}
 
   @Post("campaigns")
@@ -73,8 +76,15 @@ export class AdminCouponController {
         id: { type: "number", example: 1 },
         campaign_key: { type: "string", example: "summer-2025" },
         title: { type: "string", example: "Summer Sale 2025" },
-        description: { type: "string", example: "Summer discount campaign for 2025" },
-        status: { type: "string", example: "draft", enum: ["draft", "active", "inactive"] },
+        description: {
+          type: "string",
+          example: "Summer discount campaign for 2025",
+        },
+        status: {
+          type: "string",
+          example: "draft",
+          enum: ["draft", "active", "inactive"],
+        },
         created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
         updated_at: { type: "string", example: "2025-01-15T10:00:00Z" },
       },
@@ -87,7 +97,10 @@ export class AdminCouponController {
       type: "object",
       properties: {
         statusCode: { type: "number", example: 409 },
-        message: { type: "string", example: "Campaign with key 'summer-2025' already exists" },
+        message: {
+          type: "string",
+          example: "Campaign with key 'summer-2025' already exists",
+        },
         error: { type: "string", example: "Conflict" },
       },
     },
@@ -196,7 +209,10 @@ export class AdminCouponController {
               id: { type: "number", example: 1 },
               campaign_key: { type: "string", example: "summer-2025" },
               title: { type: "string", example: "Summer Sale 2025" },
-              description: { type: "string", example: "Summer discount campaign" },
+              description: {
+                type: "string",
+                example: "Summer discount campaign",
+              },
               status: { type: "string", example: "active" },
               created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
             },
@@ -242,7 +258,7 @@ export class AdminCouponController {
             type: "object",
             properties: {
               id: { type: "number", example: 1 },
-              code: { type: "string", example: "SUMMER-ABC12345" },
+              code: { type: "string", example: "SUMMERABC12345" },
               type: { type: "string", example: "percent" },
               status: { type: "string", example: "active" },
             },
@@ -272,7 +288,7 @@ export class AdminCouponController {
   @ApiOperation({
     summary: "Generate coupon codes",
     description:
-      "Generate unique coupon codes for a campaign. Supports preview mode to see first 10 codes. Use different examples below for different coupon types (percent, flat, preorder, etc.).",
+      "Generate unique coupon codes for a campaign. Supports preview mode to see first 10 codes. Separator accepts only '' (compact) or '-' (legacy format). Use different examples below for different coupon types (percent, flat, preorder, etc.).",
   })
   @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
   @ApiBody({
@@ -281,10 +297,12 @@ export class AdminCouponController {
     examples: {
       percentDiscount: {
         summary: "Percent Discount Coupon",
-        description: "Generate 100 codes with 20% discount, max ₹500",
+        description:
+          "Generate global percent coupons (no store/item scope) with optional free delivery cap",
         value: {
           count: 100,
           prefix: "SUMMER",
+          separator: "",
           length: 8,
           type: "percent",
           value: 20,
@@ -296,6 +314,79 @@ export class AdminCouponController {
           user_usage_limit: 1,
           global_usage_limit: 1000,
           preview: false,
+          type_meta: {
+            free_delivery: true,
+            delivery_fee_cap: 50,
+          },
+        },
+      },
+      percentDiscountHyphenFormat: {
+        summary: "Percent Discount Coupon (Hyphen Separator)",
+        description:
+          "Same as percent discount, but with legacy hyphen separator between prefix and random code.",
+        value: {
+          count: 50,
+          prefix: "SUMMER",
+          separator: "-",
+          length: 8,
+          type: "percent",
+          value: 20,
+          value_type: "percent",
+          max_discount_amount: 500,
+          min_cart_value: 500,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 1000,
+          preview: false,
+        },
+      },
+      percentStoreWide: {
+        summary: "Percent Store-Wide Coupon",
+        description:
+          "Generate percent coupons restricted to one store using store_reference_id",
+        value: {
+          count: 100,
+          prefix: "STORE20",
+          separator: "",
+          length: 8,
+          type: "percent",
+          value: 20,
+          value_type: "percent",
+          max_discount_amount: 500,
+          min_cart_value: 500,
+          expires_at: "2025-12-31T23:59:59Z",
+          start_at: "2025-01-01T00:00:00Z",
+          user_usage_limit: 1,
+          global_usage_limit: 1000,
+          preview: false,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+          },
+        },
+      },
+      percentStoreProductScoped: {
+        summary: "Percent Store+Product Coupon",
+        description:
+          "Generate percent coupons restricted to specific products within one store",
+        value: {
+          count: 100,
+          prefix: "ITEM20",
+          separator: "",
+          length: 8,
+          type: "percent",
+          value: 20,
+          value_type: "percent",
+          max_discount_amount: 500,
+          min_cart_value: 500,
+          expires_at: "2025-12-31T23:59:59Z",
+          start_at: "2025-01-01T00:00:00Z",
+          user_usage_limit: 1,
+          global_usage_limit: 1000,
+          preview: false,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_ids: ["ITEM-REF-1", "ITEM-REF-2"],
+          },
         },
       },
       flatDiscount: {
@@ -304,6 +395,7 @@ export class AdminCouponController {
         value: {
           count: 50,
           prefix: "FLAT100",
+          separator: "",
           length: 8,
           type: "flat",
           value: 100,
@@ -315,12 +407,61 @@ export class AdminCouponController {
           preview: false,
         },
       },
+      flatStoreWide: {
+        summary: "Flat Store-Wide Coupon",
+        description:
+          "Generate flat coupons restricted to one store using store_reference_id",
+        value: {
+          count: 50,
+          prefix: "FLATS44",
+          separator: "",
+          length: 8,
+          type: "flat",
+          value: 100,
+          value_type: "rupees",
+          min_cart_value: 300,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 500,
+          preview: false,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+          },
+        },
+      },
+      flatStoreProductScoped: {
+        summary: "Flat Store+Product Coupon",
+        description:
+          "Generate flat coupons restricted to specific products within one store",
+        value: {
+          count: 50,
+          prefix: "FLATI44",
+          separator: "",
+          length: 8,
+          type: "flat",
+          value: 100,
+          value_type: "rupees",
+          min_cart_value: 300,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 500,
+          preview: false,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_ids: ["ITEM-REF-1", "ITEM-REF-2"],
+            free_delivery: true,
+            delivery_fee_cap: 40,
+          },
+        },
+      },
       preorderCoupon: {
         summary: "Preorder Coupon",
-        description: "Generate preorder coupon codes with item-specific discount",
+        description:
+          "Generate preorder coupon codes with item-specific discount",
         value: {
           count: 200,
           prefix: "PREORDER",
+          separator: "",
           length: 8,
           type: "preorder",
           value: 15,
@@ -342,11 +483,13 @@ export class AdminCouponController {
         },
       },
       freeDelivery: {
-        summary: "Free Delivery Coupon",
-        description: "Generate free delivery coupon codes",
+        summary: "Free Delivery Coupon (Global)",
+        description:
+          "Generate free delivery coupon codes applicable globally with optional fee cap",
         value: {
           count: 500,
           prefix: "FREEDEL",
+          separator: "",
           length: 8,
           type: "free_delivery",
           value: 0,
@@ -361,12 +504,60 @@ export class AdminCouponController {
           },
         },
       },
+      freeDeliveryStoreWide: {
+        summary: "Free Delivery Coupon (Store-Wide)",
+        description:
+          "Generate free delivery coupons restricted to one store using store_reference_id",
+        value: {
+          count: 200,
+          prefix: "FREEDEL_STORE",
+          separator: "",
+          length: 8,
+          type: "free_delivery",
+          value: 0,
+          value_type: "rupees",
+          min_cart_value: 150,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 2000,
+          preview: false,
+          type_meta: {
+            delivery_fee_cap: 40,
+            store_reference_id: "STORE-REF-44",
+          },
+        },
+      },
+      freeDeliveryProductScoped: {
+        summary: "Free Delivery Coupon (Store+Product Scoped)",
+        description:
+          "Generate free delivery coupons restricted to specific products within one store",
+        value: {
+          count: 100,
+          prefix: "FREEDEL_PROD",
+          separator: "",
+          length: 8,
+          type: "free_delivery",
+          value: 0,
+          value_type: "rupees",
+          min_cart_value: 100,
+          expires_at: "2025-12-31T23:59:59Z",
+          user_usage_limit: 1,
+          global_usage_limit: 1000,
+          preview: false,
+          type_meta: {
+            delivery_fee_cap: 35,
+            store_reference_id: "STORE-REF-44",
+            item_reference_ids: ["ITEM-REF-1", "ITEM-REF-2"],
+          },
+        },
+      },
       nthOrder: {
         summary: "Nth Order Coupon",
         description: "Generate coupon for 3rd order discount",
         value: {
           count: 1000,
           prefix: "3RDORDER",
+          separator: "",
           length: 8,
           type: "nth_order",
           value: 25,
@@ -388,6 +579,7 @@ export class AdminCouponController {
         value: {
           count: 1000,
           prefix: "TEST",
+          separator: "",
           length: 8,
           type: "percent",
           value: 10,
@@ -413,7 +605,11 @@ export class AdminCouponController {
             codes: {
               type: "array",
               items: { type: "string" },
-              example: ["SUMMER-ABC12345", "SUMMER-XYZ67890", "SUMMER-DEF45678"],
+              example: [
+                "SUMMERABC12345",
+                "SUMMERXYZ67890",
+                "SUMMERDEF45678",
+              ],
             },
             preview: { type: "boolean", example: false },
             count: { type: "number", example: 100 },
@@ -430,7 +626,10 @@ export class AdminCouponController {
       type: "object",
       properties: {
         success: { type: "boolean", example: false },
-        message: { type: "string", example: "max_discount_amount is required for percent type" },
+        message: {
+          type: "string",
+          example: "max_discount_amount is required for percent type",
+        },
         error: { type: "string", example: "BAD_REQUEST" },
       },
     },
@@ -475,12 +674,16 @@ export class AdminCouponController {
             type: "object",
             properties: {
               id: { type: "number", example: 1 },
-              code: { type: "string", example: "SUMMER-ABC12345" },
+              code: { type: "string", example: "SUMMERABC12345" },
               type: { type: "string", example: "percent" },
               value: { type: "number", example: 20 },
               value_type: { type: "string", example: "percent" },
               status: { type: "string", example: "active" },
-              global_usage_limit: { type: "number", example: 1000, nullable: true },
+              global_usage_limit: {
+                type: "number",
+                example: 1000,
+                nullable: true,
+              },
               user_usage_limit: { type: "number", example: 1 },
               created_at: { type: "string", example: "2025-01-15T10:00:00Z" },
             },
@@ -548,7 +751,7 @@ export class AdminCouponController {
     content: {
       "application/csv": {
         schema: { type: "string", format: "binary" },
-        example: "SUMMER-ABC12345,SUMMER-XYZ67890,...",
+        example: "SUMMERABC12345,SUMMERXYZ67890,...",
       },
       "application/pdf": {
         schema: { type: "string", format: "binary" },
@@ -638,6 +841,194 @@ export class AdminCouponController {
     }
   }
 
+  @Get("analytics/overview")
+  @ApiOperation({
+    summary: "Coupon analytics overview",
+    description:
+      "Get aggregate coupon analytics across campaigns including funnel counts and discount spend. Optional from/to ISO filters apply to redemption metrics.",
+  })
+  @ApiQuery({
+    name: "from",
+    required: false,
+    type: String,
+    description: "Start datetime in ISO format",
+    example: "2026-03-01T00:00:00Z",
+  })
+  @ApiQuery({
+    name: "to",
+    required: false,
+    type: String,
+    description: "End datetime in ISO format",
+    example: "2026-03-31T23:59:59Z",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Coupon analytics overview retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        period: {
+          type: "object",
+          properties: {
+            from: { type: "string", nullable: true, example: "2026-03-01T00:00:00.000Z" },
+            to: { type: "string", nullable: true, example: "2026-03-31T23:59:59.000Z" },
+          },
+        },
+        campaigns: {
+          type: "object",
+          properties: {
+            total: { type: "number", example: 20 },
+            active: { type: "number", example: 12 },
+          },
+        },
+        coupons: {
+          type: "object",
+          properties: {
+            total: { type: "number", example: 1200 },
+            active: { type: "number", example: 890 },
+          },
+        },
+        funnel: {
+          type: "object",
+          properties: {
+            reserved: { type: "number", example: 18 },
+            redeemed: { type: "number", example: 140 },
+            rolled_back: { type: "number", example: 15 },
+            failed: { type: "number", example: 3 },
+            redemption_rate: { type: "number", example: 88.05 },
+          },
+        },
+        financials: {
+          type: "object",
+          properties: {
+            total_discount_amount: { type: "number", example: 24500.5 },
+            avg_discount_amount: { type: "number", example: 175 },
+            delivery_waived_count: { type: "number", example: 22 },
+            orders_with_coupon: { type: "number", example: 132 },
+          },
+        },
+      },
+    },
+  })
+  async getCouponAnalyticsOverview(@Query() query: CouponAnalyticsQueryDto) {
+    return this.couponAnalyticsService.getOverview(query.from, query.to);
+  }
+
+  @Get("analytics/campaigns/:id")
+  @ApiOperation({
+    summary: "Campaign coupon analytics",
+    description:
+      "Get campaign-specific coupon analytics including funnel, financial metrics, daily trend, and top coupons.",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Campaign ID" })
+  @ApiQuery({
+    name: "from",
+    required: false,
+    type: String,
+    description: "Start datetime in ISO format",
+    example: "2026-03-01T00:00:00Z",
+  })
+  @ApiQuery({
+    name: "to",
+    required: false,
+    type: String,
+    description: "End datetime in ISO format",
+    example: "2026-03-31T23:59:59Z",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Campaign analytics retrieved successfully",
+    schema: {
+      type: "object",
+      properties: {
+        campaign: {
+          type: "object",
+          properties: {
+            id: { type: "number", example: 7 },
+            campaign_key: { type: "string", example: "summer-2026" },
+            title: { type: "string", example: "Summer 2026" },
+            status: { type: "string", example: "active" },
+          },
+        },
+        period: {
+          type: "object",
+          properties: {
+            from: { type: "string", nullable: true, example: "2026-03-01T00:00:00.000Z" },
+            to: { type: "string", nullable: true, example: "2026-03-31T23:59:59.000Z" },
+          },
+        },
+        codes: {
+          type: "object",
+          properties: {
+            total: { type: "number", example: 500 },
+            active: { type: "number", example: 460 },
+            inactive: { type: "number", example: 10 },
+            expired: { type: "number", example: 20 },
+            revoked: { type: "number", example: 10 },
+          },
+        },
+        funnel: {
+          type: "object",
+          properties: {
+            reserved: { type: "number", example: 4 },
+            redeemed: { type: "number", example: 98 },
+            rolled_back: { type: "number", example: 6 },
+            failed: { type: "number", example: 2 },
+            unique_redeemed_users: { type: "number", example: 86 },
+            redemption_rate: { type: "number", example: 92.45 },
+          },
+        },
+        financials: {
+          type: "object",
+          properties: {
+            total_discount_amount: { type: "number", example: 18200 },
+            avg_discount_amount: { type: "number", example: 185.71 },
+            delivery_waived_count: { type: "number", example: 14 },
+            orders_with_coupon: { type: "number", example: 92 },
+          },
+        },
+        daily: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              date: { type: "string", example: "2026-03-18" },
+              redeemed_count: { type: "number", example: 8 },
+              total_discount_amount: { type: "number", example: 1400 },
+            },
+          },
+        },
+        top_coupons: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              coupon_id: { type: "number", example: 501 },
+              code: { type: "string", example: "SUMMERAB12" },
+              type: { type: "string", example: "percent" },
+              redeemed_count: { type: "number", example: 22 },
+              total_discount_amount: { type: "number", example: 4100 },
+            },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 404,
+    description: "Campaign not found",
+  })
+  async getCampaignAnalytics(
+    @Param("id", ParseIntPipe) campaignId: number,
+    @Query() query: CouponAnalyticsQueryDto,
+  ) {
+    return this.couponAnalyticsService.getCampaignAnalytics(
+      campaignId,
+      query.from,
+      query.to,
+    );
+  }
+
   @Get("coupons/:id/quota")
   @ApiOperation({
     summary: "Get coupon quota",
@@ -657,11 +1048,36 @@ export class AdminCouponController {
           type: "object",
           properties: {
             coupon_id: { type: "number", example: 123 },
-            current_quota: { type: "number", example: 45, nullable: true, description: "Remaining slots in Redis (used by reserve/release; may be out of sync)" },
-            global_usage_limit: { type: "number", example: 100, nullable: true, description: "Max limit from DB" },
-            redeemed_count: { type: "number", example: 5, description: "Successful redemptions / paid uses (DB)" },
-            effective_remaining: { type: "number", example: 0, description: "True remaining slots: max(0, global_usage_limit - redeemed_count)" },
-            quota_out_of_sync: { type: "boolean", example: false, description: "True when Redis current_quota does not match effective_remaining" },
+            current_quota: {
+              type: "number",
+              example: 45,
+              nullable: true,
+              description:
+                "Remaining slots in Redis (used by reserve/release; may be out of sync)",
+            },
+            global_usage_limit: {
+              type: "number",
+              example: 100,
+              nullable: true,
+              description: "Max limit from DB",
+            },
+            redeemed_count: {
+              type: "number",
+              example: 5,
+              description: "Successful redemptions / paid uses (DB)",
+            },
+            effective_remaining: {
+              type: "number",
+              example: 0,
+              description:
+                "True remaining slots: max(0, global_usage_limit - redeemed_count)",
+            },
+            quota_out_of_sync: {
+              type: "boolean",
+              example: false,
+              description:
+                "True when Redis current_quota does not match effective_remaining",
+            },
           },
         },
       },
@@ -711,7 +1127,10 @@ export class AdminCouponController {
       type: "object",
       properties: {
         success: { type: "boolean", example: true },
-        message: { type: "string", example: "Quota incremented by 50 successfully" },
+        message: {
+          type: "string",
+          example: "Quota incremented by 50 successfully",
+        },
         data: {
           type: "object",
           properties: {
@@ -805,7 +1224,12 @@ export class AdminCouponController {
             coupon_id: { type: "number", example: 123 },
             previous_quota: { type: "number", example: 5, nullable: true },
             new_quota: { type: "number", example: 100 },
-            global_usage_limit: { type: "number", example: 100, nullable: true, description: "DB limit (unchanged by reset)" },
+            global_usage_limit: {
+              type: "number",
+              example: 100,
+              nullable: true,
+              description: "DB limit (unchanged by reset)",
+            },
           },
         },
       },
@@ -854,5 +1278,3 @@ export class AdminCouponController {
     };
   }
 }
-
-

@@ -81,6 +81,27 @@ export class RedisCouponService {
   }
 
   /**
+   * Initialize quota only when key is absent.
+   * Returns true when initialization happened, false when key already existed.
+   */
+  async initializeQuotaIfAbsent(
+    couponId: number,
+    limit: number,
+  ): Promise<boolean> {
+    const key = `coupon:quota:${couponId}`;
+    const result = await this.redis.set(key, limit, "NX");
+    const initialized = result === "OK";
+
+    if (initialized) {
+      this.logger.log(
+        `Initialized missing quota for coupon ${couponId} with remaining=${limit}`,
+      );
+    }
+
+    return initialized;
+  }
+
+  /**
    * Reserve a coupon atomically using LUA script
    */
   async reserveCoupon(

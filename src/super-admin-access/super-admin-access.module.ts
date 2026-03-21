@@ -10,6 +10,6 @@ import { AdminAccessLog } from './entities/super-admin-log.entity';
   imports: [TypeOrmModule.forFeature([AdminAccess, AdminAccessLog])],
   controllers: [AdminAccessController],
   providers: [AdminAccessService, ApiKeyGuard],
-  exports: [AdminAccessService, ApiKeyGuard],
+  exports: [AdminAccessService, ApiKeyGuard, TypeOrmModule],
 })
 export class AdminAccessModule { }

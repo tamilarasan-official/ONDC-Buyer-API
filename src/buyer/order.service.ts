@@ -3,6 +3,8 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
+  Optional,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -35,7 +37,10 @@ import {
   CancelReasonDto,
 } from "./dto/seller-status-update.dto";
 import { Coupon } from "../coupon/entities/coupon.entity";
-import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
+import {
+  CouponRedemption,
+  RedemptionStatus,
+} from "../coupon/entities/coupon-redemption.entity";
 import { CouponService } from "../coupon/services/coupon.service";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType } from "../coupon/entities/coupon.entity";
@@ -46,6 +51,7 @@ import { firstValueFrom } from "rxjs";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
+import { CouponMetricsQueueService } from "../coupon/services/coupon-metrics.queue.service";
 
 /**
  * Statuses for which buyer receives an order notification; all others use skipNotification.
@@ -72,6 +78,13 @@ export class OrderService {
   // Default coordinates used when location permissions are disabled in buyer app
   private readonly DEFAULT_LATITUDE = 9.9252;
   private readonly DEFAULT_LONGITUDE = 78.1198;
+
+  private readonly metricEligibleStatuses = new Set([
+    "paid",
+    "confirmed",
+    "delivered",
+    "completed",
+  ]);
 
   constructor(
     @InjectRepository(Order)
@@ -114,7 +127,108 @@ export class OrderService {
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     private readonly dataSource: DataSource,
+    @Optional()
+    private readonly couponMetricsQueueService?: CouponMetricsQueueService,
   ) {}
+
+  private createCorrelationId(prefix: string, orderId: number): string {
+    return `${prefix}-${orderId}-${Date.now()}`;
+  }
+
+  private async enqueueCouponRedemptionRetry(
+    orderId: number,
+    userId: number,
+    reservationToken: string,
+    correlationId: string,
+  ): Promise<void> {
+    if (!this.couponMetricsQueueService) {
+      this.logger.warn(
+        `[${correlationId}] couponMetricsQueueService unavailable; skipping async coupon redemption retry enqueue`,
+      );
+      return;
+    }
+
+    try {
+      await this.couponMetricsQueueService.enqueueCouponRedeemRetry({
+        orderId,
+        userId,
+        reservationToken,
+        correlationId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${correlationId}] Failed to enqueue coupon redemption retry for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async enqueuePaidOrderMetricsUpdate(
+    orderId: number,
+    userId: number,
+    correlationId: string,
+  ): Promise<void> {
+    if (!this.couponMetricsQueueService) {
+      await this.couponService.recordPaidOrderEvent?.(
+        orderId,
+        userId,
+        correlationId,
+      );
+      return;
+    }
+
+    try {
+      await this.couponMetricsQueueService.enqueuePaidOrderEvent({
+        orderId,
+        userId,
+        correlationId,
+      });
+    } catch (queueError) {
+      this.logger.warn(
+        `[${correlationId}] Failed to enqueue paid-order event, using direct fallback: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
+      );
+
+      await this.couponService.recordPaidOrderEvent?.(
+        orderId,
+        userId,
+        correlationId,
+      );
+    }
+  }
+
+  private async isOrderRecoveryAlreadyFinalized(
+    payment: Payment,
+  ): Promise<boolean> {
+    const paymentStatus = String(payment?.payment_status ?? "").toLowerCase();
+    const orderPaymentStatus = String(payment?.order?.payment_status ?? "").toLowerCase();
+    const orderStatus = String(payment?.order?.status ?? "").toLowerCase();
+
+    const isPaymentSettled =
+      paymentStatus === "paid" || paymentStatus === "success";
+    const isOrderPaymentSettled = orderPaymentStatus === "paid";
+    const isOrderFinalized =
+      orderStatus === "confirmed" ||
+      orderStatus === "delivered" ||
+      orderStatus === "completed";
+
+    if (!(isPaymentSettled && isOrderPaymentSettled && isOrderFinalized)) {
+      return false;
+    }
+
+    const orderId = Number(payment?.order?.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return false;
+    }
+
+    const couponRedemptions = await this.couponRedemptionRepository.find({
+      where: { order_id: orderId },
+    });
+
+    const hasPendingCouponRedemption = couponRedemptions.some(
+      (redemption) => redemption.status !== RedemptionStatus.REDEEMED,
+    );
+
+    return !hasPendingCouponRedemption;
+  }
 
   /**
    * Create order from cart (without payment processing)
@@ -459,6 +573,8 @@ export class OrderService {
         (ci) => ci.is_preorder && ci.preorder_reservation_token,
       );
 
+      const codCouponRedemptionFailures: string[] = [];
+
       for (const cartItem of preorderCartItemsWithToken) {
         if (!cartItem.preorder_reservation_token) continue;
 
@@ -481,6 +597,7 @@ export class OrderService {
               order_id: savedOrder.id,
               user_id: userId,
               payment_status: PaymentStatus.PAID,
+              idempotency_key: `cod-${savedOrder.id}-${cartItem.preorder_reservation_token}`,
             });
             this.logger.log(
               `✅ Redeemed preorder coupon for COD order ${savedOrder.order_number}`,
@@ -489,8 +606,96 @@ export class OrderService {
             this.logger.error(
               `❌ Failed to redeem coupon for COD order: ${redeemError.message}. Order created but coupon not redeemed.`,
             );
+            codCouponRedemptionFailures.push(
+              cartItem.preorder_reservation_token,
+            );
+
+            await this.enqueueCouponRedemptionRetry(
+              savedOrder.id,
+              userId,
+              cartItem.preorder_reservation_token,
+              this.createCorrelationId("cod-redeem-retry", savedOrder.id),
+            );
           }
         }
+      }
+
+      // Link cart-level coupon reservation to order and redeem immediately for COD orders.
+      if (cartToUse.coupon_reservation_token) {
+        const cartCouponRedemption = await this.couponRedemptionRepository.findOne({
+          where: { reserved_token: cartToUse.coupon_reservation_token },
+        });
+
+        if (cartCouponRedemption) {
+          cartCouponRedemption.order_id = savedOrder.id;
+          await this.couponRedemptionRepository.save(cartCouponRedemption);
+          this.logger.log(
+            `🔗 Linked cart coupon redemption to order ${savedOrder.id} (reserved_token)`,
+          );
+
+          if (createOrderDto.payment_method === "cod") {
+            try {
+              await this.couponService.redeemCoupon({
+                reservation_token: cartToUse.coupon_reservation_token,
+                order_id: savedOrder.id,
+                user_id: userId,
+                payment_status: PaymentStatus.PAID,
+                idempotency_key: `cod-${savedOrder.id}-${cartToUse.coupon_reservation_token}`,
+              });
+              this.logger.log(
+                `✅ Redeemed cart coupon for COD order ${savedOrder.order_number}`,
+              );
+            } catch (redeemError) {
+              this.logger.error(
+                `❌ Failed to redeem cart coupon for COD order: ${redeemError.message}`,
+              );
+              codCouponRedemptionFailures.push(
+                cartToUse.coupon_reservation_token,
+              );
+
+              await this.enqueueCouponRedemptionRetry(
+                savedOrder.id,
+                userId,
+                cartToUse.coupon_reservation_token,
+                this.createCorrelationId("cod-cart-redeem-retry", savedOrder.id),
+              );
+            }
+          }
+        }
+      }
+
+      if (
+        createOrderDto.payment_method === "cod" &&
+        codCouponRedemptionFailures.length > 0
+      ) {
+        // Best-effort synchronous reconciliation before relying on async retries.
+        try {
+          const reconciliation = await this.redeemPreorderCouponForOrder(
+            savedOrder.id,
+            userId,
+          );
+
+          if (reconciliation.success) {
+            this.logger.log(
+              `✅ COD coupon reconciliation succeeded synchronously for order ${savedOrder.order_number}`,
+            );
+            codCouponRedemptionFailures.length = 0;
+          }
+        } catch (reconcileError) {
+          this.logger.warn(
+            `⚠️ COD coupon reconciliation attempt failed for order ${savedOrder.order_number}: ${reconcileError.message}`,
+          );
+        }
+
+      }
+
+      if (
+        createOrderDto.payment_method === "cod" &&
+        codCouponRedemptionFailures.length > 0
+      ) {
+        this.logger.error(
+          `⚠️ COD order ${savedOrder.order_number} created with coupon redemption failures for tokens: ${codCouponRedemptionFailures.join(",")}`,
+        );
       }
 
       // Create initial tracking entry (without notification - logged only)
@@ -510,8 +715,8 @@ export class OrderService {
       );
 
       // Note: Cart will be cleared after order confirmation (COD) or payment success (online)
-      // For now, just deactivate it to prevent modifications during payment
-      await this.cartRepository.update(cartToUse.id, { is_active: false });
+      // clearCart will handle deactivation after releasing preorder/coupon reservations
+      // so we do NOT deactivate here - let it remain active until clearCart is called
 
       // 🚀 PUSH ORDER TO SELLER IMMEDIATELY
       try {
@@ -545,7 +750,9 @@ export class OrderService {
       if (createOrderDto.payment_method === "cod") {
         // Clear cart after successful COD order creation
         try {
-          await this.cartService.clearCart(userId);
+          await this.cartService.clearCart(userId, {
+            releaseCouponReservations: false,
+          });
           this.logger.log(
             `🗑️ Cart cleared for user ${userId} after COD order creation`,
           );
@@ -1111,40 +1318,10 @@ export class OrderService {
         }
       }
 
-      // NEW: Restore quota for preorder items
-      const orderItems = await this.orderItemRepository.find({
-        where: { order: { id: order.id } },
-        relations: ['item'],
-      });
-
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: order.id },
-            relations: ['coupon'],
-          });
-
-          if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
-            // FIX: Use releaseReservation instead of incrementQuota to properly clean up reservation
-            if (couponRedemption.reserved_token) {
-              await this.redisCouponService.releaseReservation(
-                couponRedemption.coupon.id,
-                couponRedemption.reserved_token
-              );
-              this.logger.log(
-                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
-              );
-            } else {
-              // Fallback: If no reservation token, restore quota directly
-              await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
-              this.logger.log(
-                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon.id} after order cancellation (no reservation token found)`
-              );
-            }
-          }
-        }
-      }
+      // Policy: do NOT restore coupon quota for placed orders on cancellation.
+      this.logger.log(
+        `ℹ️ Skipping coupon quota restore for order ${order.id} on cancellation (preorder/nth lock policy)`,
+      );
 
       // Create tracking entry
       await this.createOrderTracking(
@@ -1248,23 +1425,34 @@ export class OrderService {
         );
 
         if (existingPayment?.order) {
-          // Order already exists and was processed (likely by webhook)
-          this.logger.log(
-            `ℹ️ Order already created (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning success.`,
+          const isAlreadyFinalized =
+            await this.isOrderRecoveryAlreadyFinalized(existingPayment);
+
+          if (isAlreadyFinalized) {
+            this.logger.log(
+              `ℹ️ Order already finalized (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning idempotent success.`,
+            );
+
+            // Get updated order data
+            const orderData = await this.getOrderById(
+              existingPayment.order.id,
+              userId,
+            );
+
+            return {
+              success: true,
+              message:
+                "Payment already verified and order created successfully",
+              payment_id: razorpay_payment_id,
+              order: orderData,
+            };
+          }
+
+          this.logger.warn(
+            `⚠️ Found payment ${razorpay_payment_id} with partially finalized order ${existingPayment.order.id}. Continuing recovery flow.`,
           );
 
-          // Get updated order data
-          const orderData = await this.getOrderById(
-            existingPayment.order.id,
-            userId,
-          );
-
-          return {
-            success: true,
-            message: "Payment already verified and order created successfully",
-            payment_id: razorpay_payment_id,
-            order: orderData,
-          };
+          payment = existingPayment;
         }
 
         // If still not found, this might be a retry scenario where payment_id was updated to a failed payment ID
@@ -1304,15 +1492,25 @@ export class OrderService {
       // Update payment status
       await this.updatePaymentStatus(order.id, "paid", razorpay_payment_id);
 
-      // Redeem preorder coupon on payment success (online only; COD is redeemed at order creation)
-      await this.redeemPreorderCouponForOrder(order.id, userId);
+      // Redeem coupon reservations linked to this order on payment success.
+      const redemptionResult = await this.redeemPreorderCouponForOrder(
+        order.id,
+        userId,
+      );
+      if (redemptionResult?.success === false) {
+        throw new InternalServerErrorException(
+          `Coupon redemption failed for order ${order.id}. Please retry verification.`,
+        );
+      }
 
       // Update order status
       await this.updateOrderStatus(order.id, "confirmed");
 
       // Clear cart after successful payment
       try {
-        await this.cartService.clearCart(userId);
+        await this.cartService.clearCart(userId, {
+          releaseCouponReservations: false,
+        });
         this.logger.log(
           `🗑️ Cart cleared for user ${userId} after payment success`,
         );
@@ -1353,37 +1551,64 @@ export class OrderService {
   async redeemPreorderCouponForOrder(
     orderId: number,
     userId?: number,
-  ): Promise<{ userId?: number }> {
-    const couponRedemption = await this.couponRedemptionRepository.findOne({
+  ): Promise<{ userId?: number; success: boolean; failedTokens: string[] }> {
+    const couponRedemptions = await this.couponRedemptionRepository.find({
       where: { order_id: orderId },
     });
-    if (!couponRedemption || !couponRedemption.reserved_token) {
-      return {};
+
+    if (!couponRedemptions.length) {
+      return { success: true, failedTokens: [] };
     }
-    const redeemUserId = userId ?? couponRedemption.user_id;
-    if (redeemUserId == null) {
-      this.logger.warn(
-        `⚠️ Preorder redemption for order ${orderId} has no user_id; skipping redeem`,
-      );
-      return {};
+
+    let resolvedUserId: number | undefined;
+    const failedTokens: string[] = [];
+
+    for (const couponRedemption of couponRedemptions) {
+      if (!couponRedemption.reserved_token) {
+        continue;
+      }
+
+      const redeemUserId = userId ?? couponRedemption.user_id;
+      if (redeemUserId == null) {
+        this.logger.warn(
+          `⚠️ Coupon redemption for order ${orderId} has no user_id; skipping redeem`,
+        );
+        failedTokens.push(couponRedemption.reserved_token);
+        continue;
+      }
+
+      try {
+        await this.couponService.redeemCoupon({
+          reservation_token: couponRedemption.reserved_token,
+          order_id: orderId,
+          user_id: redeemUserId,
+          payment_status: PaymentStatus.PAID,
+          idempotency_key: `pay-${orderId}-${couponRedemption.reserved_token}`,
+        });
+        resolvedUserId = redeemUserId;
+        this.logger.log(
+          `✅ Redeemed coupon for order ${orderId} (payment success)`,
+        );
+      } catch (redeemError) {
+        this.logger.error(
+          `❌ Failed to redeem coupon for order ${orderId}: ${redeemError.message}`,
+        );
+        failedTokens.push(couponRedemption.reserved_token);
+
+        await this.enqueueCouponRedemptionRetry(
+          orderId,
+          redeemUserId,
+          couponRedemption.reserved_token,
+          this.createCorrelationId("payment-redeem-retry", orderId),
+        );
+      }
     }
-    try {
-      await this.couponService.redeemCoupon({
-        reservation_token: couponRedemption.reserved_token,
-        order_id: orderId,
-        user_id: redeemUserId,
-        payment_status: PaymentStatus.PAID,
-      });
-      this.logger.log(
-        `✅ Redeemed preorder coupon for order ${orderId} (payment success)`,
-      );
-      return { userId: redeemUserId };
-    } catch (redeemError) {
-      this.logger.error(
-        `❌ Failed to redeem preorder coupon for order ${orderId}: ${redeemError.message}`,
-      );
-      return {};
-    }
+
+    return {
+      userId: resolvedUserId,
+      success: failedTokens.length === 0,
+      failedTokens,
+    };
   }
 
   /**
@@ -1408,41 +1633,10 @@ export class OrderService {
       // Update payment status to failed
       await this.updatePaymentStatus(order.id, "failed");
 
-      // NEW: Release reservations for preorder items on payment failure
-      const orderItems = await this.orderItemRepository.find({
-        where: { order: { id: orderId } },
-        relations: ['item'],
-      });
-
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: orderId },
-            relations: ['coupon'],
-          });
-
-          if (couponRedemption && couponRedemption.coupon_id) {
-            if (couponRedemption.reserved_token) {
-              // Release reservation and restore quota
-              // releaseReservation() always restores quota, even if reservation expired
-              await this.redisCouponService.releaseReservation(
-                couponRedemption.coupon_id,
-                couponRedemption.reserved_token
-              );
-              this.logger.log(
-                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment failure`
-              );
-            } else {
-              // No reservation token - restore quota directly (quota was consumed but no reservation record)
-              await this.redisCouponService.incrementQuota(couponRedemption.coupon_id, 1);
-              this.logger.log(
-                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment failure (no reservation token found)`
-              );
-            }
-          }
-        }
-      }
+      // Policy: do NOT restore coupon quota for placed orders on payment failure.
+      this.logger.log(
+        `ℹ️ Skipping coupon quota restore for order ${orderId} on payment failure (preorder/nth lock policy)`,
+      );
 
       // Reactivate cart to allow user to retry payment or modify cart
       try {
@@ -1544,42 +1738,14 @@ export class OrderService {
         // This handles partial refunds correctly - small refunds don't restore quota
         if (refundAmount !== null && refundAmount !== undefined) {
           if (refundAmount >= preorderItemsTotal && preorderItemsTotal > 0) {
-            // Refund covers preorder items - restore quota
+            // Refund covers preorder items.
             this.logger.log(
-              `✅ Refund amount (₹${refundAmount}) >= preorder items total (₹${preorderItemsTotal}). Restoring quota.`,
+              `✅ Refund amount (₹${refundAmount}) >= preorder items total (₹${preorderItemsTotal}).`,
             );
 
-            // Release reservations for preorder items
-            for (const orderItem of preorderItems) {
-              // Find the coupon redemption for this order
-              const couponRedemption =
-                await this.couponRedemptionRepository.findOne({
-                  where: { order_id: orderId },
-                  relations: ["coupon"],
-                });
-
-              if (couponRedemption && couponRedemption.coupon_id) {
-                if (couponRedemption.reserved_token) {
-                  // Release reservation and restore quota
-                  await this.redisCouponService.releaseReservation(
-                    couponRedemption.coupon_id,
-                    couponRedemption.reserved_token,
-                  );
-                  this.logger.log(
-                    `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment refund`,
-                  );
-                } else {
-                  // No reservation token - restore quota directly
-                  await this.redisCouponService.incrementQuota(
-                    couponRedemption.coupon_id,
-                    1,
-                  );
-                  this.logger.log(
-                    `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment refund (no reservation token found)`,
-                  );
-                }
-              }
-            }
+            this.logger.log(
+              `ℹ️ Skipping coupon quota restore for order ${orderId} on refund (preorder/nth lock policy)`,
+            );
           } else {
             // Partial refund - don't restore quota
             this.logger.log(
@@ -1927,6 +2093,28 @@ export class OrderService {
           `⏭️ Order ${orderId} already has status ${status}, skipping duplicate update`,
         );
         return;
+      }
+
+      // Record paid-like order transitions for nth-order metrics with idempotent dedupe by order_id.
+      if (this.metricEligibleStatuses.has(status)) {
+        try {
+          const rows = await this.dataSource.query(
+            `SELECT user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            [orderId],
+          );
+          const userId = Number(rows?.[0]?.user_id);
+          if (Number.isInteger(userId) && userId > 0) {
+            await this.enqueuePaidOrderMetricsUpdate(
+              orderId,
+              userId,
+              `order-status-${orderId}-${status}-${Date.now()}`,
+            );
+          }
+        } catch (metricsError) {
+          this.logger.warn(
+            `⚠️ Failed to update nth-order metrics for order ${orderId}: ${metricsError instanceof Error ? metricsError.message : String(metricsError)}`,
+          );
+        }
       }
 
       // Status was successfully updated (updateResult.affected > 0)
