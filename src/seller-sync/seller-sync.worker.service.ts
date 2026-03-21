@@ -6,9 +6,12 @@ import {
   OnModuleDestroy,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import { InjectRepository } from "@nestjs/typeorm";
 import { firstValueFrom } from "rxjs";
 import { Job, Worker } from "bullmq";
 import Redis from "ioredis";
+import { Repository } from "typeorm";
+import { Order } from "../order/entities/order.entity";
 import { SellerSyncJobData } from "./seller-sync.types";
 import { SellerSyncQueueService } from "./seller-sync.queue.service";
 
@@ -41,6 +44,8 @@ export class SellerSyncWorkerService
     private readonly httpService: HttpService,
     private readonly configService: ConfigService,
     private readonly sellerSyncQueueService: SellerSyncQueueService,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
   ) {}
 
   onApplicationBootstrap() {
@@ -174,6 +179,44 @@ export class SellerSyncWorkerService
     this.logger.log(
       `Processing seller sync job ${job.id} (type=${job.data.type}, attempt=${job.attemptsMade + 1}) to ${endpoint}`,
     );
+
+    // order.push: skip HTTP if outbox already skipped or buyer order already cancelled (e.g. COD delay window).
+    if (job.data.type === "order.push") {
+      const refId = getReferenceId(job.data);
+      if (refId) {
+        const outboxRow = await this.sellerSyncQueueService.getOutboxRow(
+          "order.push",
+          refId,
+        );
+        if (outboxRow?.status === "skipped") {
+          this.logger.debug(
+            `[SELLER_SYNC_SKIP] worker order.push skip=outbox_skipped job_id=${job.id} reference_id=${refId} outbox_id=${outboxRow.id}`,
+          );
+          this.logger.log(
+            `Skipping order.push job ${job.id}: outbox already skipped (reference_id=${refId})`,
+          );
+          return;
+        }
+        const order = await this.orderRepository.findOne({
+          where: { order_number: refId },
+          select: ["id", "status"],
+        });
+        if (order?.status === "cancelled") {
+          this.logger.debug(
+            `[SELLER_SYNC_SKIP] worker order.push skip=buyer_cancelled job_id=${job.id} reference_id=${refId} order_id=${order.id} marking_outbox_skipped`,
+          );
+          await this.sellerSyncQueueService.markOutboxSkippedByReference(
+            refId,
+            "order.push",
+            "order_cancelled_before_push",
+          );
+          this.logger.log(
+            `Skipping order.push job ${job.id}: order cancelled on buyer (reference_id=${refId})`,
+          );
+          return;
+        }
+      }
+    }
 
     const timeoutMs =
       Number(this.configService.get("SELLER_SYNC_TIMEOUT_MS")) || 10000;
