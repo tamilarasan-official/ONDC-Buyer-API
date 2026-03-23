@@ -495,6 +495,43 @@ export class PaginationMetaDto {
   has_more: boolean;
 }
 
+export class CodSettingsDto {
+  @ApiProperty({
+    description: "Whether COD is enabled",
+    example: true,
+    type: "boolean",
+  })
+  cod_enabled: boolean;
+
+  @ApiProperty({
+    description: "Minimum COD amount",
+    example: 11,
+    type: "number",
+  })
+  cod_min_amount: number;
+
+  @ApiProperty({
+    description: "Maximum COD amount",
+    example: 500,
+    type: "number",
+  })
+  cod_max_amount: number;
+
+  @ApiProperty({
+    description: "Daily COD threshold amount",
+    example: 100,
+    type: "number",
+  })
+  cod_daily_threshold: number;
+
+  @ApiProperty({
+    description: "Maximum COD serviceable distance in kilometers",
+    example: 10,
+    type: "number",
+  })
+  cod_serviceable_distance_km: number;
+}
+
 export class HomeDataDto {
   @ApiProperty({
     description: "Nearby restaurants within radius",
@@ -561,6 +598,12 @@ export class HomeDataDto {
     type: "string",
   })
   home_screen_restaurant_card_style: string;
+
+  @ApiProperty({
+    description: "Cash on Delivery configuration values",
+    type: CodSettingsDto,
+  })
+  cod_settings: CodSettingsDto;
 
   @ApiProperty({
     description: "Buyer cancel timer in seconds (0 when disabled)",
