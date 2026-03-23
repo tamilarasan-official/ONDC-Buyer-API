@@ -232,7 +232,9 @@ export class OrderService {
       .select("COALESCE(COUNT(o.id), 0)", "total")
       .where("u.id = :userId", { userId })
       .andWhere("o.payment_method = :paymentMethod", { paymentMethod: "cod" })
-      .andWhere("o.status != :cancelledStatus", { cancelledStatus: "cancelled" })
+     .andWhere("o.status NOT IN (:...excludedStatuses)", {
+        excludedStatuses: ["pending", "created"],
+      })
       .andWhere(
         "DATE(o.created_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')",
       )
