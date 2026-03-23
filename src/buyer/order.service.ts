@@ -1288,7 +1288,7 @@ export class OrderService {
                 `Buyer cancel rejected by timing: order=${cancelOrderDto.order_number} windowSec=${windowSec} elapsedSec=${elapsedSec} (DB clock)`,
               );
               throw new BadRequestException(
-                `You cannot cancel this order. You can only cancel within ${windowSec} seconds of placing your order.`,
+                'This order cannot be cancelled. Please contact support for assistance.'
               );
             }
           }
