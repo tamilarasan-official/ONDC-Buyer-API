@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, Logger } from "@nestjs/common";
 import { LoginDto } from "./dto/login.dto";
 import { InjectRepository } from "@nestjs/typeorm";
 import { User } from "src/user/entities/user.entity";
@@ -19,6 +19,10 @@ import { createHash, randomBytes, randomUUID } from "crypto";
 
 @Injectable()
 export class AuthenticationService {
+  private readonly logger = new Logger(AuthenticationService.name);
+  private readonly guestAccessTokenTtlSeconds =
+    Number(process.env.GUEST_ACCESS_TOKEN_TTL_SECONDS) || 1800;
+
   constructor(
     @InjectRepository(User)
     private readonly userRepository: Repository<User>,
@@ -44,9 +48,21 @@ export class AuthenticationService {
   async login(loginDto: LoginDto) {
     try {
       const user = await this.userService.login(loginDto);
+      const existingUser = !!user.email;
+      let guestLinkStatus:
+        | "not_provided"
+        | "invalid_identity_token"
+        | "skipped_existing_user"
+        | "linked"
+        | "already_linked_same_user"
+        | "skipped_linked_other_user" = "not_provided";
 
       // If the client provides an existing guest `identity_token`, link that
       // stable guest identity to the newly created/confirmed user.
+      // Security hardening:
+      // - Skip linking for existing users
+      // - Allow one-time conversion only
+      // - Reject relinking to a different user
       const rawIdentityToken = loginDto.identity_token?.trim();
       if (rawIdentityToken) {
         const identityTokenHash = createHash("sha256")
@@ -57,18 +73,58 @@ export class AuthenticationService {
           where: { identity_token_hash: identityTokenHash },
         });
 
-        if (guestIdentity) {
-          guestIdentity.converted_to_user = true;
-          guestIdentity.linked_user_id = user.id;
-          guestIdentity.converted_at = new Date();
-          await this.guestIdentityRepository.save(guestIdentity);
+        if (!guestIdentity) {
+          guestLinkStatus = "invalid_identity_token";
+        } else if (existingUser) {
+          guestLinkStatus = "skipped_existing_user";
+        } else if (guestIdentity.converted_to_user) {
+          const linkedUserId = guestIdentity.linked_user_id;
+          if (linkedUserId === user.id) {
+            guestLinkStatus = "already_linked_same_user";
+          } else {
+            guestLinkStatus = "skipped_linked_other_user";
+            this.logger.warn(
+              `Skipped guest link: identity ${guestIdentity.identity_id} already linked to user ${linkedUserId}, attempted by user ${user.id}`,
+            );
+          }
+        } else {
+          // Atomic one-time conversion to avoid race conditions.
+          const updateResult = await this.guestIdentityRepository
+            .createQueryBuilder()
+            .update(GuestIdentity)
+            .set({
+              converted_to_user: true,
+              linked_user_id: user.id,
+              converted_at: new Date(),
+            })
+            .where("identity_id = :identityId", {
+              identityId: guestIdentity.identity_id,
+            })
+            .andWhere("converted_to_user = false")
+            .execute();
 
-          // Invalidate currently active guest sessions for this identity
-          // so the app must use the user JWT after conversion.
-          await this.guestSessionRepository.update(
-            { id: guestIdentity.identity_id },
-            { is_active: false },
-          );
+          if (updateResult.affected && updateResult.affected > 0) {
+            guestLinkStatus = "linked";
+            // Invalidate currently active guest sessions for this identity
+            // so the app must use the user JWT after conversion.
+            await this.guestSessionRepository.update(
+              { id: guestIdentity.identity_id },
+              { is_active: false },
+            );
+          } else {
+            // If another request linked it first, resolve idempotently.
+            const latestIdentity = await this.guestIdentityRepository.findOne({
+              where: { identity_id: guestIdentity.identity_id },
+            });
+            if (latestIdentity?.linked_user_id === user.id) {
+              guestLinkStatus = "already_linked_same_user";
+            } else {
+              guestLinkStatus = "skipped_linked_other_user";
+              this.logger.warn(
+                `Skipped guest link after concurrent update: identity ${guestIdentity.identity_id}, attempted by user ${user.id}`,
+              );
+            }
+          }
         }
       }
 
@@ -80,7 +136,8 @@ export class AuthenticationService {
       return {
         access_token: generateAccessToken(payload),
         refresh_token: generateRefreshToken(payload),
-        existing_user: !!(user.name && user.email),
+        existing_user: existingUser,
+        guest_link_status: guestLinkStatus,
       };
     } catch (error) {
       throw new BadRequestException("Login failed", error.message);
@@ -114,9 +171,10 @@ export class AuthenticationService {
   async guestLogin(guestLoginDto: GuestLoginDto) {
     const now = Date.now();
     const jti = randomUUID();
+    const guestTtlSeconds = this.guestAccessTokenTtlSeconds;
 
-    // 30 minutes is kept in sync with `generateGuestAccessToken()`.
-    const expiresAt = new Date(now + 30 * 60 * 1000);
+    // Keep DB session TTL in sync with guest JWT TTL.
+    const expiresAt = new Date(now + guestTtlSeconds * 1000);
 
     const rawDeviceId = guestLoginDto.device_id?.trim();
     const deviceIdHash = rawDeviceId
@@ -209,7 +267,7 @@ export class AuthenticationService {
       access_token: generateGuestAccessToken(payload),
       token_type: "Bearer",
       is_guest: true,
-      expires_in_seconds: 1800,
+      expires_in_seconds: guestTtlSeconds,
       identity_token: identityTokenToReturn,
     };
   }

@@ -104,6 +104,20 @@ export class AuthenticationController {
               description:
                 "Indicates if the user has completed their profile (added name and email). False for new users, true for existing users with complete profile.",
             },
+            guest_link_status: {
+              type: "string",
+              example: "linked",
+              enum: [
+                "not_provided",
+                "invalid_identity_token",
+                "skipped_existing_user",
+                "linked",
+                "already_linked_same_user",
+                "skipped_linked_other_user",
+              ],
+              description:
+                "Outcome of optional guest identity linking during login.",
+            },
           },
         },
       },

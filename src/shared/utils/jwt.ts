@@ -5,6 +5,8 @@ const JWT_SECRET =
 const JWT_REFRESH_SECRET =
   process.env.JWT_REFRESH_SECRET ||
   "T3Kqz8gAe0J1aV9q+YrmMvH3sYDjBmxUNRTOvfhBrHo=";
+const GUEST_ACCESS_TOKEN_TTL_SECONDS =
+  Number(process.env.GUEST_ACCESS_TOKEN_TTL_SECONDS) || 1800;
 
 export function generateAccessToken(
   payload: object,
@@ -26,5 +28,5 @@ export function verifyRefreshToken(token: string) {
 }
 
 export function generateGuestAccessToken(payload: object) {
-  return generateAccessToken(payload, "30m");
+  return generateAccessToken(payload, GUEST_ACCESS_TOKEN_TTL_SECONDS);
 }
