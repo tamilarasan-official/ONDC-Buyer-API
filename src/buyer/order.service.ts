@@ -526,7 +526,7 @@ export class OrderService {
             );
             if (todayCodOrderCount >= codDailyThreshold) {
               throw new BadRequestException(
-                "COD daily limit reached. Please use online payment.",
+                "Cash on Delivery is not available. Please choose Online Payment to continue.",
               );
             }
           }

@@ -242,9 +242,10 @@ export class ReviewService {
           }) || [],
       };
 
+      // reference_id must match worker getReferenceId (payload.order_id = order_number), like order.push
       const row = await this.sellerSyncQueueService.addOutboxRow(
         "review.push",
-        String(createReviewDto.order_id),
+        String(order.order_number),
         payload as Record<string, unknown>,
       );
       const jobId = await this.sellerSyncQueueService.enqueueReviewPush(payload);
