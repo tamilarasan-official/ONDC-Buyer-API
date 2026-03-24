@@ -127,7 +127,6 @@ export class OrderService {
     private readonly appSettingsService: AppSettingsService,
     private readonly httpService: HttpService,
     private readonly sellerSyncQueueService: SellerSyncQueueService,
-     private readonly appSettingsService: AppSettingsService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     private readonly dataSource: DataSource,
