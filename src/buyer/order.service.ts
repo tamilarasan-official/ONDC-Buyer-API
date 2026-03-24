@@ -127,6 +127,7 @@ export class OrderService {
     private readonly appSettingsService: AppSettingsService,
     private readonly httpService: HttpService,
     private readonly sellerSyncQueueService: SellerSyncQueueService,
+     private readonly appSettingsService: AppSettingsService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     private readonly dataSource: DataSource,
@@ -279,6 +280,41 @@ export class OrderService {
     return !hasPendingCouponRedemption;
   }
 
+   /**
+   * Buyer cancel window in seconds from app_settings (BUYER_CANCEL_TIMING_VALUE).
+   * Cancel is allowed only while: BUYER_CANCEL_TIMING_VALUE >= elapsed seconds since order placed.
+   * null = no time limit (setting missing, inactive, or <= 0).
+   */
+  private async getBuyerCancelWindowSeconds(): Promise<number | null> {
+    const raw = await this.appSettingsService.getNumber(
+      "BUYER_CANCEL_TIMING_VALUE",
+      0,
+    );
+    if (raw == null || !Number.isFinite(raw)) return null;
+    const sec = Math.floor(Number(raw));
+    if (sec <= 0) return null;
+    return sec;
+  }
+
+  /**
+   * Whole seconds since order.created_at using the **database** clock.
+   * Avoids false "outside cancel window" when app servers are NTP-skewed vs each other or vs Postgres.
+   */
+  private async getOrderElapsedSecondsSinceCreated(
+    orderId: number,
+  ): Promise<number | null> {
+    const row = await this.orderRepository
+      .createQueryBuilder("o")
+      .select(
+        "FLOOR(GREATEST(0, EXTRACT(EPOCH FROM (NOW() - o.created_at))))::integer",
+        "elapsed_sec",
+      )
+      .where("o.id = :id", { id: orderId })
+      .getRawOne<{ elapsed_sec: string | number | null }>();
+    if (!row || row.elapsed_sec == null) return null;
+    const n = Number(row.elapsed_sec);
+    return Number.isFinite(n) ? n : null;
+  }
   /**
    * Create order from cart (without payment processing)
    */
@@ -1331,7 +1367,7 @@ export class OrderService {
     }
   }
 
-  /**
+   /**
    * Cancel order (Buyer only)
    * Validates order belongs to authenticated user
    */
@@ -1355,10 +1391,54 @@ export class OrderService {
         throw new NotFoundException("Order not found");
       }
 
-      let blockedStatuses = ["delivered", "cancelled"]
+      const cancelledBy = cancelOrderDto.cancelled_by ?? "buyer";
 
+      // Buyer: allow cancel only if BUYER_CANCEL_TIMING_VALUE >= elapsed seconds since placed.
+      if (cancelledBy === "buyer") {
+        const windowSec = await this.getBuyerCancelWindowSeconds();
+        if (windowSec != null) {
+          const elapsedSec =
+            await this.getOrderElapsedSecondsSinceCreated(order.id);
+          const placedMs = new Date(order.created_at).getTime();
+          const elapsedSecApp =
+            Number.isFinite(placedMs) && placedMs > 0
+              ? Math.floor((Date.now() - placedMs) / 1000)
+              : null;
+          const allowCancelByTiming =
+            elapsedSec != null && windowSec >= elapsedSec;
+          // Console debug (grep: BUYER_CANCEL_TIMING)
+          console.log("[BUYER_CANCEL_TIMING]", {
+            order_number: cancelOrderDto.order_number,
+            order_id: order.id,
+            BUYER_CANCEL_TIMING_VALUE: windowSec,
+            elapsed_sec_db: elapsedSec,
+            elapsed_sec_app: elapsedSecApp,
+            allow_within_window:
+              elapsedSec == null ? "skipped_no_db_elapsed" : allowCancelByTiming,
+            rule: "allowed when BUYER_CANCEL_TIMING_VALUE >= elapsed_sec_db",
+            created_at: order.created_at,
+            app_now_iso: new Date().toISOString(),
+          });
+          if (elapsedSec == null) {
+            this.logger.warn(
+              `Buyer cancel timing skipped: could not compute elapsed_sec for order id=${order.id} (${cancelOrderDto.order_number})`,
+            );
+          } else {
+            if (!allowCancelByTiming) {
+              this.logger.warn(
+                `Buyer cancel rejected by timing: order=${cancelOrderDto.order_number} windowSec=${windowSec} elapsedSec=${elapsedSec} (DB clock)`,
+              );
+              throw new BadRequestException(
+                'This order cannot be cancelled. Please contact support for assistance.'
+              );
+            }
+          }
+        }
+      }
 
-      if (cancelOrderDto.cancelled_by === "buyer") {
+      let blockedStatuses = ["delivered", "cancelled"];
+
+      if (cancelledBy === "buyer") {
         // Allow buyer to cancel when status is "confirmed"
         // Block only after order moves into preparation / logistics flow
         blockedStatuses = [
@@ -1372,10 +1452,7 @@ export class OrderService {
           "delivered",
           "cancelled",
         ];
-      } else if (
-        cancelOrderDto.cancelled_by === "seller" ||
-        cancelOrderDto.cancelled_by === "system"
-      ) {
+      } else if (cancelledBy === "seller" || cancelledBy === "system") {
         blockedStatuses = ["delivered", "cancelled"];
       }
 
@@ -1416,16 +1493,13 @@ export class OrderService {
           );
         }
 
-        if (cancelOrderDto.cancelled_by === "buyer") {
+        if (cancelledBy === "buyer") {
           throw new BadRequestException(
             `Order is currently in '${currentOrder.status}' status and cannot be cancelled by the buyer.`,
           );
         }
 
-        if (
-          cancelOrderDto.cancelled_by === "seller" ||
-          cancelOrderDto.cancelled_by === "system"
-        ) {
+        if (cancelledBy === "seller" || cancelledBy === "system") {
           throw new BadRequestException(
             `Order is currently in '${currentOrder.status}' status and cannot be cancelled at this stage.`,
           );
@@ -1435,12 +1509,38 @@ export class OrderService {
         throw new BadRequestException("Order cannot be cancelled at this time.");
       }
 
-      if (cancelOrderDto.cancelled_by === "buyer") {
+      // Stop delayed/waiting seller order.push; mark outbox skipped for audit (worker also skips if job could not be removed).
+      try {
+        const removed =
+          await this.sellerSyncQueueService.removePendingOrderPush(
+            order.order_number,
+          );
+        const skipReason = removed
+          ? "buyer_cancelled_job_removed"
+          : "cancelled_before_seller_push";
+        this.logger.debug(
+          `[SELLER_SYNC_SKIP] cancel cleanup order=${order.order_number} removePendingOrderPush_removed=${removed} next_mark_skipped_reason=${skipReason}`,
+        );
+        await this.sellerSyncQueueService.markOutboxSkippedByReference(
+          order.order_number,
+          "order.push",
+          skipReason,
+        );
+        this.logger.debug(
+          `[SELLER_SYNC_SKIP] cancel cleanup markOutboxSkippedByReference done order=${order.order_number} reason=${skipReason}`,
+        );
+      } catch (cleanupErr) {
+        this.logger.warn(
+          `seller_sync order.push cleanup: ${(cleanupErr as Error).message}`,
+        );
+      }
+
+      if (cancelledBy === "buyer") {
         try {
           const payload = {
             external_order_id: order.order_number,
             cancel_code: cancelOrderDto.code,
-            cancelled_by: cancelOrderDto.cancelled_by,
+            cancelled_by: cancelledBy,
           };
 
           const row = await this.sellerSyncQueueService.addOutboxRow(
@@ -1460,10 +1560,40 @@ export class OrderService {
         }
       }
 
-      // Policy: do NOT restore coupon quota for placed orders on cancellation.
-      this.logger.log(
-        `ℹ️ Skipping coupon quota restore for order ${order.id} on cancellation (preorder/nth lock policy)`,
-      );
+      // NEW: Restore quota for preorder items
+      const orderItems = await this.orderItemRepository.find({
+        where: { order: { id: order.id } },
+        relations: ['item'],
+      });
+
+      for (const orderItem of orderItems) {
+        if (orderItem.is_preorder) {
+          // Find the coupon redemption for this order
+          const couponRedemption = await this.couponRedemptionRepository.findOne({
+            where: { order_id: order.id },
+            relations: ['coupon'],
+          });
+
+          if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
+            // FIX: Use releaseReservation instead of incrementQuota to properly clean up reservation
+            if (couponRedemption.reserved_token) {
+              await this.redisCouponService.releaseReservation(
+                couponRedemption.coupon.id,
+                couponRedemption.reserved_token
+              );
+              this.logger.log(
+                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
+              );
+            } else {
+              // Fallback: If no reservation token, restore quota directly
+              await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
+              this.logger.log(
+                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon.id} after order cancellation (no reservation token found)`
+              );
+            }
+          }
+        }
+      }
 
       // Create tracking entry
       await this.createOrderTracking(
