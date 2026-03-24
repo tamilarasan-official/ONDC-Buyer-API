@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { AppSettings } from "../entities/app-settings.entity";
@@ -10,6 +15,8 @@ export class AppSettingsService {
   private settingsCache: Map<string, string> = new Map();
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL = 60000; // 1 minute cache
+  private readonly maxFiveDigits = 99_999;
+  private readonly codDailyThresholdMax = 999;
 
   constructor(
     @InjectRepository(AppSettings)
@@ -155,6 +162,7 @@ export class AppSettingsService {
     description?: string,
     role?: string
   ): Promise<AppSettings> {
+    this.validateSettingValueByKey(key, value);
     let setting = await this.appSettingsRepository.findOne({ where: { key } });
 
     if (setting) {
@@ -187,6 +195,7 @@ export class AppSettingsService {
       throw new NotFoundException(`Setting with ID ${id} not found`);
     }
 
+    this.validateSettingValueByKey(setting.key, value);
     setting.value = value;
     const saved = await this.appSettingsRepository.save(setting);
     await this.refreshCache();
@@ -258,5 +267,49 @@ export class AppSettingsService {
     }
 
     this.logger.log(`✅ Bulk updated ${settings.length} settings`);
+  }
+
+  /**
+   * Validate setting values for keys that require strict numeric constraints.
+   * Keeps the existing generic architecture (key/value rows) while enforcing domain rules.
+   */
+  private validateSettingValueByKey(key: string, rawValue: string): void {
+    const value = String(rawValue ?? "").trim();
+
+    if (key === "COD_DAILY_THRESHOLD") {
+      if (!/^\d+$/.test(value)) {
+        throw new BadRequestException(
+          "COD Daily Threshold must contain only numeric characters",
+        );
+      }
+      const parsed = Number(value);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new BadRequestException(
+          "COD Daily Threshold must be a positive whole number",
+        );
+      }
+      if (parsed > this.codDailyThresholdMax) {
+        throw new BadRequestException(
+          "COD Daily Threshold must be between 1 and 100",
+        );
+      }
+      return;
+    }
+
+    if (key === "COD_SERVICEABLE_DISTANCE_KM") {
+      // Whole number only, max 5 digits.
+      const validFormat = /^\d{1,5}$/.test(value);
+      if (!validFormat) {
+        throw new BadRequestException(
+          "COD Serviceable Distance must be a whole number up to 5 digits",
+        );
+      }
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed) || !Number.isInteger(parsed) || parsed <= 0) {
+        throw new BadRequestException(
+          "COD Serviceable Distance must be a positive whole number",
+        );
+      }
+    }
   }
 }

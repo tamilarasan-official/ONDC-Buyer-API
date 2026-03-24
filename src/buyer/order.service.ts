@@ -5,6 +5,7 @@ import {
   BadRequestException,
   InternalServerErrorException,
   Optional,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -52,6 +53,7 @@ import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 import { CouponMetricsQueueService } from "../coupon/services/coupon-metrics.queue.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 /**
  * Statuses for which buyer receives an order notification; all others use skipNotification.
@@ -122,6 +124,7 @@ export class OrderService {
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
+    private readonly appSettingsService: AppSettingsService,
     private readonly httpService: HttpService,
     private readonly sellerSyncQueueService: SellerSyncQueueService,
     @InjectRepository(WebhookEvent)
@@ -193,6 +196,52 @@ export class OrderService {
         correlationId,
       );
     }
+  }
+
+  /**
+   * Lightweight local Haversine distance (km) for COD radius check.
+   * Avoids triggering external distance providers inside createOrder.
+   */
+  private calculateHaversineDistanceKm(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
+    const toRadians = (degrees: number) => degrees * (Math.PI / 180);
+    const earthRadiusKm = 6371;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(lat1)) *
+        Math.cos(toRadians(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  /**
+   * COD order count placed today (IST) for a user, excluding cancelled orders.
+   */
+  private async getTodayCodOrderCountForUser(userId: number): Promise<number> {
+    const row = await this.orderRepository
+      .createQueryBuilder("o")
+      .leftJoin("o.user", "u")
+      .select("COALESCE(COUNT(o.id), 0)", "total")
+      .where("u.id = :userId", { userId })
+      .andWhere("o.payment_method = :paymentMethod", { paymentMethod: "cod" })
+     .andWhere("o.status NOT IN (:...excludedStatuses)", {
+        excludedStatuses: ["pending", "created"],
+      })
+      .andWhere(
+        "DATE(o.created_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')",
+      )
+      .getRawOne<{ total: string | number | null }>();
+
+    const total = Number(row?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
   }
 
   private async isOrderRecoveryAlreadyFinalized(
@@ -391,6 +440,99 @@ export class OrderService {
             );
           }
           throw saveError;
+        }
+      }
+
+      // COD amount range validation (dynamic via app settings).
+      // Keeps logic minimal: allow when total is within [min, max] (inclusive).
+      if (createOrderDto.payment_method === "cod") {
+        const codEnabled = await this.appSettingsService.getBoolean(
+          "COD_ENABLED",
+          false,
+        );
+        if (codEnabled) {
+          // Read COD knobs in parallel to keep request latency low.
+          const [
+            minCodAmountRaw,
+            maxCodAmountRaw,
+            codDailyThresholdRaw,
+            codServiceableDistanceKmRaw,
+          ] = await Promise.all([
+            this.appSettingsService.getNumber("COD_MIN_AMOUNT", 0),
+            this.appSettingsService.getNumber("COD_MAX_AMOUNT", 0),
+            this.appSettingsService.getNumber("COD_DAILY_THRESHOLD", 0),
+            this.appSettingsService.getNumber("COD_SERVICEABLE_DISTANCE_KM", 0),
+          ]);
+          const minCodAmount = Number(minCodAmountRaw ?? 0);
+          const maxCodAmount = Number(maxCodAmountRaw ?? 0);
+          const orderTotalAmount = Number(cartToUse.final_amount ?? 0);
+
+          const hasValidCodRange =
+            Number.isFinite(minCodAmount) &&
+            Number.isFinite(maxCodAmount) &&
+            minCodAmount >= 0 &&
+            maxCodAmount > 0 &&
+            maxCodAmount >= minCodAmount;
+
+          if (
+            hasValidCodRange &&
+            (orderTotalAmount < minCodAmount || orderTotalAmount > maxCodAmount)
+          ) {
+            throw new BadRequestException(
+              `COD is available for orders between ₹${minCodAmount} and ₹${maxCodAmount}.`,
+            );
+          }
+
+          // COD daily threshold: block new COD order if today's COD total reaches/exceeds threshold.
+          const codDailyThreshold = Number(codDailyThresholdRaw ?? 0);
+          if (Number.isFinite(codDailyThreshold) && codDailyThreshold > 0) {
+            const todayCodOrderCount = await this.getTodayCodOrderCountForUser(
+              userId,
+            );
+            if (todayCodOrderCount >= codDailyThreshold) {
+              throw new BadRequestException(
+                "COD daily limit reached. Please use online payment.",
+              );
+            }
+          }
+
+          // Additional COD-only serviceable radius check (independent from global app serviceability).
+          const codServiceableDistanceKm = Number(
+            codServiceableDistanceKmRaw ?? 0,
+          );
+          if (
+            Number.isFinite(codServiceableDistanceKm) &&
+            codServiceableDistanceKm > 0
+          ) {
+            // Fetch center values only when COD distance check is actually enabled.
+            const [centerLatRaw, centerLngRaw] = await Promise.all([
+              this.appSettingsService.get("APP_SERVICEABLE_AREA_CENTER_LAT", ""),
+              this.appSettingsService.get("APP_SERVICEABLE_AREA_CENTER_LNG", ""),
+            ]);
+            const centerLat = Number(centerLatRaw);
+            const centerLng = Number(centerLngRaw);
+            const hasValidCenter =
+              Number.isFinite(centerLat) &&
+              Number.isFinite(centerLng) &&
+              centerLat >= -90 &&
+              centerLat <= 90 &&
+              centerLng >= -180 &&
+              centerLng <= 180;
+
+            if (hasValidCenter) {
+              const codDistanceKm = this.calculateHaversineDistanceKm(
+                centerLat,
+                centerLng,
+                Number(deliveryAddress.latitude),
+                Number(deliveryAddress.longitude),
+              );
+              if (codDistanceKm > codServiceableDistanceKm) {
+                throw new ServiceUnavailableException(
+                  "COD is not available for your location.",
+                );
+              }
+            }
+          }
         }
       }
 

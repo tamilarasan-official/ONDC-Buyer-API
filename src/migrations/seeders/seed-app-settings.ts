@@ -151,6 +151,18 @@ async function seedAppSettings() {
         category: "app_config",
         description: "Maximum order amount (₹) for Cash on Delivery",
       },
+      {
+        key: "COD_DAILY_THRESHOLD",
+        value: "5000",
+        category: "app_config",
+        description: "Maximum allowable Cash on Delivery amount per day",
+      },
+      {
+        key: "COD_SERVICEABLE_DISTANCE_KM",
+        value: "10",
+        category: "app_config",
+        description: "Maximum distance in kilometers within which COD is available",
+      },
     ];
 
     console.log(`🌱 Seeding ${settings.length} app settings...`);
