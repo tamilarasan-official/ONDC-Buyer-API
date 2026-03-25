@@ -44,6 +44,7 @@ import { CouponType, CouponStatus, ValueType } from "../coupon/entities/coupon.e
 import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
+import { Order } from "../order/entities/order.entity";
 
 @Injectable()
 export class BuyerService {
@@ -98,11 +99,35 @@ export class BuyerService {
     private readonly couponRepository: Repository<Coupon>,
     @InjectRepository(CouponRedemption)
     private readonly couponRedemptionRepository: Repository<CouponRedemption>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly redisCouponService: RedisCouponService,
     private readonly locationService: LocationService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appSettingsService: AppSettingsService,
   ) { }
+
+  /**
+   * COD order count placed today (IST) for a user, excluding cancelled orders.
+   */
+  private async getTodayCodOrderCountForUser(userId: number): Promise<number> {
+    const row = await this.orderRepository
+      .createQueryBuilder("o")
+      .leftJoin("o.user", "u")
+      .select("COALESCE(COUNT(o.id), 0)", "total")
+      .where("u.id = :userId", { userId })
+      .andWhere("o.payment_method = :paymentMethod", { paymentMethod: "cod" })
+      .andWhere("o.status NOT IN (:...excludedStatuses)", {
+          excludedStatuses: ["pending", "created"],
+        })
+      .andWhere(
+        "DATE(o.created_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')",
+      )
+      .getRawOne<{ total: string | number | null }>();
+
+    const total = Number(row?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
 
   /**
    * Get home page data with nearby restaurants, trending items, and promotional banner
@@ -167,6 +192,9 @@ export class BuyerService {
         codEnabled,
         codMinAmount,
         codMaxAmount,
+        codDailyThreshold,
+        codServiceableDistanceKm,
+        cancelTimerSecondsRaw,
       ] = await Promise.all([
         this.getFeaturedRestaurants(
           userLocation.lat,
@@ -184,6 +212,9 @@ export class BuyerService {
         this.appSettingsService.getBoolean("COD_ENABLED", false),
         this.appSettingsService.getNumber("COD_MIN_AMOUNT", 0),
         this.appSettingsService.getNumber("COD_MAX_AMOUNT", 0),
+        this.appSettingsService.getNumber("COD_DAILY_THRESHOLD", 0),
+        this.appSettingsService.getNumber("COD_SERVICEABLE_DISTANCE_KM", 0),
+        this.appSettingsService.getNumber("BUYER_CANCEL_TIMING_VALUE", 0),
       ]);
 
       this.logger.log(
@@ -192,6 +223,16 @@ export class BuyerService {
       this.logger.log(
         `🕐 App operation status: ${appOperationStatus.isOpen ? "OPEN" : "CLOSED"} - ${appOperationStatus.message}`,
       );
+
+      let codEnabledForUser = codEnabled;
+      if (codEnabled && userId && Number(codDailyThreshold ?? 0) > 0) {
+        const todayCodOrderCount = await this.getTodayCodOrderCountForUser(userId);
+        console.log('codDailyThreshold', codDailyThreshold);
+        console.log('todayCodOrderCount', todayCodOrderCount);
+        if (todayCodOrderCount >= Number(codDailyThreshold ?? 0)) {
+          codEnabledForUser = false;
+        }
+      }
 
       const data = {
         nearby_restaurants: restaurantsResult.restaurants,
@@ -212,10 +253,15 @@ export class BuyerService {
         },
         home_screen_restaurant_card_style: homeScreenCardStyle || "1",
         cod_settings: {
-          cod_enabled: codEnabled,
+          cod_enabled: codEnabledForUser,
           cod_min_amount: codMinAmount ?? 0,
           cod_max_amount: codMaxAmount ?? 0,
+          cod_daily_threshold: codDailyThreshold ?? 0,
+          cod_serviceable_distance_km: codServiceableDistanceKm ?? 0,
         },
+        cancel_timer: Number.isFinite(cancelTimerSecondsRaw)
+          ? (cancelTimerSecondsRaw as number)
+          : 0,
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);

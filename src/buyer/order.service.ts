@@ -3,6 +3,9 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
+  InternalServerErrorException,
+  Optional,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { DataSource, Repository } from "typeorm";
@@ -35,7 +38,10 @@ import {
   CancelReasonDto,
 } from "./dto/seller-status-update.dto";
 import { Coupon } from "../coupon/entities/coupon.entity";
-import { CouponRedemption } from "../coupon/entities/coupon-redemption.entity";
+import {
+  CouponRedemption,
+  RedemptionStatus,
+} from "../coupon/entities/coupon-redemption.entity";
 import { CouponService } from "../coupon/services/coupon.service";
 import { RedisCouponService } from "../coupon/services/redis-coupon.service";
 import { CouponType } from "../coupon/entities/coupon.entity";
@@ -46,6 +52,8 @@ import { firstValueFrom } from "rxjs";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
+import { CouponMetricsQueueService } from "../coupon/services/coupon-metrics.queue.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 /**
  * Statuses for which buyer receives an order notification; all others use skipNotification.
@@ -55,13 +63,11 @@ import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service
  * - cancelled, refunded: order cancelled or refunded.
  */
 const BUYER_ORDER_NOTIFICATION_STATUSES = [
-  "created",
-  "pending",
   "confirmed",
   "billed",
   "packed",
   "agent-assigned",
-  "out_for_delivery",
+  "out-for-delivery",
   "delivered",
   "cancelled",
   "refunded",
@@ -74,6 +80,13 @@ export class OrderService {
   // Default coordinates used when location permissions are disabled in buyer app
   private readonly DEFAULT_LATITUDE = 9.9252;
   private readonly DEFAULT_LONGITUDE = 78.1198;
+
+  private readonly metricEligibleStatuses = new Set([
+    "paid",
+    "confirmed",
+    "delivered",
+    "completed",
+  ]);
 
   constructor(
     @InjectRepository(Order)
@@ -111,13 +124,196 @@ export class OrderService {
     private readonly sellerStatusService: SellerStatusService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appServiceableAreaService: AppServiceableAreaService,
+    private readonly appSettingsService: AppSettingsService,
     private readonly httpService: HttpService,
     private readonly sellerSyncQueueService: SellerSyncQueueService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     private readonly dataSource: DataSource,
+    @Optional()
+    private readonly couponMetricsQueueService?: CouponMetricsQueueService,
   ) {}
 
+  private createCorrelationId(prefix: string, orderId: number): string {
+    return `${prefix}-${orderId}-${Date.now()}`;
+  }
+
+  private async enqueueCouponRedemptionRetry(
+    orderId: number,
+    userId: number,
+    reservationToken: string,
+    correlationId: string,
+  ): Promise<void> {
+    if (!this.couponMetricsQueueService) {
+      this.logger.warn(
+        `[${correlationId}] couponMetricsQueueService unavailable; skipping async coupon redemption retry enqueue`,
+      );
+      return;
+    }
+
+    try {
+      await this.couponMetricsQueueService.enqueueCouponRedeemRetry({
+        orderId,
+        userId,
+        reservationToken,
+        correlationId,
+      });
+    } catch (error) {
+      this.logger.warn(
+        `[${correlationId}] Failed to enqueue coupon redemption retry for order ${orderId}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  private async enqueuePaidOrderMetricsUpdate(
+    orderId: number,
+    userId: number,
+    correlationId: string,
+  ): Promise<void> {
+    if (!this.couponMetricsQueueService) {
+      await this.couponService.recordPaidOrderEvent?.(
+        orderId,
+        userId,
+        correlationId,
+      );
+      return;
+    }
+
+    try {
+      await this.couponMetricsQueueService.enqueuePaidOrderEvent({
+        orderId,
+        userId,
+        correlationId,
+      });
+    } catch (queueError) {
+      this.logger.warn(
+        `[${correlationId}] Failed to enqueue paid-order event, using direct fallback: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
+      );
+
+      await this.couponService.recordPaidOrderEvent?.(
+        orderId,
+        userId,
+        correlationId,
+      );
+    }
+  }
+
+  /**
+   * Lightweight local Haversine distance (km) for COD radius check.
+   * Avoids triggering external distance providers inside createOrder.
+   */
+  private calculateHaversineDistanceKm(
+    lat1: number,
+    lng1: number,
+    lat2: number,
+    lng2: number,
+  ): number {
+    const toRadians = (degrees: number) => degrees * (Math.PI / 180);
+    const earthRadiusKm = 6371;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRadians(lat1)) *
+        Math.cos(toRadians(lat2)) *
+        Math.sin(dLng / 2) *
+        Math.sin(dLng / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return earthRadiusKm * c;
+  }
+
+  /**
+   * COD order count placed today (IST) for a user, excluding cancelled orders.
+   */
+  private async getTodayCodOrderCountForUser(userId: number): Promise<number> {
+    const row = await this.orderRepository
+      .createQueryBuilder("o")
+      .leftJoin("o.user", "u")
+      .select("COALESCE(COUNT(o.id), 0)", "total")
+      .where("u.id = :userId", { userId })
+      .andWhere("o.payment_method = :paymentMethod", { paymentMethod: "cod" })
+     .andWhere("o.status NOT IN (:...excludedStatuses)", {
+        excludedStatuses: ["pending", "created"],
+      })
+      .andWhere(
+        "DATE(o.created_at AT TIME ZONE 'Asia/Kolkata') = DATE(NOW() AT TIME ZONE 'Asia/Kolkata')",
+      )
+      .getRawOne<{ total: string | number | null }>();
+
+    const total = Number(row?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
+  private async isOrderRecoveryAlreadyFinalized(
+    payment: Payment,
+  ): Promise<boolean> {
+    const paymentStatus = String(payment?.payment_status ?? "").toLowerCase();
+    const orderPaymentStatus = String(payment?.order?.payment_status ?? "").toLowerCase();
+    const orderStatus = String(payment?.order?.status ?? "").toLowerCase();
+
+    const isPaymentSettled =
+      paymentStatus === "paid" || paymentStatus === "success";
+    const isOrderPaymentSettled = orderPaymentStatus === "paid";
+    const isOrderFinalized =
+      orderStatus === "confirmed" ||
+      orderStatus === "delivered" ||
+      orderStatus === "completed";
+
+    if (!(isPaymentSettled && isOrderPaymentSettled && isOrderFinalized)) {
+      return false;
+    }
+
+    const orderId = Number(payment?.order?.id);
+    if (!Number.isInteger(orderId) || orderId <= 0) {
+      return false;
+    }
+
+    const couponRedemptions = await this.couponRedemptionRepository.find({
+      where: { order_id: orderId },
+    });
+
+    const hasPendingCouponRedemption = couponRedemptions.some(
+      (redemption) => redemption.status !== RedemptionStatus.REDEEMED,
+    );
+
+    return !hasPendingCouponRedemption;
+  }
+
+   /**
+   * Buyer cancel window in seconds from app_settings (BUYER_CANCEL_TIMING_VALUE).
+   * Cancel is allowed only while: BUYER_CANCEL_TIMING_VALUE >= elapsed seconds since order placed.
+   * null = no time limit (setting missing, inactive, or <= 0).
+   */
+  private async getBuyerCancelWindowSeconds(): Promise<number | null> {
+    const raw = await this.appSettingsService.getNumber(
+      "BUYER_CANCEL_TIMING_VALUE",
+      0,
+    );
+    if (raw == null || !Number.isFinite(raw)) return null;
+    const sec = Math.floor(Number(raw));
+    if (sec <= 0) return null;
+    return sec;
+  }
+
+  /**
+   * Whole seconds since order.created_at using the **database** clock.
+   * Avoids false "outside cancel window" when app servers are NTP-skewed vs each other or vs Postgres.
+   */
+  private async getOrderElapsedSecondsSinceCreated(
+    orderId: number,
+  ): Promise<number | null> {
+    const row = await this.orderRepository
+      .createQueryBuilder("o")
+      .select(
+        "FLOOR(GREATEST(0, EXTRACT(EPOCH FROM (NOW() - o.created_at))))::integer",
+        "elapsed_sec",
+      )
+      .where("o.id = :id", { id: orderId })
+      .getRawOne<{ elapsed_sec: string | number | null }>();
+    if (!row || row.elapsed_sec == null) return null;
+    const n = Number(row.elapsed_sec);
+    return Number.isFinite(n) ? n : null;
+  }
   /**
    * Create order from cart (without payment processing)
    */
@@ -279,6 +475,99 @@ export class OrderService {
             );
           }
           throw saveError;
+        }
+      }
+
+      // COD amount range validation (dynamic via app settings).
+      // Keeps logic minimal: allow when total is within [min, max] (inclusive).
+      if (createOrderDto.payment_method === "cod") {
+        const codEnabled = await this.appSettingsService.getBoolean(
+          "COD_ENABLED",
+          false,
+        );
+        if (codEnabled) {
+          // Read COD knobs in parallel to keep request latency low.
+          const [
+            minCodAmountRaw,
+            maxCodAmountRaw,
+            codDailyThresholdRaw,
+            codServiceableDistanceKmRaw,
+          ] = await Promise.all([
+            this.appSettingsService.getNumber("COD_MIN_AMOUNT", 0),
+            this.appSettingsService.getNumber("COD_MAX_AMOUNT", 0),
+            this.appSettingsService.getNumber("COD_DAILY_THRESHOLD", 0),
+            this.appSettingsService.getNumber("COD_SERVICEABLE_DISTANCE_KM", 0),
+          ]);
+          const minCodAmount = Number(minCodAmountRaw ?? 0);
+          const maxCodAmount = Number(maxCodAmountRaw ?? 0);
+          const orderTotalAmount = Number(cartToUse.final_amount ?? 0);
+
+          const hasValidCodRange =
+            Number.isFinite(minCodAmount) &&
+            Number.isFinite(maxCodAmount) &&
+            minCodAmount >= 0 &&
+            maxCodAmount > 0 &&
+            maxCodAmount >= minCodAmount;
+
+          if (
+            hasValidCodRange &&
+            (orderTotalAmount < minCodAmount || orderTotalAmount > maxCodAmount)
+          ) {
+            throw new BadRequestException(
+              `COD is available for orders between ₹${minCodAmount} and ₹${maxCodAmount}.`,
+            );
+          }
+
+          // COD daily threshold: block new COD order if today's COD total reaches/exceeds threshold.
+          const codDailyThreshold = Number(codDailyThresholdRaw ?? 0);
+          if (Number.isFinite(codDailyThreshold) && codDailyThreshold > 0) {
+            const todayCodOrderCount = await this.getTodayCodOrderCountForUser(
+              userId,
+            );
+            if (todayCodOrderCount >= codDailyThreshold) {
+              throw new BadRequestException(
+                "Cash on Delivery is not available. Please choose Online Payment to continue.",
+              );
+            }
+          }
+
+          // Additional COD-only serviceable radius check (independent from global app serviceability).
+          const codServiceableDistanceKm = Number(
+            codServiceableDistanceKmRaw ?? 0,
+          );
+          if (
+            Number.isFinite(codServiceableDistanceKm) &&
+            codServiceableDistanceKm > 0
+          ) {
+            // Fetch center values only when COD distance check is actually enabled.
+            const [centerLatRaw, centerLngRaw] = await Promise.all([
+              this.appSettingsService.get("APP_SERVICEABLE_AREA_CENTER_LAT", ""),
+              this.appSettingsService.get("APP_SERVICEABLE_AREA_CENTER_LNG", ""),
+            ]);
+            const centerLat = Number(centerLatRaw);
+            const centerLng = Number(centerLngRaw);
+            const hasValidCenter =
+              Number.isFinite(centerLat) &&
+              Number.isFinite(centerLng) &&
+              centerLat >= -90 &&
+              centerLat <= 90 &&
+              centerLng >= -180 &&
+              centerLng <= 180;
+
+            if (hasValidCenter) {
+              const codDistanceKm = this.calculateHaversineDistanceKm(
+                centerLat,
+                centerLng,
+                Number(deliveryAddress.latitude),
+                Number(deliveryAddress.longitude),
+              );
+              if (codDistanceKm > codServiceableDistanceKm) {
+                throw new ServiceUnavailableException(
+                  "COD is not available for your location.",
+                );
+              }
+            }
+          }
         }
       }
 
@@ -461,6 +750,8 @@ export class OrderService {
         (ci) => ci.is_preorder && ci.preorder_reservation_token,
       );
 
+      const codCouponRedemptionFailures: string[] = [];
+
       for (const cartItem of preorderCartItemsWithToken) {
         if (!cartItem.preorder_reservation_token) continue;
 
@@ -483,6 +774,7 @@ export class OrderService {
               order_id: savedOrder.id,
               user_id: userId,
               payment_status: PaymentStatus.PAID,
+              idempotency_key: `cod-${savedOrder.id}-${cartItem.preorder_reservation_token}`,
             });
             this.logger.log(
               `✅ Redeemed preorder coupon for COD order ${savedOrder.order_number}`,
@@ -491,8 +783,96 @@ export class OrderService {
             this.logger.error(
               `❌ Failed to redeem coupon for COD order: ${redeemError.message}. Order created but coupon not redeemed.`,
             );
+            codCouponRedemptionFailures.push(
+              cartItem.preorder_reservation_token,
+            );
+
+            await this.enqueueCouponRedemptionRetry(
+              savedOrder.id,
+              userId,
+              cartItem.preorder_reservation_token,
+              this.createCorrelationId("cod-redeem-retry", savedOrder.id),
+            );
           }
         }
+      }
+
+      // Link cart-level coupon reservation to order and redeem immediately for COD orders.
+      if (cartToUse.coupon_reservation_token) {
+        const cartCouponRedemption = await this.couponRedemptionRepository.findOne({
+          where: { reserved_token: cartToUse.coupon_reservation_token },
+        });
+
+        if (cartCouponRedemption) {
+          cartCouponRedemption.order_id = savedOrder.id;
+          await this.couponRedemptionRepository.save(cartCouponRedemption);
+          this.logger.log(
+            `🔗 Linked cart coupon redemption to order ${savedOrder.id} (reserved_token)`,
+          );
+
+          if (createOrderDto.payment_method === "cod") {
+            try {
+              await this.couponService.redeemCoupon({
+                reservation_token: cartToUse.coupon_reservation_token,
+                order_id: savedOrder.id,
+                user_id: userId,
+                payment_status: PaymentStatus.PAID,
+                idempotency_key: `cod-${savedOrder.id}-${cartToUse.coupon_reservation_token}`,
+              });
+              this.logger.log(
+                `✅ Redeemed cart coupon for COD order ${savedOrder.order_number}`,
+              );
+            } catch (redeemError) {
+              this.logger.error(
+                `❌ Failed to redeem cart coupon for COD order: ${redeemError.message}`,
+              );
+              codCouponRedemptionFailures.push(
+                cartToUse.coupon_reservation_token,
+              );
+
+              await this.enqueueCouponRedemptionRetry(
+                savedOrder.id,
+                userId,
+                cartToUse.coupon_reservation_token,
+                this.createCorrelationId("cod-cart-redeem-retry", savedOrder.id),
+              );
+            }
+          }
+        }
+      }
+
+      if (
+        createOrderDto.payment_method === "cod" &&
+        codCouponRedemptionFailures.length > 0
+      ) {
+        // Best-effort synchronous reconciliation before relying on async retries.
+        try {
+          const reconciliation = await this.redeemPreorderCouponForOrder(
+            savedOrder.id,
+            userId,
+          );
+
+          if (reconciliation.success) {
+            this.logger.log(
+              `✅ COD coupon reconciliation succeeded synchronously for order ${savedOrder.order_number}`,
+            );
+            codCouponRedemptionFailures.length = 0;
+          }
+        } catch (reconcileError) {
+          this.logger.warn(
+            `⚠️ COD coupon reconciliation attempt failed for order ${savedOrder.order_number}: ${reconcileError.message}`,
+          );
+        }
+
+      }
+
+      if (
+        createOrderDto.payment_method === "cod" &&
+        codCouponRedemptionFailures.length > 0
+      ) {
+        this.logger.error(
+          `⚠️ COD order ${savedOrder.order_number} created with coupon redemption failures for tokens: ${codCouponRedemptionFailures.join(",")}`,
+        );
       }
 
       // Create initial tracking entry (without notification - logged only)
@@ -512,8 +892,8 @@ export class OrderService {
       );
 
       // Note: Cart will be cleared after order confirmation (COD) or payment success (online)
-      // For now, just deactivate it to prevent modifications during payment
-      await this.cartRepository.update(cartToUse.id, { is_active: false });
+      // clearCart will handle deactivation after releasing preorder/coupon reservations
+      // so we do NOT deactivate here - let it remain active until clearCart is called
 
       // 🚀 PUSH ORDER TO SELLER IMMEDIATELY
       try {
@@ -547,7 +927,9 @@ export class OrderService {
       if (createOrderDto.payment_method === "cod") {
         // Clear cart after successful COD order creation
         try {
-          await this.cartService.clearCart(userId);
+          await this.cartService.clearCart(userId, {
+            releaseCouponReservations: false,
+          });
           this.logger.log(
             `🗑️ Cart cleared for user ${userId} after COD order creation`,
           );
@@ -984,7 +1366,7 @@ export class OrderService {
     }
   }
 
-  /**
+   /**
    * Cancel order (Buyer only)
    * Validates order belongs to authenticated user
    */
@@ -1008,10 +1390,54 @@ export class OrderService {
         throw new NotFoundException("Order not found");
       }
 
-      let blockedStatuses = ["delivered", "cancelled"]
+      const cancelledBy = cancelOrderDto.cancelled_by ?? "buyer";
 
+      // Buyer: allow cancel only if BUYER_CANCEL_TIMING_VALUE >= elapsed seconds since placed.
+      if (cancelledBy === "buyer") {
+        const windowSec = await this.getBuyerCancelWindowSeconds();
+        if (windowSec != null) {
+          const elapsedSec =
+            await this.getOrderElapsedSecondsSinceCreated(order.id);
+          const placedMs = new Date(order.created_at).getTime();
+          const elapsedSecApp =
+            Number.isFinite(placedMs) && placedMs > 0
+              ? Math.floor((Date.now() - placedMs) / 1000)
+              : null;
+          const allowCancelByTiming =
+            elapsedSec != null && windowSec >= elapsedSec;
+          // Console debug (grep: BUYER_CANCEL_TIMING)
+          console.log("[BUYER_CANCEL_TIMING]", {
+            order_number: cancelOrderDto.order_number,
+            order_id: order.id,
+            BUYER_CANCEL_TIMING_VALUE: windowSec,
+            elapsed_sec_db: elapsedSec,
+            elapsed_sec_app: elapsedSecApp,
+            allow_within_window:
+              elapsedSec == null ? "skipped_no_db_elapsed" : allowCancelByTiming,
+            rule: "allowed when BUYER_CANCEL_TIMING_VALUE >= elapsed_sec_db",
+            created_at: order.created_at,
+            app_now_iso: new Date().toISOString(),
+          });
+          if (elapsedSec == null) {
+            this.logger.warn(
+              `Buyer cancel timing skipped: could not compute elapsed_sec for order id=${order.id} (${cancelOrderDto.order_number})`,
+            );
+          } else {
+            if (!allowCancelByTiming) {
+              this.logger.warn(
+                `Buyer cancel rejected by timing: order=${cancelOrderDto.order_number} windowSec=${windowSec} elapsedSec=${elapsedSec} (DB clock)`,
+              );
+              throw new BadRequestException(
+                'This order cannot be cancelled. Please contact support for assistance.'
+              );
+            }
+          }
+        }
+      }
 
-      if (cancelOrderDto.cancelled_by === "buyer") {
+      let blockedStatuses = ["delivered", "cancelled"];
+
+      if (cancelledBy === "buyer") {
         // Allow buyer to cancel when status is "confirmed"
         // Block only after order moves into preparation / logistics flow
         blockedStatuses = [
@@ -1025,10 +1451,7 @@ export class OrderService {
           "delivered",
           "cancelled",
         ];
-      } else if (
-        cancelOrderDto.cancelled_by === "seller" ||
-        cancelOrderDto.cancelled_by === "system"
-      ) {
+      } else if (cancelledBy === "seller" || cancelledBy === "system") {
         blockedStatuses = ["delivered", "cancelled"];
       }
 
@@ -1069,16 +1492,13 @@ export class OrderService {
           );
         }
 
-        if (cancelOrderDto.cancelled_by === "buyer") {
+        if (cancelledBy === "buyer") {
           throw new BadRequestException(
             `Order is currently in '${currentOrder.status}' status and cannot be cancelled by the buyer.`,
           );
         }
 
-        if (
-          cancelOrderDto.cancelled_by === "seller" ||
-          cancelOrderDto.cancelled_by === "system"
-        ) {
+        if (cancelledBy === "seller" || cancelledBy === "system") {
           throw new BadRequestException(
             `Order is currently in '${currentOrder.status}' status and cannot be cancelled at this stage.`,
           );
@@ -1088,11 +1508,38 @@ export class OrderService {
         throw new BadRequestException("Order cannot be cancelled at this time.");
       }
 
-      if (cancelOrderDto.cancelled_by === "buyer") {
+      // Stop delayed/waiting seller order.push; mark outbox skipped for audit (worker also skips if job could not be removed).
+      try {
+        const removed =
+          await this.sellerSyncQueueService.removePendingOrderPush(
+            order.order_number,
+          );
+        const skipReason = removed
+          ? "buyer_cancelled_job_removed"
+          : "cancelled_before_seller_push";
+        this.logger.debug(
+          `[SELLER_SYNC_SKIP] cancel cleanup order=${order.order_number} removePendingOrderPush_removed=${removed} next_mark_skipped_reason=${skipReason}`,
+        );
+        await this.sellerSyncQueueService.markOutboxSkippedByReference(
+          order.order_number,
+          "order.push",
+          skipReason,
+        );
+        this.logger.debug(
+          `[SELLER_SYNC_SKIP] cancel cleanup markOutboxSkippedByReference done order=${order.order_number} reason=${skipReason}`,
+        );
+      } catch (cleanupErr) {
+        this.logger.warn(
+          `seller_sync order.push cleanup: ${(cleanupErr as Error).message}`,
+        );
+      }
+
+      if (cancelledBy === "buyer") {
         try {
           const payload = {
             external_order_id: order.order_number,
             cancel_code: cancelOrderDto.code,
+            cancelled_by: cancelledBy,
           };
 
           const row = await this.sellerSyncQueueService.addOutboxRow(
@@ -1249,23 +1696,34 @@ export class OrderService {
         );
 
         if (existingPayment?.order) {
-          // Order already exists and was processed (likely by webhook)
-          this.logger.log(
-            `ℹ️ Order already created (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning success.`,
+          const isAlreadyFinalized =
+            await this.isOrderRecoveryAlreadyFinalized(existingPayment);
+
+          if (isAlreadyFinalized) {
+            this.logger.log(
+              `ℹ️ Order already finalized (ID: ${existingPayment.order.id}) for payment ${razorpay_payment_id}. Returning idempotent success.`,
+            );
+
+            // Get updated order data
+            const orderData = await this.getOrderById(
+              existingPayment.order.id,
+              userId,
+            );
+
+            return {
+              success: true,
+              message:
+                "Payment already verified and order created successfully",
+              payment_id: razorpay_payment_id,
+              order: orderData,
+            };
+          }
+
+          this.logger.warn(
+            `⚠️ Found payment ${razorpay_payment_id} with partially finalized order ${existingPayment.order.id}. Continuing recovery flow.`,
           );
 
-          // Get updated order data
-          const orderData = await this.getOrderById(
-            existingPayment.order.id,
-            userId,
-          );
-
-          return {
-            success: true,
-            message: "Payment already verified and order created successfully",
-            payment_id: razorpay_payment_id,
-            order: orderData,
-          };
+          payment = existingPayment;
         }
 
         // If still not found, this might be a retry scenario where payment_id was updated to a failed payment ID
@@ -1305,15 +1763,25 @@ export class OrderService {
       // Update payment status
       await this.updatePaymentStatus(order.id, "paid", razorpay_payment_id);
 
-      // Redeem preorder coupon on payment success (online only; COD is redeemed at order creation)
-      await this.redeemPreorderCouponForOrder(order.id, userId);
+      // Redeem coupon reservations linked to this order on payment success.
+      const redemptionResult = await this.redeemPreorderCouponForOrder(
+        order.id,
+        userId,
+      );
+      if (redemptionResult?.success === false) {
+        throw new InternalServerErrorException(
+          `Coupon redemption failed for order ${order.id}. Please retry verification.`,
+        );
+      }
 
       // Update order status
       await this.updateOrderStatus(order.id, "confirmed");
 
       // Clear cart after successful payment
       try {
-        await this.cartService.clearCart(userId);
+        await this.cartService.clearCart(userId, {
+          releaseCouponReservations: false,
+        });
         this.logger.log(
           `🗑️ Cart cleared for user ${userId} after payment success`,
         );
@@ -1354,37 +1822,64 @@ export class OrderService {
   async redeemPreorderCouponForOrder(
     orderId: number,
     userId?: number,
-  ): Promise<{ userId?: number }> {
-    const couponRedemption = await this.couponRedemptionRepository.findOne({
+  ): Promise<{ userId?: number; success: boolean; failedTokens: string[] }> {
+    const couponRedemptions = await this.couponRedemptionRepository.find({
       where: { order_id: orderId },
     });
-    if (!couponRedemption || !couponRedemption.reserved_token) {
-      return {};
+
+    if (!couponRedemptions.length) {
+      return { success: true, failedTokens: [] };
     }
-    const redeemUserId = userId ?? couponRedemption.user_id;
-    if (redeemUserId == null) {
-      this.logger.warn(
-        `⚠️ Preorder redemption for order ${orderId} has no user_id; skipping redeem`,
-      );
-      return {};
+
+    let resolvedUserId: number | undefined;
+    const failedTokens: string[] = [];
+
+    for (const couponRedemption of couponRedemptions) {
+      if (!couponRedemption.reserved_token) {
+        continue;
+      }
+
+      const redeemUserId = userId ?? couponRedemption.user_id;
+      if (redeemUserId == null) {
+        this.logger.warn(
+          `⚠️ Coupon redemption for order ${orderId} has no user_id; skipping redeem`,
+        );
+        failedTokens.push(couponRedemption.reserved_token);
+        continue;
+      }
+
+      try {
+        await this.couponService.redeemCoupon({
+          reservation_token: couponRedemption.reserved_token,
+          order_id: orderId,
+          user_id: redeemUserId,
+          payment_status: PaymentStatus.PAID,
+          idempotency_key: `pay-${orderId}-${couponRedemption.reserved_token}`,
+        });
+        resolvedUserId = redeemUserId;
+        this.logger.log(
+          `✅ Redeemed coupon for order ${orderId} (payment success)`,
+        );
+      } catch (redeemError) {
+        this.logger.error(
+          `❌ Failed to redeem coupon for order ${orderId}: ${redeemError.message}`,
+        );
+        failedTokens.push(couponRedemption.reserved_token);
+
+        await this.enqueueCouponRedemptionRetry(
+          orderId,
+          redeemUserId,
+          couponRedemption.reserved_token,
+          this.createCorrelationId("payment-redeem-retry", orderId),
+        );
+      }
     }
-    try {
-      await this.couponService.redeemCoupon({
-        reservation_token: couponRedemption.reserved_token,
-        order_id: orderId,
-        user_id: redeemUserId,
-        payment_status: PaymentStatus.PAID,
-      });
-      this.logger.log(
-        `✅ Redeemed preorder coupon for order ${orderId} (payment success)`,
-      );
-      return { userId: redeemUserId };
-    } catch (redeemError) {
-      this.logger.error(
-        `❌ Failed to redeem preorder coupon for order ${orderId}: ${redeemError.message}`,
-      );
-      return {};
-    }
+
+    return {
+      userId: resolvedUserId,
+      success: failedTokens.length === 0,
+      failedTokens,
+    };
   }
 
   /**
@@ -1409,41 +1904,10 @@ export class OrderService {
       // Update payment status to failed
       await this.updatePaymentStatus(order.id, "failed");
 
-      // NEW: Release reservations for preorder items on payment failure
-      const orderItems = await this.orderItemRepository.find({
-        where: { order: { id: orderId } },
-        relations: ['item'],
-      });
-
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: orderId },
-            relations: ['coupon'],
-          });
-
-          if (couponRedemption && couponRedemption.coupon_id) {
-            if (couponRedemption.reserved_token) {
-              // Release reservation and restore quota
-              // releaseReservation() always restores quota, even if reservation expired
-              await this.redisCouponService.releaseReservation(
-                couponRedemption.coupon_id,
-                couponRedemption.reserved_token
-              );
-              this.logger.log(
-                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment failure`
-              );
-            } else {
-              // No reservation token - restore quota directly (quota was consumed but no reservation record)
-              await this.redisCouponService.incrementQuota(couponRedemption.coupon_id, 1);
-              this.logger.log(
-                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment failure (no reservation token found)`
-              );
-            }
-          }
-        }
-      }
+      // Policy: do NOT restore coupon quota for placed orders on payment failure.
+      this.logger.log(
+        `ℹ️ Skipping coupon quota restore for order ${orderId} on payment failure (preorder/nth lock policy)`,
+      );
 
       // Reactivate cart to allow user to retry payment or modify cart
       try {
@@ -1545,42 +2009,14 @@ export class OrderService {
         // This handles partial refunds correctly - small refunds don't restore quota
         if (refundAmount !== null && refundAmount !== undefined) {
           if (refundAmount >= preorderItemsTotal && preorderItemsTotal > 0) {
-            // Refund covers preorder items - restore quota
+            // Refund covers preorder items.
             this.logger.log(
-              `✅ Refund amount (₹${refundAmount}) >= preorder items total (₹${preorderItemsTotal}). Restoring quota.`,
+              `✅ Refund amount (₹${refundAmount}) >= preorder items total (₹${preorderItemsTotal}).`,
             );
 
-            // Release reservations for preorder items
-            for (const orderItem of preorderItems) {
-              // Find the coupon redemption for this order
-              const couponRedemption =
-                await this.couponRedemptionRepository.findOne({
-                  where: { order_id: orderId },
-                  relations: ["coupon"],
-                });
-
-              if (couponRedemption && couponRedemption.coupon_id) {
-                if (couponRedemption.reserved_token) {
-                  // Release reservation and restore quota
-                  await this.redisCouponService.releaseReservation(
-                    couponRedemption.coupon_id,
-                    couponRedemption.reserved_token,
-                  );
-                  this.logger.log(
-                    `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon_id} after payment refund`,
-                  );
-                } else {
-                  // No reservation token - restore quota directly
-                  await this.redisCouponService.incrementQuota(
-                    couponRedemption.coupon_id,
-                    1,
-                  );
-                  this.logger.log(
-                    `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon_id} after payment refund (no reservation token found)`,
-                  );
-                }
-              }
-            }
+            this.logger.log(
+              `ℹ️ Skipping coupon quota restore for order ${orderId} on refund (preorder/nth lock policy)`,
+            );
           } else {
             // Partial refund - don't restore quota
             this.logger.log(
@@ -1928,6 +2364,28 @@ export class OrderService {
           `⏭️ Order ${orderId} already has status ${status}, skipping duplicate update`,
         );
         return;
+      }
+
+      // Record paid-like order transitions for nth-order metrics with idempotent dedupe by order_id.
+      if (this.metricEligibleStatuses.has(status)) {
+        try {
+          const rows = await this.dataSource.query(
+            `SELECT user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            [orderId],
+          );
+          const userId = Number(rows?.[0]?.user_id);
+          if (Number.isInteger(userId) && userId > 0) {
+            await this.enqueuePaidOrderMetricsUpdate(
+              orderId,
+              userId,
+              `order-status-${orderId}-${status}-${Date.now()}`,
+            );
+          }
+        } catch (metricsError) {
+          this.logger.warn(
+            `⚠️ Failed to update nth-order metrics for order ${orderId}: ${metricsError instanceof Error ? metricsError.message : String(metricsError)}`,
+          );
+        }
       }
 
       // Status was successfully updated (updateResult.affected > 0)
@@ -2283,6 +2741,19 @@ export class OrderService {
       tracking_url: order.tracking && order.tracking.length > 0
         ? order.tracking[order.tracking.length - 1].tracking_url
         : null,
+      tracking_id: order.tracking && order.tracking.length > 0
+        ? (() => {
+          const url = order.tracking[order.tracking.length - 1].tracking_url;
+          if (!url) return null;
+          const last = String(url)
+            .split(/[?#]/)[0]
+            .split("/")
+            .filter(Boolean)
+            .pop();
+          const n = last != null ? Number(last) : NaN;
+          return Number.isFinite(n) ? n : null;
+        })()
+        : null,
       delivery_code: order.tracking && order.tracking.length > 0
         ? (() => {
           // Find the most recent tracking event that has a delivery_code
@@ -2403,6 +2874,30 @@ export class OrderService {
         );
       }
 
+      // Reassignment when order is already past agent-assigned (picked, out_for_delivery, delivered):
+      // seller may send agent-assigned again with new rider. Do not move status backward or create duplicate tracking/notification.
+      const statusAlreadyPastAgentAssigned = [
+        "picked",
+        "out_for_delivery",
+        "out-for-delivery",
+        "delivered",
+      ].includes(order.status);
+      if (
+        sellerStatusUpdateDto.status === "agent-assigned" &&
+        statusAlreadyPastAgentAssigned
+      ) {
+        this.logger.log(
+          `⏭️ Order ${sellerStatusUpdateDto.order_number} already ${order.status} (past agent-assigned); ignoring agent-assigned (reassign) update`,
+        );
+        return {
+          success: true,
+          message: "Order status updated successfully",
+          order_number: sellerStatusUpdateDto.order_number,
+          previous_status: order.status,
+          new_status: order.status,
+        };
+      }
+
       // Validate status transition (before atomic update)
       this.sellerStatusService.validateSellerStatusUpdate(
         sellerStatusUpdateDto.order_number,
@@ -2477,11 +2972,25 @@ export class OrderService {
       }
 
       const previousStatus = order.status;
+      const newStatus = sellerStatusUpdateDto.status;
+
+      // Idempotency: when status unchanged (e.g. agent-assigned → agent-assigned on reassign),
+      // skip tracking and notification to avoid duplicates from multiple webhook deliveries.
+      if (previousStatus === newStatus) {
+        this.logger.log(
+          `⏭️ Order ${sellerStatusUpdateDto.order_number} status unchanged (${previousStatus}), skipping tracking and notification`,
+        );
+        return {
+          success: true,
+          message: "Order status updated successfully",
+          order_number: sellerStatusUpdateDto.order_number,
+          previous_status: previousStatus,
+          new_status: newStatus,
+        };
+      }
 
       // Create tracking entry
-      const statusMessage = this.sellerStatusService.getStatusMessage(
-        sellerStatusUpdateDto.status,
-      );
+      const statusMessage = this.sellerStatusService.getStatusMessage(newStatus);
       const fullMessage = sellerStatusUpdateDto.message
         ? `${statusMessage}. ${sellerStatusUpdateDto.message}`
         : statusMessage;
@@ -2499,7 +3008,7 @@ export class OrderService {
 
       await this.createOrderTracking(
         order.id,
-        sellerStatusUpdateDto.status,
+        newStatus,
         fullMessage,
         agentDetails,
         sellerStatusUpdateDto.tracking_url,
@@ -2512,7 +3021,7 @@ export class OrderService {
 
       // Send notification to user only for allowed statuses.
       // Exclude "created" and "pending" so "Order Placed Successfully" is sent only once (at order creation).
-      const status = sellerStatusUpdateDto.status;
+      const status = newStatus;
       const isAllowed = BUYER_ORDER_NOTIFICATION_STATUSES.includes(status as any);
       const isPlacementStatus = status === "created" || status === "pending";
       if (isAllowed && !isPlacementStatus) {
@@ -2530,7 +3039,7 @@ export class OrderService {
       }
 
       this.logger.log(
-        `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${sellerStatusUpdateDto.status}`,
+        `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${newStatus}`,
       );
 
       return {

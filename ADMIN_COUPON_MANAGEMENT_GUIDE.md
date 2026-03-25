@@ -42,7 +42,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 | `title` | string | Campaign display name | ✅ | `"Summer 2025 Sale"` |
 | `description` | string | Campaign description | ❌ | `"20% off on all orders"` |
 | `created_by` | string | Admin username/email | ❌ | `"admin@example.com"` |
-| `status` | enum | Campaign status | ❌ | `"draft"`, `"active"`, `"paused"`, `"archived"` |
+| `status` | enum | Campaign status | ❌ | `"draft"`, `"active"`, `"paused"`, `"expired"`, `"revoked"` |
 | `created_at` | datetime | Creation timestamp | Auto | `"2025-11-26T10:00:00Z"` |
 | `updated_at` | datetime | Last update timestamp | Auto | `"2025-11-26T10:00:00Z"` |
 
@@ -50,7 +50,8 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 - `draft` - Campaign created but not active
 - `active` - Campaign is live and coupons can be used
 - `paused` - Temporarily disabled
-- `archived` - Archived for historical records
+- `expired` - Campaign validity has ended
+- `revoked` - Campaign is permanently disabled
 
 ---
 
@@ -62,7 +63,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 |-------|------|-------------|----------|---------|
 | `id` | bigint | Auto-generated ID | Auto | `1234567890` |
 | `campaign_id` | number | Reference to campaign | ✅ | `1` |
-| `code` | string | Unique coupon code | Auto | `"SUMMER-ABC12345"` |
+| `code` | string | Unique coupon code | Auto | `"SUMMERABC12345"` |
 | `type` | enum | Coupon type | ✅ | `"flat"`, `"percent"`, `"free_delivery"`, etc. |
 | `value` | number | Discount value | ✅ | `100` or `20` (for percent) |
 | `value_type` | enum | Value type | ✅ | `"rupees"`, `"percent"` |
@@ -73,7 +74,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 | `user_usage_limit` | number | Uses per user | ❌ | `1` (default: 1) |
 | `global_usage_limit` | number | Total uses across all users | ❌ | `1000` (null = unlimited) |
 | `priority` | number | Priority for coupon selection when multiple coupons match (higher = selected first) | ❌ | `0` (default: 0) |
-| `status` | enum | Coupon status | Auto | `"active"`, `"expired"`, `"exhausted"` |
+| `status` | enum | Coupon status | Auto | `"active"`, `"inactive"`, `"expired"`, `"revoked"` |
 | `type_meta` | JSON | Type-specific metadata | ❌ | `{"nth": 3}` or `{"delivery_fee_cap": 50}` |
 | `exported` | boolean | Whether codes were exported | Auto | `false` |
 | `exported_at` | datetime | Export timestamp | Auto | `null` |
@@ -86,6 +87,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 4. **`first_order`** - Discount on user's first order
 5. **`nth_order`** - Discount on user's Nth order (requires `type_meta.nth`)
 6. **`referral`** - Referral reward coupon
+7. **`preorder`** - Item/date specific preorder discount
 
 **Value Types**:
 - `rupees` - Fixed amount in INR
@@ -113,7 +115,7 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 1. **Campaign Management**
    - Create new campaigns
    - Edit campaign details
-   - Activate/Pause/Archive campaigns
+   - Activate/Pause/Revoke campaigns
    - View campaign list with filters
 
 2. **Code Generation**
@@ -159,7 +161,7 @@ Body: {
   title: string (required)
   description?: string
   created_by?: string (max 64 chars)
-  status?: "draft" | "active" | "paused" | "archived"
+   status?: "draft" | "active" | "paused" | "expired" | "revoked"
 }
 Response: { id, campaign_key, title, ... }
 ```
@@ -184,9 +186,7 @@ Query Params:
   - limit?: number (default: 20)
 Response: {
   campaigns: Campaign[],
-  total: number,
-  page: number,
-  limit: number
+   total: number
 }
 ```
 
@@ -206,6 +206,7 @@ POST /admin/coupons/campaigns/:id/generate-codes
 Body: {
   count: number (1-10000, required)
   prefix?: string (optional)
+   separator?: "" | "-" (optional, default: "")
   length?: number (6-16, default: 8)
   type: CouponType (required)
   value: number (required, >= 0)
@@ -229,6 +230,7 @@ Response: {
 
 **Important Notes**:
 - If `preview: true`, only first 10 codes are returned
+- `separator` only allows `""` (compact code) or `"-"` (legacy format)
 - `max_discount_amount` is **required** for percent type
 - `type_meta.nth` is required for `nth_order` type
 - `type_meta.delivery_fee_cap` is optional for `free_delivery` type
@@ -246,11 +248,27 @@ Query Params:
   - limit?: number (default: 50)
 Response: {
   codes: Coupon[],
-  total: number,
-  page: number,
-  limit: number
+   total: number
 }
 ```
+
+---
+
+### 4A. Analytics
+
+#### Coupon Analytics Overview
+```
+GET /admin/coupons/analytics/overview?from=2026-03-01T00:00:00Z&to=2026-03-31T23:59:59Z
+```
+
+Response includes campaign totals, coupon totals, funnel metrics, and financials with `orders_with_coupon`.
+
+#### Campaign Analytics
+```
+GET /admin/coupons/analytics/campaigns/:id?from=2026-03-01T00:00:00Z&to=2026-03-31T23:59:59Z
+```
+
+Response includes code distribution, funnel metrics, financials (`orders_with_coupon` included), daily trend, and top coupon codes.
 
 ---
 
@@ -288,8 +306,12 @@ Response: File download (binary)
    ↓
 5. Monitor Campaign Performance
    ↓
-6. Update/Archive Campaign
+6. Update/Revoke Campaign
+
+Note: recommend using Update/Revoke actions in UI labels.
 ```
+
+Note: campaign lifecycle values are `draft`, `active`, `paused`, `expired`, `revoked`.
 
 ### Detailed Workflow
 
@@ -309,6 +331,7 @@ Response: File download (binary)
 2. Fill generation form:
    - Number of codes (1-10,000)
    - Prefix (optional, e.g., "SUMMER")
+   - Separator (optional: compact `""` or legacy `"-"`)
    - Code length (6-16, default: 8)
    - Coupon type (flat/percent/free_delivery/etc.)
    - Discount value
@@ -392,7 +415,7 @@ Response: File download (binary)
 ┌─────────────────────────────────────────┐
 │  ← Back to Campaigns                    │
 │  Campaign: Summer 2025 Sale            │
-│  Status: [Active ▼] [Edit] [Archive]    │
+│  Status: [Active ▼] [Edit] [Revoke]     │
 ├─────────────────────────────────────────┤
 │  Statistics Cards:                      │
 │  ┌──────┐ ┌──────┐ ┌──────┐ ┌──────┐ │
@@ -406,7 +429,7 @@ Response: File download (binary)
 │  ┌───────────────────────────────────┐ │
 │  │ Code        │ Status │ Used │ ... │ │
 │  ├───────────────────────────────────┤ │
-│  │ SUMMER-ABC  │ Active │ 0/1  │ ... │ │
+│  │ SUMMERABC   │ Active │ 0/1  │ ... │ │
 │  └───────────────────────────────────┘ │
 └─────────────────────────────────────────┘
 ```
@@ -452,6 +475,7 @@ Response: File download (binary)
 │  ─────────────────────────────────────  │
 │  Number of Codes*: [1000] (1-10,000)   │
 │  Prefix: [SUMMER] (optional)           │
+│  Separator: [None ▼] ("" or "-")      │
 │  Code Length: [8] (6-16)               │
 │  ☑ Preview Mode (show first 10 only)   │
 │                                         │
@@ -553,8 +577,8 @@ Response: File download (binary)
    - Confirmation dialogs
 
 6. **Status Badges**
-   - Campaign: draft (gray), active (green), paused (yellow), archived (red)
-   - Coupon: active (green), expired (red), exhausted (orange)
+   - Campaign: draft (gray), active (green), paused (yellow), expired (orange), revoked (red)
+   - Coupon: active (green), inactive (gray), expired (orange), revoked (red)
 
 ---
 
@@ -582,6 +606,8 @@ Response: File download (binary)
      - `generateCodes(campaignId, data)`
      - `getCampaignCodes(campaignId, params)`
      - `exportCodes(campaignId, format, includeQr)`
+       - `getCouponAnalyticsOverview(params)`
+       - `getCampaignAnalytics(campaignId, params)`
 
 3. **Setup State Management** (if using Redux/Zustand)
    - Campaigns list state
@@ -657,6 +683,7 @@ Response: File download (binary)
 
 2. **Implementation Steps**:
    - Fetch campaign details: `GET /campaigns/:id`
+   - Fetch campaign analytics: `GET /analytics/campaigns/:id`
    - Display campaign information
    - Calculate and display statistics
    - Fetch codes list: `GET /campaigns/:id/codes`
@@ -711,6 +738,9 @@ Response: File download (binary)
    if (type === 'free_delivery') {
      show type_meta.delivery_fee_cap (optional)
    }
+    if (separator !== '' && separator !== '-') {
+       show separator validation error
+    }
    ```
 
 ---
@@ -879,6 +909,7 @@ Response: File download (binary)
 - Campaign performance comparison
 - Revenue impact analysis
 - User segment analysis
+- Orders with coupon trend (`orders_with_coupon`)
 
 ### 2. Bulk Operations
 - Bulk activate/pause codes

@@ -80,6 +80,23 @@ export class UserController {
       },
     },
   })
+  @ApiResponse({
+    status: 403,
+    description: "Forbidden - Guest users must register before viewing profile",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: false },
+        statusCode: { type: "number", example: 403 },
+        message: {
+          type: "string",
+          example: "Please register as a Tazty user first to view your profile.",
+        },
+        timestamp: { type: "string", example: "2026-03-20T12:00:00.000Z" },
+        path: { type: "string", example: "/user/profile" },
+      },
+    },
+  })
   async profile(@Req() req) {
     return this.userService.profile(req.user);
   }

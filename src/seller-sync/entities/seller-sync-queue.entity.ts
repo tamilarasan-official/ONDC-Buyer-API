@@ -6,7 +6,12 @@ import {
   UpdateDateColumn,
 } from "typeorm";
 
-export type SellerSyncQueueStatus = "pending" | "queued" | "sent" | "failed";
+export type SellerSyncQueueStatus =
+  | "pending"
+  | "queued"
+  | "sent"
+  | "failed"
+  | "skipped";
 
 @Entity("seller_sync_queue")
 export class SellerSyncQueue {

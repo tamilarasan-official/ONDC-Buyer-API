@@ -56,10 +56,60 @@ export class SellerSyncQueueService {
     return val === "true" || val === "1";
   }
 
-  /** COD orders: delay (ms) before job is processed. Default 30s. */
+  /**
+   * COD orders: delay (ms) before order.push is processed. Default 30s.
+   * If this is close to the buyer cancel window, prefer job removal on cancel + worker skip (see removePendingOrderPush).
+   */
   getCodDelayMs(): number {
     const ms = Number(this.configService.get("SELLER_SYNC_COD_DELAY_MS"));
     return ms > 0 ? ms : 30_000;
+  }
+
+  /**
+   * Remove a waiting/delayed order.push job so seller never receives a late create after buyer cancel.
+   * Job id matches enqueueOrderPush: `order.push-${external_order_no}` (same as order.order_number).
+   * Active/completed jobs are not removed; worker + outbox skip handle those cases.
+   */
+  async removePendingOrderPush(orderNumber: string): Promise<boolean> {
+    const jobId = `order.push-${orderNumber}`;
+    try {
+      // BullMQ API differs across versions/types: prefer getJob, fallback to scanning jobs.
+      const queueAny = this.queue as any;
+      let job: any = null;
+      if (typeof queueAny.getJob === "function") {
+        job = await queueAny.getJob(jobId);
+      } else if (typeof queueAny.getJobs === "function") {
+        const candidateStates = [
+          "wait",
+          "waiting",
+          "delayed",
+          "active",
+          "paused",
+          "prioritized",
+        ];
+        const jobs = await queueAny.getJobs(candidateStates, 0, -1, true);
+        job = jobs.find((j: any) => String(j?.id) === jobId) ?? null;
+      }
+      if (!job) {
+        this.logger.log(`removePendingOrderPush: no job ${jobId}`);
+        return false;
+      }
+      const state = await job.getState();
+      if (state === "completed" || state === "failed") {
+        this.logger.log(
+          `removePendingOrderPush: job ${jobId} already ${state}, not removing`,
+        );
+        return false;
+      }
+      await job.remove();
+      this.logger.log(
+        `removePendingOrderPush: removed ${jobId} (was ${state})`,
+      );
+      return true;
+    } catch (e) {
+      this.logger.warn(`removePendingOrderPush: ${(e as Error).message}`);
+      return false;
+    }
   }
 
   private getOutboxMaxAttempts(): number {
@@ -154,6 +204,16 @@ export class SellerSyncQueueService {
       order: { id: "DESC" },
     });
     if (!row) return;
+    // Do not overwrite terminal skip (e.g. cancelled before push).
+    if (row.status === "skipped") {
+      this.logger.debug(
+        `[SELLER_SYNC_SKIP] updateOutboxToSent blocked (outbox already skipped) outbox_id=${row.id} type=${type} reference_id=${referenceId}`,
+      );
+      this.logger.log(
+        `Outbox already skipped, not marking sent: type=${type}, reference_id=${referenceId}`,
+      );
+      return;
+    }
     await this.outboxRepository.update(row.id, {
       status: "sent",
       sent_at: new Date(),
@@ -161,6 +221,45 @@ export class SellerSyncQueueService {
       ...(attempts != null ? { attempts } : {}),
     });
     this.logger.log(`Outbox marked sent: type=${type}, reference_id=${referenceId}`);
+  }
+
+  /**
+   * Mark outbox row skipped (e.g. order cancelled before seller push ran).
+   */
+  async markOutboxSkippedByReference(
+    referenceId: string,
+    type: string,
+    lastError?: string,
+  ): Promise<void> {
+    this.logger.debug(
+      `[SELLER_SYNC_SKIP] markOutboxSkippedByReference enter reference_id=${referenceId} type=${type} last_error=${lastError ?? "n/a"}`,
+    );
+    const row = await this.outboxRepository.findOne({
+      where: { reference_id: referenceId, type },
+      order: { id: "DESC" },
+    });
+    if (!row) {
+      this.logger.debug(
+        `[SELLER_SYNC_SKIP] markOutboxSkippedByReference no row reference_id=${referenceId} type=${type}`,
+      );
+      return;
+    }
+    if (row.status === "sent" || row.status === "skipped") {
+      this.logger.debug(
+        `[SELLER_SYNC_SKIP] markOutboxSkippedByReference noop outbox_id=${row.id} current_status=${row.status} reference_id=${referenceId} type=${type}`,
+      );
+      return;
+    }
+    await this.outboxRepository.update(row.id, {
+      status: "skipped",
+      last_error: lastError ?? "skipped",
+    });
+    this.logger.debug(
+      `[SELLER_SYNC_SKIP] markOutboxSkippedByReference updated outbox_id=${row.id} reference_id=${referenceId} type=${type} last_error=${lastError ?? "skipped"}`,
+    );
+    this.logger.log(
+      `Outbox marked skipped: type=${type}, reference_id=${referenceId}`,
+    );
   }
 
   /**
@@ -215,6 +314,7 @@ export class SellerSyncQueueService {
   async enqueueOrderCancel(payload: {
     external_order_id: string;
     cancel_code: string;
+    cancelled_by: string;
   }): Promise<string | null> {
     this.logger.log(
       `Enqueuing seller order cancel job for external_order_id=${payload.external_order_id}`,

@@ -554,6 +554,16 @@ export class OrderDataDto {
   tracking: OrderTrackingResponseDto[];
 
   @ApiProperty({
+    description:
+      "Latest tracking ID derived from the last path segment of tracking_url (numeric). Null when tracking_url is missing or does not end with a number.",
+    example: 4420,
+    required: false,
+    nullable: true,
+    type: "number",
+  })
+  tracking_id?: number | null;
+
+  @ApiProperty({
     description: "Order created at",
     example: "2025-01-02T10:30:00Z",
   })

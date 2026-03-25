@@ -298,7 +298,8 @@ export class DishController {
   @Get(":id")
   @ApiOperation({
     summary: "Get dish by ID",
-    description: "Retrieve a specific dish by its unique identifier.",
+    description:
+      "Retrieve a specific dish by its unique identifier.",
   })
   @ApiParam({
     name: "id",
