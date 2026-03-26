@@ -104,16 +104,17 @@ export class SellerSyncWorkerService
         }
         // Mark outbox "failed" when max attempts reached (no more retries).
         const maxAttempts = Number(job.opts.attempts) || 5;
-        if (job.attemptsMade >= maxAttempts) {
+        // BullMQ attemptsMade is 0-based. "Attempt number" is attemptsMade + 1.
+        const attemptNumber = (Number(job.attemptsMade) || 0) + 1;
+        if (attemptNumber >= maxAttempts) {
           const refId = getReferenceId(job.data);
           if (refId) {
-            const attemptsUsed = Number(job.attemptsMade) || maxAttempts;
             this.sellerSyncQueueService
               .markOutboxFailedByReference(
                 refId,
                 job.data.type,
                 err.message,
-                attemptsUsed,
+                attemptNumber,
               )
               .catch((e) =>
                 this.logger.warn(`Failed to mark outbox failed: ${e.message}`),
