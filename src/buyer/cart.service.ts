@@ -39,6 +39,32 @@ import { AppServiceableAreaService } from "../shared/services/app-serviceable-ar
 import { AppSettingsService } from "../shared/services/app-settings.service";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
 
+type CouponValidationDetails = {
+  is_valid: boolean;
+  validation_status: string;
+  minimum_order_amount: number;
+  minimum_order_basis: "SUBTOTAL";
+  eligible_subtotal: number;
+  is_minimum_order_satisfied: boolean;
+  invalid_reason_code: string | null;
+  invalid_reason_message: string | null;
+  is_restaurant_eligible: boolean;
+  are_items_eligible: boolean;
+};
+
+type CouponValidationSnapshot = {
+  coupon_validation: CouponValidationDetails | null;
+  validation: {
+    valid?: boolean;
+    discount_amount?: number;
+    delivery_waived?: boolean;
+    reason_code?: string;
+    message?: string;
+  } | null;
+  coupon: Coupon | null;
+  cart: Cart | null;
+};
+
 @Injectable()
 export class CartService {
   private readonly logger = new Logger(CartService.name);
@@ -134,6 +160,7 @@ export class CartService {
               final_amount: 0,
               estimated_delivery_time: null,
             },
+            coupon_validation: null,
             total_items: 0,
             is_active: false,
             created_at: null,
@@ -554,10 +581,23 @@ export class CartService {
       // Update cart totals
       await this.updateCartTotals(cart.id);
 
+      const couponValidation = await this.syncAppliedCouponValidation(
+        cart.id,
+        userId,
+      );
+
       // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
         where: { id: cart.id },
-        relations: ["store", "cart_items", "cart_items.item"],
+        relations: [
+          "store",
+          "store.locations",
+          "cart_items",
+          "cart_items.item",
+          "cart_items.item.attributes",
+          "cart_items.item.quantities",
+          "user",
+        ],
       });
 
       const cartSummary = updatedCart
@@ -585,6 +625,7 @@ export class CartService {
         cart_id: cart.id,
         cart_item_id: cartItem.id,
         cart_summary: cartSummary,
+        coupon_validation: couponValidation,
       };
     } catch (error) {
       this.logger.error(
@@ -800,6 +841,9 @@ export class CartService {
           success: true,
           message: "Cart reactivated successfully",
           cart_summary: cartSummary,
+          coupon_validation: updatedCart
+            ? await this.getCartCouponValidation(updatedCart, userId)
+            : null,
         };
       }
 
@@ -958,6 +1002,8 @@ export class CartService {
         where: { cart: { id: cartId } },
       });
 
+      let syncedCouponValidation: CouponValidationDetails | null = null;
+
       if (remainingItems === 0) {
         // Clear coupon fields before deactivating cart
         if (cart.coupon_id || cart.coupon_code || cart.coupon_reservation_token) {
@@ -993,12 +1039,25 @@ export class CartService {
           await this.cartRepository.update(cartId, { is_active: true });
           this.logger.log(`Cart ${cartId} reactivated during update`);
         }
+
+        syncedCouponValidation = await this.syncAppliedCouponValidation(
+          cartId,
+          userId,
+        );
       }
 
       // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
         where: { id: cartId },
-        relations: ["store", "cart_items", "cart_items.item"],
+        relations: [
+          "store",
+          "store.locations",
+          "cart_items",
+          "cart_items.item",
+          "cart_items.item.attributes",
+          "cart_items.item.quantities",
+          "user",
+        ],
       });
 
       const cartSummary = updatedCart
@@ -1023,6 +1082,11 @@ export class CartService {
         success: true,
         message: "Cart item updated successfully",
         cart_summary: cartSummary,
+        coupon_validation:
+          syncedCouponValidation ||
+          (updatedCart
+            ? await this.getCartCouponValidation(updatedCart, userId)
+            : null),
       };
     } catch (error) {
       this.logger.error(
@@ -2541,6 +2605,9 @@ export class CartService {
     );
 
     const summary = await this.calculateCartSummary(cart);
+    const couponValidation = cart.user?.id
+      ? await this.getCartCouponValidation(cart, cart.user.id)
+      : null;
 
     return {
       id: cart.id,
@@ -2549,6 +2616,7 @@ export class CartService {
       restaurant_logo: cart.store.logo_url,
       items: cartItems,
       summary,
+      coupon_validation: couponValidation,
       total_items: cartItems.length,
       is_active: cart.is_active,
       created_at: cart.created_at.toISOString(),
@@ -2788,21 +2856,31 @@ export class CartService {
         }
       }
 
-      // Get user location for pincode
-      const userLocation = await this.locationService.getUserLocation(userId);
-      const pincode = userLocation?.address?.pincode;
-      if (!pincode) {
-        throw new BadRequestException(
-          "User location (pincode) is required to apply coupon",
-        );
-      }
-
-      // Calculate current cart total (cartItems already fetched above)
-
       const subtotal = cartItems.reduce(
         (sum, item) => sum + Number(item.total_price),
         0,
       );
+
+      // Get user location for pincode
+      const userLocation = await this.locationService.getUserLocation(userId);
+      const pincode = userLocation?.address?.pincode;
+      if (!pincode) {
+        const couponValidation = await this.buildInvalidCouponValidationPayload(
+          applyCouponDto.coupon_code,
+          cart,
+          cartItems,
+          subtotal,
+          "PINCODE_REQUIRED",
+          "User location (pincode) is required to apply coupon",
+        );
+
+        throw new BadRequestException({
+          message: "User location (pincode) is required to apply coupon",
+          coupon_validation: couponValidation,
+        });
+      }
+
+      // Calculate current cart total (cartItems already fetched above)
       const couponValidationContext =
         await this.buildCouponValidationContextFromCartItems(
           applyCouponDto.coupon_code,
@@ -2833,9 +2911,20 @@ export class CartService {
           });
 
           if (!validation.valid) {
-            throw new BadRequestException(
-              validation.message || "Invalid coupon code",
-            );
+            const couponValidation =
+              await this.buildInvalidCouponValidationPayload(
+                applyCouponDto.coupon_code,
+                cart,
+                cartItems,
+                subtotal,
+                validation.reason_code || "INVALID",
+                validation.message || "Invalid coupon code",
+              );
+
+            throw new BadRequestException({
+              message: validation.message || "Invalid coupon code",
+              coupon_validation: couponValidation,
+            });
           }
 
           const coupon = await this.couponRepository.findOne({
@@ -2857,10 +2946,23 @@ export class CartService {
 
           const updatedCart = await this.cartRepository.findOne({
             where: { id: cart.id },
-            relations: ["store", "cart_items", "cart_items.item"],
+            relations: [
+              "store",
+              "store.locations",
+              "cart_items",
+              "cart_items.item",
+              "cart_items.item.attributes",
+              "cart_items.item.quantities",
+              "user",
+            ],
           });
 
           const cartSummary = await this.calculateCartSummary(updatedCart!);
+          const couponValidation = await this.getCartCouponValidation(
+            updatedCart!,
+            userId,
+            applyCouponDto.coupon_code,
+          );
 
           this.logger.log(
             `✅ Coupon reapplied using existing reservation. Discount: ₹${validation.discount_amount}`,
@@ -2874,6 +2976,7 @@ export class CartService {
               discount_amount: validation.discount_amount || 0,
               delivery_waived: validation.delivery_waived || false,
               reservation_token: existingToken,
+              coupon_validation: couponValidation,
               cart_summary: cartSummary,
             },
           };
@@ -2908,9 +3011,19 @@ export class CartService {
       });
 
       if (!validation.valid) {
-        throw new BadRequestException(
+        const couponValidation = await this.buildInvalidCouponValidationPayload(
+          applyCouponDto.coupon_code,
+          cart,
+          cartItems,
+          subtotal,
+          validation.reason_code || "INVALID",
           validation.message || "Invalid coupon code",
         );
+
+        throw new BadRequestException({
+          message: validation.message || "Invalid coupon code",
+          coupon_validation: couponValidation,
+        });
       }
 
       // Get coupon to set coupon_id
@@ -2938,10 +3051,23 @@ export class CartService {
       // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
         where: { id: cart.id },
-        relations: ["store", "cart_items", "cart_items.item"],
+        relations: [
+          "store",
+          "store.locations",
+          "cart_items",
+          "cart_items.item",
+          "cart_items.item.attributes",
+          "cart_items.item.quantities",
+          "user",
+        ],
       });
 
       const cartSummary = await this.calculateCartSummary(updatedCart!);
+      const couponValidation = await this.getCartCouponValidation(
+        updatedCart!,
+        userId,
+        applyCouponDto.coupon_code,
+      );
 
       this.logger.log(
         `✅ Coupon applied successfully. Discount: ₹${validation.discount_amount}`,
@@ -2955,6 +3081,7 @@ export class CartService {
           discount_amount: validation.discount_amount || 0,
           delivery_waived: validation.delivery_waived || false,
           reservation_token: validation.reservation_token,
+          coupon_validation: couponValidation,
           cart_summary: cartSummary,
         },
       };
@@ -3454,7 +3581,14 @@ export class CartService {
       where: { code: couponCode },
     });
 
-    if (!coupon || coupon.type !== CouponType.PERCENT) {
+    if (
+      !coupon ||
+      ![
+        CouponType.PERCENT,
+        CouponType.FLAT,
+        CouponType.FREE_DELIVERY,
+      ].includes(coupon.type)
+    ) {
       return { item_ids: itemIds };
     }
 
@@ -3495,5 +3629,427 @@ export class CartService {
       item_ids: itemIds,
       eligible_item_subtotal: Number(eligibleItemSubtotal.toFixed(2)),
     };
+  }
+
+  private getCartSubtotal(cartItems: CartItem[]): number {
+    return Number(
+      cartItems
+        .reduce((sum, cartItem) => sum + Number(cartItem.total_price || 0), 0)
+        .toFixed(2),
+    );
+  }
+
+  private extractCouponEligibleItemIds(coupon: Coupon): number[] {
+    const internalItemIds = Array.isArray(coupon.type_meta?.internal_item_ids)
+      ? coupon.type_meta.internal_item_ids
+          .map((value: number | string) => Number(value))
+          .filter((value: number) => Number.isFinite(value) && value > 0)
+      : [];
+
+    if (internalItemIds.length > 0) {
+      return internalItemIds;
+    }
+
+    const singleItemId = Number(coupon.type_meta?.item_id);
+    if (Number.isFinite(singleItemId) && singleItemId > 0) {
+      return [singleItemId];
+    }
+
+    return [];
+  }
+
+  private extractCouponEligibleItemReferenceIds(coupon: Coupon): string[] {
+    return Array.isArray(coupon.type_meta?.item_reference_ids)
+      ? coupon.type_meta.item_reference_ids
+          .map((value: string) => String(value))
+          .filter((value: string) => value.length > 0)
+      : [];
+  }
+
+  private getCouponEligibleSubtotal(
+    coupon: Coupon,
+    cartItems: CartItem[],
+    subtotal: number,
+  ): number {
+    const eligibleItemIds = this.extractCouponEligibleItemIds(coupon);
+    const eligibleItemReferenceIds = this.extractCouponEligibleItemReferenceIds(coupon);
+
+    if (eligibleItemIds.length === 0 && eligibleItemReferenceIds.length === 0) {
+      return subtotal;
+    }
+
+    const eligibleItemSet = new Set(eligibleItemIds);
+    const eligibleItemReferenceSet = new Set(eligibleItemReferenceIds);
+    return Number(
+      cartItems
+        .reduce((sum, cartItem) => {
+          const itemId = Number(cartItem.item?.id);
+          const itemReferenceId = String(cartItem.item?.reference_id || "");
+          const isEligibleById = eligibleItemSet.has(itemId);
+          const isEligibleByReference = eligibleItemReferenceSet.has(itemReferenceId);
+
+          if (!isEligibleById && !isEligibleByReference) {
+            return sum;
+          }
+
+          return sum + Number(cartItem.total_price || 0);
+        }, 0)
+        .toFixed(2),
+    );
+  }
+
+  private isCouponRestaurantEligible(coupon: Coupon, store: Cart["store"]): boolean {
+    const applicableStoreIds = Array.isArray(coupon.applicable_store_ids)
+      ? coupon.applicable_store_ids
+          .map((value: number | string) => Number(value))
+          .filter((value: number) => Number.isFinite(value) && value > 0)
+      : [];
+
+    if (applicableStoreIds.length > 0) {
+      return applicableStoreIds.includes(Number(store?.id));
+    }
+
+    const internalStoreId = Number(coupon.type_meta?.internal_store_id);
+    if (Number.isFinite(internalStoreId) && internalStoreId > 0) {
+      return internalStoreId === Number(store?.id);
+    }
+
+    const storeReferenceId = String(coupon.type_meta?.store_reference_id || "");
+    if (storeReferenceId) {
+      return String(store?.reference_id || "") === storeReferenceId;
+    }
+
+    return true;
+  }
+
+  private areCouponItemsEligible(coupon: Coupon, cartItems: CartItem[]): boolean {
+    const eligibleItemIds = this.extractCouponEligibleItemIds(coupon);
+    const eligibleItemReferenceIds = this.extractCouponEligibleItemReferenceIds(coupon);
+
+    if (eligibleItemIds.length === 0 && eligibleItemReferenceIds.length === 0) {
+      return true;
+    }
+
+    const eligibleItemSet = new Set(eligibleItemIds);
+    const eligibleItemReferenceSet = new Set(eligibleItemReferenceIds);
+    return cartItems.some((cartItem) =>
+      eligibleItemSet.has(Number(cartItem.item?.id)) ||
+      eligibleItemReferenceSet.has(String(cartItem.item?.reference_id || "")),
+    );
+  }
+
+  private buildCouponValidationDetails(
+    coupon: Coupon,
+    cartItems: CartItem[],
+    subtotal: number,
+    store: Cart["store"],
+    validation: CouponValidationSnapshot["validation"],
+  ): CouponValidationDetails {
+    const minimumOrderAmount = Number(coupon.min_cart_value || 0);
+    const isValid = validation?.valid === true;
+    const invalidReasonCode = isValid
+      ? null
+      : validation?.reason_code || "INVALID";
+    const invalidReasonMessage = isValid
+      ? null
+      : validation?.message || "Coupon is not valid for the current cart";
+
+    return {
+      is_valid: isValid,
+      validation_status: isValid ? "VALID" : invalidReasonCode || "INVALID",
+      minimum_order_amount: minimumOrderAmount,
+      minimum_order_basis: "SUBTOTAL",
+      eligible_subtotal: this.getCouponEligibleSubtotal(coupon, cartItems, subtotal),
+      is_minimum_order_satisfied: subtotal >= minimumOrderAmount,
+      invalid_reason_code: invalidReasonCode,
+      invalid_reason_message: invalidReasonMessage,
+      is_restaurant_eligible: this.isCouponRestaurantEligible(coupon, store),
+      are_items_eligible: this.areCouponItemsEligible(coupon, cartItems),
+    };
+  }
+
+  private async buildInvalidCouponValidationPayload(
+    couponCode: string,
+    cart: Cart,
+    cartItems: CartItem[],
+    subtotal: number,
+    reasonCode: string,
+    message: string,
+  ): Promise<CouponValidationDetails> {
+    const coupon = await this.couponRepository.findOne({
+      where: { code: couponCode },
+    });
+
+    if (coupon && cart.store) {
+      return this.buildCouponValidationDetails(
+        coupon,
+        cartItems,
+        subtotal,
+        cart.store,
+        {
+          valid: false,
+          reason_code: reasonCode,
+          message,
+        },
+      );
+    }
+
+    return {
+      is_valid: false,
+      validation_status: reasonCode || "INVALID",
+      minimum_order_amount: 0,
+      minimum_order_basis: "SUBTOTAL",
+      eligible_subtotal: Number(subtotal.toFixed(2)),
+      is_minimum_order_satisfied: true,
+      invalid_reason_code: reasonCode || "INVALID",
+      invalid_reason_message: message || "Invalid coupon code",
+      is_restaurant_eligible: true,
+      are_items_eligible: true,
+    };
+  }
+
+  private async resolveCartCoupon(
+    cart: Cart,
+    couponCode?: string,
+  ): Promise<Coupon | null> {
+    if (couponCode) {
+      const couponByCode = await this.couponRepository.findOne({
+        where: { code: couponCode },
+      });
+      if (couponByCode) {
+        return couponByCode;
+      }
+    }
+
+    if (cart.coupon_id) {
+      const couponById = await this.couponRepository.findOne({
+        where: { id: Number(cart.coupon_id) },
+      });
+      if (couponById) {
+        return couponById;
+      }
+    }
+
+    if (cart.coupon_code) {
+      return this.couponRepository.findOne({
+        where: { code: cart.coupon_code },
+      });
+    }
+
+    return null;
+  }
+
+  private async getCartCouponValidationSnapshot(
+    cart: Cart,
+    userId: number,
+    couponCode?: string,
+  ): Promise<CouponValidationSnapshot> {
+    const resolvedCoupon = await this.resolveCartCoupon(cart, couponCode);
+    if (!resolvedCoupon || !cart.store?.id) {
+      return {
+        coupon_validation: null,
+        validation: null,
+        coupon: resolvedCoupon,
+        cart,
+      };
+    }
+
+    const cartItems = cart.cart_items || [];
+    const subtotal = this.getCartSubtotal(cartItems);
+
+    let pincode: string | undefined;
+    try {
+      const userLocation = await this.locationService.getUserLocation(userId);
+      pincode = userLocation?.address?.pincode;
+    } catch (error) {
+      this.logger.warn(
+        `⚠️ Failed to load user location for coupon validation: ${error.message}`,
+      );
+    }
+
+    if (!pincode) {
+      const validation = {
+        valid: false,
+        reason_code: "PINCODE_REQUIRED",
+        message: "User location (pincode) is required to validate coupon",
+      };
+
+      return {
+        coupon_validation: this.buildCouponValidationDetails(
+          resolvedCoupon,
+          cartItems,
+          subtotal,
+          cart.store,
+          validation,
+        ),
+        validation,
+        coupon: resolvedCoupon,
+        cart,
+      };
+    }
+
+    const validationContext = await this.buildCouponValidationContextFromCartItems(
+      resolvedCoupon.code,
+      cart.store.id,
+      cartItems,
+    );
+
+    let validation: CouponValidationSnapshot["validation"];
+    try {
+      validation = await this.couponService.validateCoupon({
+        code: resolvedCoupon.code,
+        user_id: userId,
+        cart_total: subtotal,
+        delivery_fee: Number(cart.delivery_fee || 0),
+        pincode,
+        store_id: cart.store.id,
+        reserve: false,
+        ...validationContext,
+      });
+    } catch (error) {
+      validation = {
+        valid: false,
+        reason_code: "VALIDATION_FAILED",
+        message: error.message || "Coupon validation failed",
+      };
+    }
+
+    return {
+      coupon_validation: this.buildCouponValidationDetails(
+        resolvedCoupon,
+        cartItems,
+        subtotal,
+        cart.store,
+        validation,
+      ),
+      validation,
+      coupon: resolvedCoupon,
+      cart,
+    };
+  }
+
+  private async getCartCouponValidation(
+    cart: Cart,
+    userId: number,
+    couponCode?: string,
+  ): Promise<CouponValidationDetails | null> {
+    const snapshot = await this.getCartCouponValidationSnapshot(
+      cart,
+      userId,
+      couponCode,
+    );
+    return snapshot.coupon_validation;
+  }
+
+  private async syncAppliedCouponValidation(
+    cartId: number,
+    userId: number,
+  ): Promise<CouponValidationDetails | null> {
+    const cart = await this.cartRepository.findOne({
+      where: { id: cartId },
+      relations: ["store", "cart_items", "cart_items.item", "user"],
+    });
+
+    if (!cart || (!cart.coupon_code && !cart.coupon_id)) {
+      return null;
+    }
+
+    const snapshot = await this.getCartCouponValidationSnapshot(cart, userId);
+    if (!snapshot.coupon_validation) {
+      return null;
+    }
+
+    if (snapshot.coupon_validation.is_valid) {
+      let syncedDiscountAmount = Number(snapshot.validation?.discount_amount || 0);
+
+      // Preserve preorder discount semantics: base_discount + tax_saved.
+      if (snapshot.coupon?.type === CouponType.PREORDER) {
+        syncedDiscountAmount = this.calculatePreorderDiscountForCart(
+          cart.cart_items || [],
+          snapshot.coupon,
+        );
+      }
+
+      const updatePayload: Partial<Cart> = {
+        discount_amount: syncedDiscountAmount,
+      };
+
+      if (snapshot.validation?.delivery_waived) {
+        updatePayload.delivery_fee = 0;
+        updatePayload.delivery_fee_tax = 0;
+      }
+
+      await this.cartRepository.update(cartId, updatePayload);
+      await this.updateCartTotals(cartId);
+      return snapshot.coupon_validation;
+    }
+
+    const nonDestructiveReasonCodes = new Set([
+      "PINCODE_REQUIRED",
+      "VALIDATION_FAILED",
+    ]);
+
+    if (
+      snapshot.coupon_validation.invalid_reason_code &&
+      nonDestructiveReasonCodes.has(
+        snapshot.coupon_validation.invalid_reason_code,
+      )
+    ) {
+      return snapshot.coupon_validation;
+    }
+
+    if (cart.coupon_reservation_token) {
+      try {
+        await this.couponService.rollbackCoupon({
+          reservation_token: cart.coupon_reservation_token,
+          reason: "Coupon invalidated after cart change",
+        });
+      } catch (error) {
+        this.logger.warn(
+          `⚠️ Failed to rollback invalid coupon reservation for cart ${cartId}: ${error.message}`,
+        );
+      }
+    }
+
+    await this.cartRepository.update(cartId, {
+      coupon_code: undefined,
+      coupon_reservation_token: undefined,
+      coupon_id: undefined,
+      discount_amount: 0,
+    });
+    await this.updateCartTotals(cartId);
+
+    return snapshot.coupon_validation;
+  }
+
+  private calculatePreorderDiscountForCart(
+    cartItems: CartItem[],
+    preorderCoupon: Coupon,
+  ): number {
+    let preorderDiscount = 0;
+
+    for (const cartItem of cartItems) {
+      if (!cartItem.is_preorder) {
+        continue;
+      }
+
+      const quantity = Math.max(1, Number(cartItem.quantity || 1));
+      const fallbackUnitPrice = Number(cartItem.total_price || 0) / quantity;
+      const unitPrice = Number(
+        cartItem.unit_price != null ? cartItem.unit_price : fallbackUnitPrice,
+      );
+      const taxRate = Number(cartItem.item?.tax_rate || 0);
+
+      const preorderPricing = this.calculatePreorderPricingBreakdown(
+        unitPrice,
+        quantity,
+        taxRate,
+        preorderCoupon,
+      );
+
+      preorderDiscount += preorderPricing.total_discount;
+    }
+
+    return Number(preorderDiscount.toFixed(2));
   }
 }
