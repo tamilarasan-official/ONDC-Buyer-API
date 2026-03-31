@@ -28,9 +28,10 @@ export interface CreateUnifiedReviewDto {
   overall_rating: number;
   restaurant_rating?: number;
   restaurant_comment?: string;
+  comments?: string;
   delivery_partner_rating?: number;
-  food_ratings?: Array<{
-    item_id: number;
+  food_quality?: Array<{
+    product_id: number;
     rating: number;
     comment?: string;
   }>;
@@ -119,7 +120,7 @@ export class ReviewService {
           title: createReviewDto.restaurant_comment
             ? createReviewDto.restaurant_comment.substring(0, 100)
             : undefined,
-          comment: createReviewDto.restaurant_comment,
+          comment: createReviewDto.comments || createReviewDto.restaurant_comment,
           food_quality: createReviewDto.restaurant_rating, // Use same rating as default
           delivery_time:
             createReviewDto.delivery_partner_rating ||
@@ -139,18 +140,19 @@ export class ReviewService {
 
       // Create item reviews if provided
       if (
-        createReviewDto.food_ratings &&
-        createReviewDto.food_ratings.length > 0
+        createReviewDto.food_quality &&
+        createReviewDto.food_quality.length > 0
       ) {
-        for (const foodRating of createReviewDto.food_ratings) {
+        for (const foodRating of createReviewDto.food_quality) {
           // Validate item exists in the order
+       //   console.log("Order items:", order.order_items);
           const orderItem = order.order_items.find(
-            (oi) => oi.item.id === foodRating.item_id,
+            (oi) => String(oi.item.id) === String(foodRating.product_id)
           );
           
           if (!orderItem) {
             this.logger.warn(
-              `Item ${foodRating.item_id} not found in order ${createReviewDto.order_id}`,
+              `Item ${foodRating.product_id} not found in order ${createReviewDto.order_id}`,
             );
             continue;
           }
@@ -160,26 +162,26 @@ export class ReviewService {
             where: {
               user: { id: userId },
               order: { id: createReviewDto.order_id },
-              item: { id: foodRating.item_id },
+              item: { id: foodRating.product_id },
             },
           });
 
           if (existingItemReview) {
             this.logger.warn(
-              `Review already exists for item ${foodRating.item_id} in order ${createReviewDto.order_id}`,
+              `Review already exists for item ${foodRating.product_id} in order ${createReviewDto.order_id}`,
             );
             continue;
           }
 
           const itemReview = this.itemReviewRepository.create({
             user: { id: userId },
-            item: { id: foodRating.item_id },
+            item: { id: foodRating.product_id },
             order: { id: createReviewDto.order_id },
             rating: foodRating.rating,
             title: foodRating.comment
               ? foodRating.comment.substring(0, 100)
               : undefined,
-            comment: foodRating.comment,
+            comment: createReviewDto.comments || foodRating.comment,
             taste: foodRating.rating, // Use same rating as default
             portion_size: foodRating.rating,
             value_for_money: foodRating.rating,
@@ -190,7 +192,7 @@ export class ReviewService {
             await this.itemReviewRepository.save(itemReview);
           result.item_review_ids.push(savedItemReview.id);
           this.logger.log(
-            `Created item review: ${savedItemReview.id} for item ${foodRating.item_id}`,
+            `Created item review: ${savedItemReview.id} for item ${foodRating.product_id}`,
           );
         }
       }
@@ -220,7 +222,7 @@ export class ReviewService {
         user_phone: user?.phone_number,
         rating: createReviewDto.restaurant_rating,
         title: createReviewDto.restaurant_comment,
-        comments: createReviewDto.restaurant_comment,
+        comments: createReviewDto.comments || createReviewDto.restaurant_comment,
         status: "visible",
         aspects: {
           delivery_speed: createReviewDto.delivery_partner_rating || 0,
@@ -228,9 +230,9 @@ export class ReviewService {
           service: createReviewDto.restaurant_rating || 0,
         },
         food_quality:
-          createReviewDto.food_ratings?.map((item) => {
+          createReviewDto.food_quality?.map((item) => {
             const matchedOrderItem = order.order_items.find(
-              (oi) => oi.item.id === item.item_id,
+              (oi) => String(oi.item.id) === String(item.product_id),
             );
 
             return {

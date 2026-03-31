@@ -2216,7 +2216,12 @@ export class BuyerController {
         restaurant_comment: {
           type: "string",
           example: "Great food and fast delivery!",
-          description: "Restaurant review comment (optional)",
+          description: "Restaurant review comment / title (optional)",
+        },
+        comments: {
+          type: "string",
+          example: "Overall the experience was great!",
+          description: "General review comment applied to both restaurant and item reviews (optional)",
         },
         delivery_partner_rating: {
           type: "number",
@@ -2225,20 +2230,20 @@ export class BuyerController {
           maximum: 5,
           description: "Delivery partner rating (optional)",
         },
-        food_ratings: {
+        food_quality: {
           type: "array",
           description: "Individual food item ratings (optional)",
           items: {
             type: "object",
             properties: {
-              item_id: { type: "number", example: 1 },
+              product_id: { type: "number", example: 1 },
               rating: { type: "number", example: 5, minimum: 1, maximum: 5 },
               comment: {
                 type: "string",
                 example: "Perfect crust and fresh ingredients!",
               },
             },
-            required: ["item_id", "rating"],
+            required: ["product_id", "rating"],
           },
         },
         photos: {
