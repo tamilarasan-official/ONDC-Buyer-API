@@ -104,16 +104,17 @@ export class SellerSyncWorkerService
         }
         // Mark outbox "failed" when max attempts reached (no more retries).
         const maxAttempts = Number(job.opts.attempts) || 5;
-        if (job.attemptsMade >= maxAttempts) {
+        // moveToFailed increments attemptsMade before this event; do not add +1 (avoids off-by-one).
+        const attemptsMade = Number(job.attemptsMade) || 0;
+        if (attemptsMade >= maxAttempts) {
           const refId = getReferenceId(job.data);
           if (refId) {
-            const attemptsUsed = Number(job.attemptsMade) || maxAttempts;
             this.sellerSyncQueueService
               .markOutboxFailedByReference(
                 refId,
                 job.data.type,
                 err.message,
-                attemptsUsed,
+                attemptsMade,
               )
               .catch((e) =>
                 this.logger.warn(`Failed to mark outbox failed: ${e.message}`),
@@ -129,7 +130,8 @@ export class SellerSyncWorkerService
       );
       const refId = getReferenceId(job.data);
       if (refId) {
-        const attemptsUsed = (Number(job.attemptsMade) || 0) + 1;
+        // moveToCompleted increments attemptsMade before this event; +1 would double-count (e.g. 1st success → 2).
+        const attemptsUsed = Number(job.attemptsMade) || 0;
         this.sellerSyncQueueService
           .updateOutboxToSent(refId, job.data.type, attemptsUsed)
           .catch((e) =>

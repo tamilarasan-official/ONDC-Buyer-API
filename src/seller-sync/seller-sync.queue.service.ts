@@ -134,14 +134,28 @@ export class SellerSyncQueueService {
     referenceId: string,
     payload: Record<string, unknown>,
   ): Promise<SellerSyncQueue> {
-    const row = this.outboxRepository.create({
-      reference_id: referenceId,
-      type,
-      payload,
-      status: "pending",
-      attempts: 0,
-    });
-    return this.outboxRepository.save(row);
+    // Insert-or-fetch to prevent duplicates (DB unique index on (type, reference_id)).
+    await this.outboxRepository
+      .createQueryBuilder()
+      .insert()
+      .into(SellerSyncQueue)
+      .values({
+        reference_id: referenceId,
+        type,
+        payload: payload as any,
+        status: "pending",
+        attempts: 0,
+      })
+      .orIgnore()
+      .execute();
+
+    const row = await this.getOutboxRow(type, referenceId);
+    if (!row) {
+      throw new Error(
+        `Failed to create or fetch outbox row (type=${type}, reference_id=${referenceId})`,
+      );
+    }
+    return row;
   }
 
   /**
@@ -154,14 +168,32 @@ export class SellerSyncQueueService {
     referenceId: string,
     payload: Record<string, unknown>,
   ): Promise<SellerSyncQueue> {
-    const row = manager.getRepository(SellerSyncQueue).create({
-      reference_id: referenceId,
-      type,
-      payload,
-      status: "pending",
-      attempts: 0,
+    // Insert-or-fetch inside transaction to prevent duplicates (DB unique index on (type, reference_id)).
+    await manager
+      .getRepository(SellerSyncQueue)
+      .createQueryBuilder()
+      .insert()
+      .into(SellerSyncQueue)
+      .values({
+        reference_id: referenceId,
+        type,
+        payload: payload as any,
+        status: "pending",
+        attempts: 0,
+      })
+      .orIgnore()
+      .execute();
+
+    const row = await manager.getRepository(SellerSyncQueue).findOne({
+      where: { type, reference_id: referenceId },
+      order: { id: "DESC" },
     });
-    return manager.getRepository(SellerSyncQueue).save(row);
+    if (!row) {
+      throw new Error(
+        `Failed to create or fetch outbox row in transaction (type=${type}, reference_id=${referenceId})`,
+      );
+    }
+    return row;
   }
 
   /** Mark outbox row as queued after successful enqueue. */
@@ -169,6 +201,11 @@ export class SellerSyncQueueService {
     id: string,
     jobId?: string | null,
   ): Promise<void> {
+    // Do not overwrite terminal states.
+    const row = await this.outboxRepository.findOne({ where: { id } });
+    if (!row) return;
+    if (row.status === "sent" || row.status === "skipped") return;
+
     await this.outboxRepository.update(id, {
       status: "queued",
       ...(jobId != null ? { bullmq_job_id: jobId } : {}),
@@ -276,6 +313,13 @@ export class SellerSyncQueueService {
       order: { id: "DESC" },
     });
     if (!row) return;
+    // Do not overwrite terminal states.
+    if (row.status === "sent" || row.status === "skipped") {
+      this.logger.debug(
+        `[SELLER_SYNC_FAIL] markOutboxFailedByReference blocked (terminal state) outbox_id=${row.id} current_status=${row.status} reference_id=${referenceId} type=${type}`,
+      );
+      return;
+    }
     await this.outboxRepository.update(row.id, {
       status: "failed",
       last_error: lastError,
@@ -304,7 +348,7 @@ export class SellerSyncQueueService {
       {
         type: "order.push",
         endpoint: "/orders",
-        payload,
+        payload: payload as any,
       },
       jobOpts,
     );
@@ -325,7 +369,7 @@ export class SellerSyncQueueService {
       {
         type: "order.cancel",
         endpoint: "/orders/cancel-by-order",
-        payload,
+        payload: payload as any,
       },
       { jobId: `order.cancel-${payload.external_order_id}` },
     );
@@ -346,7 +390,7 @@ export class SellerSyncQueueService {
       {
         type: "review.push",
         endpoint: "/reviews",
-        payload,
+        payload: payload as any,
       },
       { jobId },
     );
