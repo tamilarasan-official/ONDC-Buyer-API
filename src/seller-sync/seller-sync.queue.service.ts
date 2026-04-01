@@ -142,7 +142,7 @@ export class SellerSyncQueueService {
       .values({
         reference_id: referenceId,
         type,
-        payload,
+        payload: payload as any,
         status: "pending",
         attempts: 0,
       })
@@ -177,7 +177,7 @@ export class SellerSyncQueueService {
       .values({
         reference_id: referenceId,
         type,
-        payload,
+        payload: payload as any,
         status: "pending",
         attempts: 0,
       })
@@ -348,7 +348,7 @@ export class SellerSyncQueueService {
       {
         type: "order.push",
         endpoint: "/orders",
-        payload,
+        payload: payload as any,
       },
       jobOpts,
     );
@@ -369,7 +369,7 @@ export class SellerSyncQueueService {
       {
         type: "order.cancel",
         endpoint: "/orders/cancel-by-order",
-        payload,
+        payload: payload as any,
       },
       { jobId: `order.cancel-${payload.external_order_id}` },
     );
@@ -390,7 +390,7 @@ export class SellerSyncQueueService {
       {
         type: "review.push",
         endpoint: "/reviews",
-        payload,
+        payload: payload as any,
       },
       { jobId },
     );

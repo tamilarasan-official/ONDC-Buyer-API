@@ -57,8 +57,8 @@ export class Order {
   @Column({ type: "bigint", nullable: true })
   delivery_alternate_phone: number;
 
-  @Column({ type: "varchar", length: 20, default: "pending" })
-  status: string; // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
+  @Column({ type: "varchar", length: 50, default: "pending" })
+  status: string; // buyer + seller pipeline statuses (aligned with order_tracking.status width)
 
   @Column({ type: "decimal", precision: 10, scale: 2 })
   subtotal: number;
