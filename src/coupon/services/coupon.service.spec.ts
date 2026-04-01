@@ -1516,6 +1516,34 @@ describe("CouponService", () => {
       expect(result.valid).toBe(false);
       expect(result.reason_code).toBe("NOT_FIRST_ORDER");
     });
+
+    it("should block first_order coupon reapply when COD order has order_id linked redemption (COD double-apply fix)", async () => {
+      const coupon: Partial<Coupon> = {
+        id: 1,
+        code: "FIRST50",
+        type: CouponType.FIRST_ORDER,
+        value: 50,
+        value_type: ValueType.RUPEES,
+        status: CouponStatus.ACTIVE,
+        user_usage_limit: 1,
+        min_cart_value: 0,
+        campaign: { id: 1, status: "active" as any } as any,
+      };
+
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      // redemption count: 1 RESERVED row with order_id set (COD order placed but undelivered)
+      mockRedemptionRepo.count.mockResolvedValue(1);
+
+      const result = await service.validateCoupon({
+        code: "FIRST50",
+        user_id: 123,
+        cart_total: 1000,
+        pincode: "600001",
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("USER_LIMIT_EXCEEDED");
+    });
   });
 
   describe("validateCoupon - referral type", () => {
@@ -1760,6 +1788,23 @@ describe("CouponService", () => {
 
       expect(result.valid).toBe(true);
       expect(mockDataSource.query).toHaveBeenCalledTimes(2);
+    });
+
+    it("should throw when fallback order table query also fails", async () => {
+      mockCouponRepo.findOne.mockResolvedValue(nthCoupon);
+      mockRedemptionRepo.count.mockResolvedValue(0);
+      mockDataSource.query
+        .mockRejectedValueOnce(new Error("user_order_metrics unavailable"))
+        .mockRejectedValueOnce(new Error("orders table unavailable"));
+
+      await expect(
+        service.validateCoupon({
+          code: "NTH100",
+          user_id: 123,
+          cart_total: 1000,
+          pincode: "600001",
+        }),
+      ).rejects.toThrow("Failed to determine order eligibility for coupon validation");
     });
 
     it("should block reapply when placed nth-order redemption was rolled back", async () => {

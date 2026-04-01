@@ -42,12 +42,14 @@ export class CouponMetricsReconciliationService {
 
     try {
       // Ensure dedupe contains all paid-like order transitions so downstream metrics stay deterministic.
+      // Uses payment_status = 'paid' (not order.status) since 'paid' is only a payment_status value.
       await this.dataSource.query(
         `
         INSERT INTO order_paid_events_dedupe(order_id, user_id, processed_at)
-        SELECT o.id, o.user_id, now()
+        SELECT o.id, o."userId", now()
         FROM "order" o
-        WHERE o.status IN ('paid', 'confirmed', 'delivered', 'completed')
+        WHERE o.payment_status = 'paid'
+          AND o.status NOT IN ('cancelled', 'refunded')
         ON CONFLICT (order_id) DO NOTHING
       `,
       );

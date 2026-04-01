@@ -82,8 +82,6 @@ export class OrderService {
   private readonly DEFAULT_LONGITUDE = 78.1198;
 
   private readonly metricEligibleStatuses = new Set([
-    "paid",
-    "confirmed",
     "delivered",
     "completed",
   ]);
@@ -171,7 +169,13 @@ export class OrderService {
     correlationId: string,
   ): Promise<void> {
     if (!this.couponMetricsQueueService) {
-      await this.couponService.recordPaidOrderEvent?.(
+      if (!this.couponService?.recordPaidOrderEvent) {
+        this.logger.warn(
+          `[${correlationId}] couponService.recordPaidOrderEvent is unavailable, metrics skipped for order ${orderId}`,
+        );
+        return;
+      }
+      await this.couponService.recordPaidOrderEvent(
         orderId,
         userId,
         correlationId,
@@ -190,7 +194,13 @@ export class OrderService {
         `[${correlationId}] Failed to enqueue paid-order event, using direct fallback: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
       );
 
-      await this.couponService.recordPaidOrderEvent?.(
+      if (!this.couponService?.recordPaidOrderEvent) {
+        this.logger.warn(
+          `[${correlationId}] couponService.recordPaidOrderEvent is unavailable during queue fallback, metrics skipped for order ${orderId}`,
+        );
+        return;
+      }
+      await this.couponService.recordPaidOrderEvent(
         orderId,
         userId,
         correlationId,
@@ -2190,6 +2200,29 @@ export class OrderService {
         !BUYER_ORDER_NOTIFICATION_STATUSES.includes(paymentStatus as any),
       );
 
+      // Trigger nth-order metrics when payment is confirmed as paid.
+      // This is the correct place for online payments since 'paid' is a payment_status value,
+      // not an order.status value — updateOrderStatus is never called with 'paid'.
+      if (paymentStatus === "paid") {
+        try {
+          const rows = await this.dataSource.query(
+            `SELECT "userId" AS user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            [orderId],
+          );
+          const userId = Number(rows?.[0]?.user_id);
+          if (Number.isInteger(userId) && userId > 0) {
+            const correlationId = this.createCorrelationId("order-payment", orderId);
+            await this.enqueuePaidOrderMetricsUpdate(orderId, userId, correlationId);
+          }
+        } catch (metricsError) {
+          this.logger.warn(
+            `⚠️ Failed to update nth-order metrics for order ${orderId}: ${
+              metricsError instanceof Error ? metricsError.message : String(metricsError)
+            }`,
+          );
+        }
+      }
+
       this.logger.log(`✅ Payment status updated for order ${orderId}`);
     } catch (error) {
       this.logger.error(
@@ -2370,7 +2403,7 @@ export class OrderService {
       if (this.metricEligibleStatuses.has(status)) {
         try {
           const rows = await this.dataSource.query(
-            `SELECT user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            `SELECT "userId" AS user_id FROM "order" WHERE id = $1 LIMIT 1`,
             [orderId],
           );
           const userId = Number(rows?.[0]?.user_id);
@@ -2378,7 +2411,7 @@ export class OrderService {
             await this.enqueuePaidOrderMetricsUpdate(
               orderId,
               userId,
-              `order-status-${orderId}-${status}-${Date.now()}`,
+              this.createCorrelationId(`order-status-${status}`, orderId),
             );
           }
         } catch (metricsError) {
