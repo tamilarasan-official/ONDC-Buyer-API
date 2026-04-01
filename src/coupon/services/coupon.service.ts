@@ -678,7 +678,9 @@ export class CouponService {
     // Check per-user usage limit
     if (dto.user_id) {
       const userRedemptions =
-        coupon.type === CouponType.PREORDER || coupon.type === CouponType.NTH_ORDER
+        coupon.type === CouponType.PREORDER ||
+        coupon.type === CouponType.NTH_ORDER ||
+        coupon.type === CouponType.FIRST_ORDER
           ? await this.redemptionRepository.count({
               where: {
                 coupon_id: coupon.id,
@@ -1906,11 +1908,14 @@ export class CouponService {
     correlationId: string,
   ): Promise<number> {
     // Fallback path to keep eligibility correct while metrics model is warming up.
+    // Uses payment_status column (not order.status) since 'paid' is only a payment_status value.
+    // Excludes cancelled/refunded orders to stay consistent with metricEligibleStatuses in OrderService.
     const query = `
       SELECT COUNT(*)::int as count
       FROM "order"
-      WHERE user_id = $1
-      AND status IN ('paid', 'delivered', 'confirmed', 'completed')
+      WHERE "userId" = $1
+      AND payment_status = 'paid'
+      AND status NOT IN ('cancelled', 'refunded')
     `;
 
     try {
@@ -1921,11 +1926,9 @@ export class CouponService {
         `[${correlationId}] Error counting paid orders for user ${userId}: ${error.message}`,
         error instanceof Error ? error.stack : undefined,
       );
-      this.logger.warn(
-        `[${correlationId}] Falling back to 0 paid orders count for user ${userId} due to query error`,
+      throw new InternalServerErrorException(
+        "Failed to determine order eligibility for coupon validation",
       );
-      // Fallback: return 0 to allow coupon validation to proceed
-      return 0;
     }
   }
 

@@ -254,6 +254,7 @@ describe("OrderService integration - percent coupon discount propagation", () =>
       sellerStatusService,
       appOperationHoursService,
       appServiceableAreaService,
+      { getBoolean: jest.fn().mockResolvedValue(true), getNumber: jest.fn().mockResolvedValue(0), get: jest.fn().mockReturnValue("") } as any,
       httpService,
       sellerSyncQueueService,
       webhookEventRepository,
@@ -511,6 +512,7 @@ describe("OrderService integration - percent coupon discount propagation", () =>
         sellerStatusService,
         appOperationHoursService,
         appServiceableAreaService,
+        { getBoolean: jest.fn().mockResolvedValue(true), getNumber: jest.fn().mockResolvedValue(0), get: jest.fn().mockReturnValue("") } as any,
         httpService,
         sellerSyncQueueService,
         webhookEventRepository,
@@ -599,6 +601,7 @@ describe("OrderService integration - percent coupon discount propagation", () =>
         {} as any,
         {} as any,
         cartService,
+        {} as any,
         {} as any,
         {} as any,
         {} as any,
@@ -779,6 +782,7 @@ describe("OrderService integration - cart cleanup policy", () => {
       {} as any,
       { validateAppIsOpen: jest.fn().mockResolvedValue(undefined) } as any,
       { validateServiceableArea: jest.fn().mockResolvedValue(undefined) } as any,
+      { getBoolean: jest.fn().mockResolvedValue(true), getNumber: jest.fn().mockResolvedValue(0), get: jest.fn().mockReturnValue("") } as any,
       {} as any,
       { addOutboxRowInTransaction: jest.fn().mockResolvedValue(undefined) } as any,
       {} as any,
@@ -849,6 +853,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
       {} as any, // sellerStatusService
       {} as any, // appOperationHoursService
       {} as any, // appServiceableAreaService
+      {} as any, // appSettingsService
       {} as any, // httpService
       {} as any, // sellerSyncQueueService
       {} as any, // webhookEventRepository
@@ -864,7 +869,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
     expect(couponMetricsQueueService.enqueueCouponRedeemRetry).toHaveBeenCalledTimes(1);
   });
 
-  it("should enqueue metrics event when order status moves to confirmed", async () => {
+  it("should enqueue metrics event when payment status moves to paid (online payment)", async () => {
     const couponMetricsQueueService = {
       enqueuePaidOrderEvent: jest.fn().mockResolvedValue("job-metrics-1"),
       enqueueCouponRedeemRetry: jest.fn().mockResolvedValue("job-redeem-1"),
@@ -878,18 +883,11 @@ describe("OrderService integration - coupon redemption reliability", () => {
       execute: jest.fn().mockResolvedValue({ affected: 1 }),
     } as any;
 
-    const loadQb = {
-      leftJoinAndSelect: jest.fn().mockReturnThis(),
-      where: jest.fn().mockReturnThis(),
-      getOne: jest.fn().mockResolvedValue({ id: 77, status: "confirmed" }),
-    } as any;
-
     const orderRepository = {
-      createQueryBuilder: jest
+      createQueryBuilder: jest.fn().mockReturnValue(updateQb),
+      findOne: jest
         .fn()
-        .mockReturnValueOnce(updateQb)
-        .mockReturnValueOnce(loadQb),
-      findOne: jest.fn().mockResolvedValue(null),
+        .mockResolvedValue({ id: 77, payment_status: "pending" }),
     } as any;
 
     const service = new OrderService(
@@ -920,6 +918,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
       {} as any,
       {} as any,
       {} as any,
+      {} as any,
       {
         query: jest.fn().mockResolvedValue([{ user_id: 501 }]),
       } as any,
@@ -928,7 +927,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
 
     jest.spyOn(service as any, "createOrderTracking").mockResolvedValue(undefined);
 
-    await service.updateOrderStatus(77, "confirmed");
+    await service.updatePaymentStatus(77, "paid");
 
     expect(couponMetricsQueueService.enqueuePaidOrderEvent).toHaveBeenCalledTimes(1);
     expect(couponMetricsQueueService.enqueuePaidOrderEvent).toHaveBeenCalledWith(
@@ -937,6 +936,54 @@ describe("OrderService integration - coupon redemption reliability", () => {
         userId: 501,
       }),
     );
+  });
+
+  it("should NOT enqueue metrics event when order status moves to confirmed (cancellable state)", async () => {
+    const couponMetricsQueueService = {
+      enqueuePaidOrderEvent: jest.fn().mockResolvedValue("job-metrics-1"),
+      enqueueCouponRedeemRetry: jest.fn().mockResolvedValue("job-redeem-1"),
+    } as any;
+
+    const updateQb = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ affected: 1 }),
+    } as any;
+
+    const loadQb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({ id: 77, status: "confirmed" }),
+    } as any;
+
+    const orderRepository = {
+      createQueryBuilder: jest
+        .fn()
+        .mockReturnValueOnce(updateQb)
+        .mockReturnValueOnce(loadQb),
+      findOne: jest.fn().mockResolvedValue(null),
+    } as any;
+
+    const service = new OrderService(
+      orderRepository,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      { recordPaidOrderEvent: jest.fn().mockResolvedValue({ processed: true }) } as any,
+      {} as any, {} as any, {} as any,
+      { pushOrderToSeller: jest.fn().mockResolvedValue(undefined) } as any,
+      {} as any, {} as any, {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any,
+      { query: jest.fn().mockResolvedValue([{ user_id: 501 }]) } as any,
+      couponMetricsQueueService,
+    );
+
+    jest.spyOn(service as any, "createOrderTracking").mockResolvedValue(undefined);
+
+    await service.updateOrderStatus(77, "confirmed");
+
+    expect(couponMetricsQueueService.enqueuePaidOrderEvent).not.toHaveBeenCalled();
   });
 
   it("should not fail COD order creation when coupon redemption fails after order persistence", async () => {
@@ -1079,6 +1126,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
       {} as any,
       { validateAppIsOpen: jest.fn().mockResolvedValue(undefined) } as any,
       { validateServiceableArea: jest.fn().mockResolvedValue(undefined) } as any,
+      { getBoolean: jest.fn().mockResolvedValue(true), getNumber: jest.fn().mockResolvedValue(0), get: jest.fn().mockReturnValue("") } as any,
       {} as any,
       { addOutboxRowInTransaction: jest.fn().mockResolvedValue(undefined) } as any,
       {} as any,
@@ -1244,6 +1292,7 @@ describe("OrderService integration - coupon redemption reliability", () => {
       {} as any,
       { validateAppIsOpen: jest.fn().mockResolvedValue(undefined) } as any,
       { validateServiceableArea: jest.fn().mockResolvedValue(undefined) } as any,
+      { getBoolean: jest.fn().mockResolvedValue(true), getNumber: jest.fn().mockResolvedValue(0), get: jest.fn().mockReturnValue("") } as any,
       {} as any,
       { addOutboxRowInTransaction: jest.fn().mockResolvedValue(undefined) } as any,
       {} as any,
