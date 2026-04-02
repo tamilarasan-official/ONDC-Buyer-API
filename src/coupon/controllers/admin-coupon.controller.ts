@@ -30,6 +30,7 @@ import { GenerateCodesDto } from "../dto/generate-codes.dto";
 import { CouponAnalyticsQueryDto } from "../dto/coupon-analytics-query.dto";
 import { ExportCodesDto, ExportFormat } from "../dto/export-codes.dto";
 import { IncrementQuotaDto, ResetQuotaDto } from "../dto/manage-quota.dto";
+import { UpdateCouponStatusDto } from "../dto/update-coupon-status.dto";
 import { CampaignStatus } from "../entities/coupon-campaign.entity";
 import { ApiKeyGuard } from "src/super-admin-access/api-key-auth-gaurd";
 
@@ -1275,6 +1276,73 @@ export class AdminCouponController {
       success: true,
       message: `Quota reset to ${dto.quota} successfully`,
       data: result,
+    };
+  }
+
+  @Patch("coupons/:id/status")
+  @ApiOperation({
+    summary: "Update individual coupon status",
+    description:
+      "Activate or deactivate a single coupon code. Only 'active' and 'inactive' are accepted. " +
+      "'expired' and 'revoked' are system-managed states and cannot be set manually.",
+  })
+  @ApiParam({ name: "id", type: Number, description: "Coupon ID" })
+  @ApiBody({
+    schema: {
+      type: "object",
+      required: ["status"],
+      properties: {
+        status: {
+          type: "string",
+          enum: ["active", "inactive"],
+          example: "inactive",
+          description: "New status for the coupon. Only 'active' or 'inactive' are allowed.",
+        },
+      },
+    },
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Coupon status updated successfully",
+    schema: {
+      type: "object",
+      properties: {
+        success: { type: "boolean", example: true },
+        message: { type: "string", example: "Coupon status updated to inactive" },
+        data: {
+          type: "object",
+          properties: {
+            id: { type: "number", example: 42 },
+            code: { type: "string", example: "SUMMER12345678" },
+            status: { type: "string", example: "inactive" },
+          },
+        },
+      },
+    },
+  })
+  @ApiResponse({ status: 404, description: "Coupon not found" })
+  @ApiResponse({
+    status: 400,
+    description:
+      "Invalid status value, or attempt to change a revoked/expired coupon, or re-activating a coupon past its end_at",
+  })
+  async updateCouponStatus(
+    @Param("id", ParseIntPipe) couponId: number,
+    @Body() dto: UpdateCouponStatusDto,
+  ) {
+    const coupon = await this.couponService.updateCouponStatus(
+      couponId,
+      dto.status,
+    );
+
+    return {
+      success: true,
+      message: `Coupon status updated to ${dto.status}`,
+      data: {
+        id: coupon.id,
+        code: coupon.code,
+        status: coupon.status,
+      },
     };
   }
 }
