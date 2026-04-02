@@ -476,10 +476,12 @@ export class AdminCouponController {
           priority: 5,
           preview: false,
           type_meta: {
-            item_id: 123,
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
             title: "Special Preorder Offer",
             delivery_date: "2025-02-15T12:00:00Z",
             free_delivery: true,
+            delivery_fee_cap: 40,
           },
         },
       },

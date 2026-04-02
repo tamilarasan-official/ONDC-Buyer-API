@@ -1473,7 +1473,7 @@ export class BuyerService {
         .where("coupon.type = :type", { type: CouponType.PREORDER })
         .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
         .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-        .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.id.toString() })
+        .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: item.id.toString() })
         .andWhere(
           "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
           { storeId }

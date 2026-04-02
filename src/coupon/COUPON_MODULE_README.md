@@ -435,17 +435,24 @@ Current internal service methods:
   "value_type": "percent",
   "max_discount_amount": 300,
   "type_meta": {
-    "item_id": 123,
+    "store_reference_id": "STORE-REF-44",
+    "item_reference_id": "ITEM-REF-123",
     "title": "Special Preorder Offer",
     "delivery_date": "2026-12-25T18:30:00Z",
-    "free_delivery": true
+    "free_delivery": true,
+    "delivery_fee_cap": 40
   }
 }
 ```
 
-- `type_meta.item_id` is required and must exist.
-- `type_meta.delivery_date` is required and must be a future datetime.
-- `type_meta.final_price` is not required.
+- `type_meta.store_reference_id` is required. Must match an existing store's `reference_id`.
+- `type_meta.item_reference_id` is required (single item). Must match an existing item's `reference_id` within the given store.
+- `type_meta.delivery_date` is required and must be a future ISO 8601 datetime.
+- `type_meta.title` is optional — display title shown to the buyer.
+- `type_meta.free_delivery` is optional boolean — waives delivery fee.
+- `type_meta.delivery_fee_cap` is optional — caps the waived delivery amount (only when `free_delivery: true`).
+- At generation time the service resolves references and stores `internal_store_id` and `internal_item_id` in `type_meta`. Querying and validation use these resolved IDs at runtime.
+- `applicable_store_ids` is automatically set from `internal_store_id`.
 
 ## Coupon Type Meta Combinations
 
@@ -570,7 +577,7 @@ During rollback, quota restoration is driven by `releaseReservation` and guarded
 - `flat`: `value_type=rupees`, `value > 0`
 - `free_delivery`: `value_type=rupees`, `value = 0`
 - `nth_order`: requires `type_meta.nth`
-- `preorder`: requires `type_meta.item_id` and future `type_meta.delivery_date`
+- `preorder`: requires `type_meta.store_reference_id`, `type_meta.item_reference_id`, and future `type_meta.delivery_date`
 
 ### Latest Code Generation Examples
 
