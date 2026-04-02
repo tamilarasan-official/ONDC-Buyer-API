@@ -82,8 +82,8 @@ export class OrderService {
   private readonly DEFAULT_LONGITUDE = 78.1198;
 
   private readonly metricEligibleStatuses = new Set([
-    "delivered",
-    "completed",
+    "confirmed",  // COD order placed → count immediately at confirmation
+    "delivered",  // Online order delivered (deduped by order_id via order_paid_events_dedupe)
   ]);
 
   constructor(

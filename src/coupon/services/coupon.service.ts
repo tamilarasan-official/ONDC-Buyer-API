@@ -2006,14 +2006,17 @@ export class CouponService {
     correlationId: string,
   ): Promise<number> {
     // Fallback path to keep eligibility correct while metrics model is warming up.
-    // Uses payment_status column (not order.status) since 'paid' is only a payment_status value.
-    // Excludes cancelled/refunded orders to stay consistent with metricEligibleStatuses in OrderService.
+    // Counts any order that is actively placed (confirmed or later), excluding:
+    //   - 'created'/'pending': unpaid online orders not yet confirmed
+    //   - 'cancelled'/'refunded': voided orders
+    // This ensures COD orders (which start as 'confirmed' with payment_status='pending')
+    // are counted immediately at placement, preventing reuse of nth/first-order coupons.
+    // Must stay consistent with metricEligibleStatuses in OrderService.
     const query = `
       SELECT COUNT(*)::int as count
       FROM "order"
       WHERE "userId" = $1
-      AND payment_status = 'paid'
-      AND status NOT IN ('cancelled', 'refunded')
+      AND status NOT IN ('created', 'cancelled')
     `;
 
     try {
