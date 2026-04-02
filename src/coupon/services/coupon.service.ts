@@ -680,10 +680,13 @@ export class CouponService {
     }
 
     // Check store eligibility
+    // NOTE: applicable_store_ids is bigint[] in Postgres; the pg driver returns bigint values as
+    // strings, so the array may contain "113" while dto.store_id is the number 113.
+    // Use Number() on both sides to avoid strict-equality type mismatch.
     if (coupon.applicable_store_ids && coupon.applicable_store_ids.length > 0) {
       if (
         !dto.store_id ||
-        !coupon.applicable_store_ids.includes(dto.store_id)
+        !coupon.applicable_store_ids.map(Number).includes(Number(dto.store_id))
       ) {
         return {
           valid: false,
