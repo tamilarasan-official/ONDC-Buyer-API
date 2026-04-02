@@ -1572,35 +1572,47 @@ export class OrderService {
       // NEW: Restore quota for preorder items
       const orderItems = await this.orderItemRepository.find({
         where: { order: { id: order.id } },
-        relations: ['item'],
       });
 
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: order.id },
-            relations: ['coupon'],
-          });
+      // Rollback ALL coupon redemptions for this order (PREORDER, FLAT, PERCENT, NTH_ORDER, etc).
+      // cancelOrder handles REDEEMED coupons directly because rollbackCoupon() treats REDEEMED
+      // as a no-op (it was designed for post-payment flows where quota must not be restored).
+      // On cancellation, quota always needs to be returned regardless of redemption state.
+      const allRedemptions = await this.couponRedemptionRepository.find({
+        where: { order_id: order.id },
+        relations: ['coupon'],
+      });
 
-          if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
-            // FIX: Use releaseReservation instead of incrementQuota to properly clean up reservation
-            if (couponRedemption.reserved_token) {
-              await this.redisCouponService.releaseReservation(
-                couponRedemption.coupon.id,
-                couponRedemption.reserved_token
-              );
-              this.logger.log(
-                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
-              );
-            } else {
-              // Fallback: If no reservation token, restore quota directly
-              await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
-              this.logger.log(
-                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon.id} after order cancellation (no reservation token found)`
-              );
-            }
+      for (const redemption of allRedemptions) {
+        try {
+          if (redemption.status === RedemptionStatus.REDEEMED) {
+            // COD path: coupon was already fully redeemed at order creation.
+            // Must increment quota directly — releaseReservation only undoes RESERVED state.
+            await this.redisCouponService.incrementQuota(redemption.coupon.id, 1);
+            redemption.status = RedemptionStatus.ROLLED_BACK;
+            await this.couponRedemptionRepository.save(redemption);
+            this.logger.log(
+              `✅ Restored quota for coupon ${redemption.coupon.id} (type: ${redemption.coupon.type}) after order cancellation (was REDEEMED)`,
+            );
+          } else if (
+            redemption.status === RedemptionStatus.RESERVED &&
+            redemption.reserved_token
+          ) {
+            // Online payment path: still RESERVED — release normally via rollbackCoupon.
+            await this.couponService.rollbackCoupon({
+              reservation_token: redemption.reserved_token,
+              reason: 'order_cancelled',
+            });
+            this.logger.log(
+              `✅ Rolled back reservation for coupon ${redemption.coupon.id} (type: ${redemption.coupon.type}) after order cancellation`,
+            );
           }
+          // ROLLED_BACK / FAILED: already handled, skip silently.
+        } catch (rollbackErr) {
+          this.logger.error(
+            `❌ Failed to rollback coupon ${redemption.coupon.id} on order cancellation: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+          );
+          // Do not rethrow — order cancellation must complete even if coupon rollback fails.
         }
       }
 
@@ -1779,8 +1791,11 @@ export class OrderService {
         userId,
       );
       if (redemptionResult?.success === false) {
-        throw new InternalServerErrorException(
-          `Coupon redemption failed for order ${order.id}. Please retry verification.`,
+        // Redemption failure must NOT block order confirmation — payment was already captured.
+        // Throwing here leaves order in 'created' state and misleads the user into retrying payment.
+        // Retry is already enqueued inside redeemPreorderCouponForOrder; proceed to confirm.
+        this.logger.warn(
+          `⚠️ Coupon redemption failed for order ${order.id} but payment was captured. Proceeding to confirm order. Failed tokens: ${redemptionResult.failedTokens.join(", ")}`,
         );
       }
 

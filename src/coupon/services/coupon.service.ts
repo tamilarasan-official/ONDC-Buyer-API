@@ -328,6 +328,23 @@ export class CouponService {
           "type_meta is required for preorder coupons",
         );
       }
+
+      // PREORDER coupons must be generated one at a time — each campaign is a single unique code.
+      // count > 1 creates N independent quota pools for the same item, causing overselling.
+      if (dto.count > 1) {
+        throw new BadRequestException(
+          "PREORDER coupons must be generated one at a time (count must be 1). Each preorder campaign requires exactly one coupon code.",
+        );
+      }
+
+      // global_usage_limit is mandatory for PREORDER — it is the slot count for the campaign.
+      // Without it, the preorder has no capacity control and allows unlimited reservations.
+      if (!dto.global_usage_limit || dto.global_usage_limit < 1) {
+        throw new BadRequestException(
+          "global_usage_limit is required for PREORDER coupons and must be at least 1. It defines the maximum number of preorder slots available.",
+        );
+      }
+
       const preorderMetaValidation = this.validatePreorderCouponTypeMeta(
         dto.type_meta as Record<string, any>,
       );
@@ -337,6 +354,26 @@ export class CouponService {
       dto.type_meta = await this.enrichPreorderCouponTypeMeta(
         dto.type_meta as Record<string, any>,
       );
+
+      // Guard: Only one active PREORDER coupon per item is allowed at a time.
+      // Multiple active campaigns for the same item split quota and can cause overselling.
+      const internalItemId = (dto.type_meta as any)?.internal_item_id;
+      if (internalItemId) {
+        const existingActive = await this.couponRepository
+          .createQueryBuilder("c")
+          .where("c.type = :type", { type: CouponType.PREORDER })
+          .andWhere("c.status = :status", { status: CouponStatus.ACTIVE })
+          .andWhere("c.type_meta->>'internal_item_id' = :itemId", {
+            itemId: String(internalItemId),
+          })
+          .getOne();
+
+        if (existingActive) {
+          throw new BadRequestException(
+            `An active preorder campaign already exists for this item (coupon id: ${existingActive.id}). Revoke or expire it before creating a new one.`,
+          );
+        }
+      }
     }
 
     const codeLength = dto.length || 8;
@@ -883,29 +920,11 @@ export class CouponService {
   /**
    * Count consumed quota slots from DB as a safety source of truth.
    * RESERVED always consumes a slot until explicit rollback.
-   * PREORDER/NTH_ORDER can intentionally retain consumed usage as ROLLED_BACK when linked to an order.
+   * ROLLED_BACK is excluded: cancelOrder now restores Redis quota on cancellation
+   * for all coupon types (PREORDER, NTH_ORDER, FLAT, PERCENT, etc), so the DB
+   * fallback must not count cancelled redemptions as still consuming capacity.
    */
   private async countConsumedQuotaSlots(coupon: Coupon): Promise<number> {
-    if (coupon.type === CouponType.PREORDER || coupon.type === CouponType.NTH_ORDER) {
-      return this.redemptionRepository.count({
-        where: [
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.RESERVED,
-          },
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.REDEEMED,
-          },
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.ROLLED_BACK,
-            order_id: Not(IsNull()),
-          },
-        ],
-      });
-    }
-
     return this.redemptionRepository.count({
       where: {
         coupon_id: coupon.id,

@@ -54,6 +54,14 @@ describe("CouponService", () => {
       create: jest.fn(),
       save: jest.fn(),
       update: jest.fn(),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
     };
 
     mockRedemptionRepo = {
@@ -2997,6 +3005,77 @@ describe("CouponService", () => {
           },
         } as any),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when count > 1", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 2,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          global_usage_limit: 50,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("count must be 1");
+    });
+
+    it("should reject preorder coupon when global_usage_limit is missing", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          // global_usage_limit intentionally omitted
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("global_usage_limit is required");
+    });
+
+    it("should reject preorder coupon when an active campaign already exists for the same item", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      // Simulate existing active preorder coupon for the same item
+      mockCouponRepo.createQueryBuilder.mockReturnValueOnce({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 99, code: "EXISTING-PREORDER" }),
+      });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          global_usage_limit: 50,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("active preorder campaign already exists");
     });
   });
 
