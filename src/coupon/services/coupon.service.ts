@@ -71,6 +71,7 @@ export class CouponService {
     private readonly schedulerRegistry: SchedulerRegistry,
   ) {
     this.registerAutoRollbackCron();
+    this.registerExpiryMarkingCron();
   }
 
   /**
@@ -105,6 +106,31 @@ export class CouponService {
 
     this.logger.log(
       `Registered auto-rollback cron with expression "${expr}" (Asia/Kolkata)`,
+    );
+  }
+
+  /**
+   * Register a cron job that marks coupons as EXPIRED when their end_at has passed.
+   * Env: COUPON_EXPIRY_CRON_EXPRESSION (default: every hour at minute 0)
+   */
+  private registerExpiryMarkingCron() {
+    const expr =
+      this.configService.get<string>("COUPON_EXPIRY_CRON_EXPRESSION") ||
+      "0 * * * *"; // default: every hour
+
+    const job = new CronJob(
+      expr,
+      () => { void this.markExpiredCoupons(); },
+      null,
+      false,
+      "Asia/Kolkata",
+    );
+
+    this.schedulerRegistry.addCronJob("mark_expired_coupons", job);
+    job.start();
+
+    this.logger.log(
+      `Registered expiry-marking cron with expression "${expr}" (Asia/Kolkata)`,
     );
   }
 
@@ -2206,10 +2232,18 @@ export class CouponService {
 
       await queryRunner.manager.save(redemption);
 
-      // If single-use, update coupon status
-      if (coupon.global_usage_limit === 1) {
-        coupon.status = CouponStatus.REVOKED;
-        await queryRunner.manager.save(coupon);
+      // Auto-revoke when quota is exhausted (covers single-use and multi-use coupons)
+      if (coupon.global_usage_limit != null) {
+        const redeemedCount = await queryRunner.manager.count(CouponRedemption, {
+          where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
+        });
+        if (redeemedCount >= Number(coupon.global_usage_limit)) {
+          coupon.status = CouponStatus.REVOKED;
+          await queryRunner.manager.save(coupon);
+          this.logger.log(
+            `[${correlationId}] Coupon ${coupon.code} marked REVOKED after reaching global_usage_limit (${coupon.global_usage_limit})`,
+          );
+        }
       }
 
       await queryRunner.commitTransaction();
@@ -2329,6 +2363,23 @@ export class CouponService {
     this.logger.log(
       `[${correlationId}] Redeemed coupon via DB fallback for token ${dto.reservation_token} and order ${dto.order_id} after Redis reservation expiry`,
     );
+
+    // Auto-revoke when quota is exhausted (same logic as main redeem path)
+    if (coupon.global_usage_limit != null) {
+      const redeemedCount = await this.redemptionRepository.count({
+        where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
+      });
+      if (redeemedCount >= Number(coupon.global_usage_limit)) {
+        // Conditional update guards against concurrent revokes
+        await this.couponRepository.update(
+          { id: coupon.id, status: CouponStatus.ACTIVE },
+          { status: CouponStatus.REVOKED },
+        );
+        this.logger.log(
+          `[${correlationId}] Coupon ${coupon.code} marked REVOKED (DB fallback path) after reaching global_usage_limit (${coupon.global_usage_limit})`,
+        );
+      }
+    }
 
     return {
       success: true,
@@ -2828,6 +2879,42 @@ export class CouponService {
     return reservation != null;
   }
 
+  /**
+   * Bulk-marks coupons as EXPIRED when their end_at timestamp has passed.
+   * Runs on schedule via registerExpiryMarkingCron().
+   * This keeps coupon.status in sync with the time-based expiry already enforced at validation.
+   */
+  async markExpiredCoupons(): Promise<{ updated: number }> {
+    const correlationId = this.createCorrelationId("coupon-expiry-cron");
+    try {
+      this.logger.log(
+        `[${correlationId}] ⏰ Running markExpiredCoupons cron`,
+      );
+
+      const result = await this.couponRepository
+        .createQueryBuilder()
+        .update(Coupon)
+        .set({ status: CouponStatus.EXPIRED })
+        .where("status = :active", { active: CouponStatus.ACTIVE })
+        .andWhere("end_at IS NOT NULL")
+        .andWhere("end_at < :now", { now: new Date() })
+        .execute();
+
+      const updated = result.affected ?? 0;
+      this.logger.log(
+        `[${correlationId}] ✅ markExpiredCoupons: marked ${updated} coupon(s) as EXPIRED`,
+      );
+
+      return { updated };
+    } catch (error) {
+      this.logger.error(
+        `[${correlationId}] ❌ Error during markExpiredCoupons: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return { updated: 0 };
+    }
+  }
+
   async autoRollbackStaleReservations() {
     const correlationId = this.createCorrelationId("coupon-cron");
     let attempted = 0;
@@ -2919,15 +3006,23 @@ export class CouponService {
     let valid = coupon.status === CouponStatus.ACTIVE;
     let message = "";
 
-    if (coupon.start_at && now < coupon.start_at) {
+    // Check terminal system-managed states first — these take priority over time checks
+    if (coupon.status === CouponStatus.REVOKED) {
+      valid = false;
+      message = "Coupon has been revoked";
+    } else if (coupon.status === CouponStatus.EXPIRED) {
+      valid = false;
+      message = "Coupon has expired";
+    } else if (coupon.status === CouponStatus.INACTIVE) {
+      valid = false;
+      message = "Coupon is inactive";
+    } else if (coupon.start_at && now < coupon.start_at) {
       valid = false;
       message = "Coupon not yet valid";
     } else if (coupon.end_at && now > coupon.end_at) {
+      // end_at passed but cron hasn't run yet — status is still ACTIVE
       valid = false;
-      message = "Coupon expired";
-    } else if (coupon.status !== CouponStatus.ACTIVE) {
-      valid = false;
-      message = "Coupon is inactive";
+      message = "Coupon has expired";
     } else if (coupon.campaign.status !== CampaignStatus.ACTIVE) {
       valid = false;
       message = "Campaign is inactive";
@@ -2942,6 +3037,55 @@ export class CouponService {
   }
 
   // ==================== Quota Management ====================
+
+  /**
+   * Update the status of a single coupon (admin-driven).
+   * Only ACTIVE ↔ INACTIVE transitions are allowed through this endpoint.
+   * EXPIRED and REVOKED are system-managed states and cannot be set manually.
+   */
+  async updateCouponStatus(
+    couponId: number,
+    newStatus: CouponStatus.ACTIVE | CouponStatus.INACTIVE,
+  ): Promise<Coupon> {
+    const coupon = await this.couponRepository.findOne({
+      where: { id: couponId },
+    });
+
+    if (!coupon) {
+      throw new NotFoundException(`Coupon with ID ${couponId} not found`);
+    }
+
+    if (coupon.status === CouponStatus.REVOKED) {
+      throw new BadRequestException(
+        "Cannot change the status of a revoked coupon",
+      );
+    }
+
+    if (coupon.status === CouponStatus.EXPIRED) {
+      throw new BadRequestException(
+        "Cannot change the status of an expired coupon",
+      );
+    }
+
+    if (
+      newStatus === CouponStatus.ACTIVE &&
+      coupon.end_at &&
+      coupon.end_at < new Date()
+    ) {
+      throw new BadRequestException(
+        "Cannot re-activate a coupon whose end_at has already passed",
+      );
+    }
+
+    coupon.status = newStatus;
+    await this.couponRepository.save(coupon);
+
+    this.logger.log(
+      `Admin updated coupon ${coupon.code} (id: ${couponId}) status to ${newStatus}`,
+    );
+
+    return coupon;
+  }
 
   /**
    * Get current quota for a coupon

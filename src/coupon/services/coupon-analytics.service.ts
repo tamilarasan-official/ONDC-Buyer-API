@@ -61,7 +61,7 @@ export class CouponAnalyticsService {
       `
       SELECT
         COUNT(*)::int AS total_coupons,
-        COUNT(*) FILTER (WHERE status = 'active')::int AS active_coupons
+        COUNT(*) FILTER (WHERE status = 'active' AND (end_at IS NULL OR end_at > NOW()))::int AS active_coupons
       FROM coupons
       `,
     );
@@ -199,7 +199,7 @@ export class CouponAnalyticsService {
       `
       SELECT
         COUNT(*)::int AS total_codes,
-        COUNT(*) FILTER (WHERE status = 'active')::int AS active_codes,
+        COUNT(*) FILTER (WHERE status = 'active' AND (end_at IS NULL OR end_at > NOW()))::int AS active_codes,
         COUNT(*) FILTER (WHERE status = 'inactive')::int AS inactive_codes,
         COUNT(*) FILTER (WHERE status = 'expired')::int AS expired_codes,
         COUNT(*) FILTER (WHERE status = 'revoked')::int AS revoked_codes

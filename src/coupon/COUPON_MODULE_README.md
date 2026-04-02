@@ -11,11 +11,13 @@ This is a production-grade Coupon module for NestJS that supports cart/order-lev
 - ✅ **Reservation system** with TTL (15 minutes default)
 - ✅ **Idempotent redemption** with idempotency keys
 - ✅ **Fallback idempotency path** when Redis reservation is expired but DB reservation exists
-- ✅ **Admin endpoints** for campaign management and code generation
+- ✅ **Admin endpoints** for campaign management, code generation, and individual coupon status control
 - ✅ **Export functionality** (CSV, PDF, ZIP with QR codes)
 - ✅ **Comprehensive validation** (time, geo, store, user limits, quota)
 - ✅ **Transaction-safe** operations with rollback support and Redis-only rollback handling
 - ✅ **Queue + cron based paid-order metrics** for deterministic first/nth order validation
+- ✅ **Automatic coupon expiry** — hourly cron marks `ACTIVE` coupons with past `end_at` to `EXPIRED`
+- ✅ **Auto-revoke on quota exhaustion** — coupons with `global_usage_limit` are marked `REVOKED` when fully redeemed
 
 ## Installation
 
@@ -46,6 +48,7 @@ REDIS_PASSWORD=  # Optional
 # Coupon Configuration
 COUPON_RESERVATION_TTL=900  # 15 minutes in seconds
 COUPON_RESERVATION_CRON_EXPRESSION=*/10 * * * *
+COUPON_EXPIRY_CRON_EXPRESSION=0 * * * *
 COUPON_METRICS_RECONCILE_CRON=0 */2 * * *
 COUPON_METRICS_ATTEMPTS=5
 COUPON_METRICS_BACKOFF_DELAY_MS=2000
@@ -61,6 +64,7 @@ APP_URL=https://your-app.com  # For QR code generation
 
 - `COUPON_RESERVATION_TTL`: Reservation lifetime in seconds. If not redeemed before TTL expiry, the reservation is treated as stale and can be rolled back.
 - `COUPON_RESERVATION_CRON_EXPRESSION`: Cron schedule used by coupon stale-reservation cleanup.
+- `COUPON_EXPIRY_CRON_EXPRESSION`: Cron schedule for bulk-marking `ACTIVE` coupons whose `end_at` has passed as `EXPIRED`. Defaults to `0 * * * *` (every hour). See [Coupon Status Lifecycle](#coupon-status-lifecycle).
 - `COUPON_METRICS_RECONCILE_CRON`: Cron schedule for backfilling/reconciling paid-order metrics (`user_order_metrics` and `order_paid_events_dedupe`).
 - `COUPON_METRICS_ATTEMPTS`: Max retry attempts for coupon metrics queue jobs before moving to DLQ.
 - `COUPON_METRICS_BACKOFF_DELAY_MS`: Base retry delay (milliseconds) for exponential backoff in queue jobs.
@@ -103,6 +107,42 @@ import { CouponModule } from './coupon/coupon.module';
 })
 export class AppModule {}
 ```
+
+## Coupon Status Lifecycle
+
+Each coupon code has a `status` field that follows a strict lifecycle. Only two transitions are writable by admins directly; the rest are managed by the system.
+
+```
+          Creation
+             │
+       status = ACTIVE
+             │
+   ┌─────────┼───────────────────┐
+   │         │                   │
+Admin     end_at passes      global_usage_limit
+deactivates (hourly cron)    reached (on redeem)
+   │         │                   │
+INACTIVE  EXPIRED            REVOKED  ← terminal
+   │
+(admin can
+ re-activate
+ if end_at
+ not passed)
+```
+
+| Status | Set by | Reversible | Notes |
+|---|---|---|---|
+| `active` | Code generation / admin | — | Default state |
+| `inactive` | Admin (`PATCH /admin/coupons/:id/status`) | ✅ Yes | Surgical kill switch for individual codes |
+| `expired` | Hourly cron (`markExpiredCoupons`) | ❌ No | Fires when `end_at < NOW()` and `status = active` |
+| `revoked` | Redemption engine | ❌ No | Fires when `redeemed_count >= global_usage_limit` |
+
+**Important rules:**
+- `EXPIRED` and `REVOKED` are system-managed terminal states and **cannot** be set via the admin API.
+- A coupon with `status = inactive` and a future `end_at` **can** be re-activated.
+- A coupon with a past `end_at` **cannot** be re-activated (even if status is `inactive`).
+- Between cron runs (up to 1 hour), a coupon with an expired `end_at` will still fail validation at runtime — `status` column may temporarily show `active` but the coupon is not redeemable.
+- Analytics `active_coupons` / `active_codes` counts exclude time-expired coupons regardless of cron timing.
 
 ## API Endpoints
 
@@ -194,6 +234,37 @@ GET /admin/coupons/analytics/campaigns/:id?from=2026-03-01T00:00:00Z&to=2026-03-
 
 **Response fields include:**
 - campaign details and code distribution (`total`, `active`, `inactive`, `expired`, `revoked`)
+
+#### Update Individual Coupon Status
+```http
+PATCH /admin/coupons/coupons/:id/status
+Content-Type: application/json
+
+{
+  "status": "inactive"
+}
+```
+
+**Allowed values**: `"active"` or `"inactive"` only. `"expired"` and `"revoked"` are system-managed and cannot be set manually.
+
+**Validation errors (400)**:
+- Missing or empty `status` field
+- Value other than `"active"` or `"inactive"`
+- Attempting to change a `revoked` or `expired` coupon
+- Re-activating a coupon whose `end_at` has already passed
+
+**Response (200)**:
+```json
+{
+  "success": true,
+  "message": "Coupon status updated to inactive",
+  "data": {
+    "id": 42,
+    "code": "SUMMER12345678",
+    "status": "inactive"
+  }
+}
+```
 - funnel (`reserved`, `redeemed`, `rolled_back`, `failed`, `unique_redeemed_users`, `redemption_rate`)
 - financials (`total_discount_amount`, `avg_discount_amount`, `delivery_waived_count`, `orders_with_coupon`)
 - daily redemption trend and top coupon codes
@@ -428,6 +499,7 @@ Notes:
 - Rollback is idempotent and safe under retries.
 - If Redis reservation exists but DB reservation row is missing, rollback still releases quota (Redis-only rollback path).
 - For `preorder` and `nth_order` reservations already linked to an order, quota may remain consumed intentionally.
+- After each successful redemption, if the coupon has a `global_usage_limit` and `redeemed_count >= global_usage_limit`, the coupon is automatically marked `REVOKED`. This applies to single-use (`global_usage_limit = 1`) and multi-use limited coupons alike. Unlimited coupons (`global_usage_limit = null`) are never auto-revoked.
 
 ### Reservation TTL
 
