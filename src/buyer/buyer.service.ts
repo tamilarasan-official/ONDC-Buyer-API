@@ -1147,9 +1147,13 @@ export class BuyerService {
           sortOrder.toUpperCase() as "ASC" | "DESC",
         );
       } else if (sortBy === "best_sellers") {
-        queryBuilder = queryBuilder.orderBy("s.name", "ASC"); // TODO: Add order count logic
+        // Not yet implemented — fall back to distance sort
+        this.logger.warn(`sort_by=best_sellers is not yet implemented, falling back to distance sort`);
+        queryBuilder = queryBuilder.orderBy("distance", "ASC");
       } else if (sortBy === "highly_ordered") {
-        queryBuilder = queryBuilder.orderBy("s.name", "ASC"); // TODO: Add popularity logic
+        // Not yet implemented — fall back to distance sort
+        this.logger.warn(`sort_by=highly_ordered is not yet implemented, falling back to distance sort`);
+        queryBuilder = queryBuilder.orderBy("distance", "ASC");
       }
 
       // Apply pagination
@@ -1385,7 +1389,9 @@ export class BuyerService {
       } else if (sortBy === "best_sellers") {
         queryBuilder = queryBuilder.orderBy("i.is_recommended", "DESC");
       } else if (sortBy === "highly_ordered") {
-        queryBuilder = queryBuilder.orderBy("i.name", "ASC"); // TODO: Add order count logic
+        // Not yet implemented — fall back to is_recommended (same as best_sellers)
+        this.logger.warn(`sort_by=highly_ordered is not yet implemented, falling back to is_recommended sort`);
+        queryBuilder = queryBuilder.orderBy("i.is_recommended", "DESC");
       }
 
       // Apply pagination
@@ -1814,6 +1820,10 @@ export class BuyerService {
         .andWhere("o.valid_to >= :now", { now })
         .getCount();
 
+      // Fetch delivery fee from app settings (configurable, falls back to 30 if not set)
+      const deliveryFeeRaw = await this.appSettingsService.getNumber("DELIVERY_FEE", 30);
+      const deliveryFee = Number(deliveryFeeRaw ?? 30);
+
       // Format response
       const restaurantDetails: any = {
         id: restaurant.id,
@@ -1893,7 +1903,7 @@ export class BuyerService {
         is_open: storeOpenData.isOpen,
         delivery_time: deliveryTime,
         min_order_value: restaurant.configs?.[0]?.min_order_value || 0,
-        delivery_fee: 30.0, // TODO: Calculate based on distance and store config
+        delivery_fee: deliveryFee,
         phone_number: deliveryFulfillment?.contact_phone || null,
         email: deliveryFulfillment?.contact_email || null,
       };
@@ -2625,9 +2635,19 @@ export class BuyerService {
       );
 
       // Filter out empty categories if search or filters are applied
-      return categoriesWithItems.filter(
+      const filteredCategories = categoriesWithItems.filter(
         (category) => category.items.length > 0,
       );
+
+      // Sort categories: categories with preorder items first, then preserve display_rank order
+      filteredCategories.sort((a, b) => {
+        const aHasPreorder = a.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        const bHasPreorder = b.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        if (bHasPreorder !== aHasPreorder) return bHasPreorder - aHasPreorder;
+        return 0;
+      });
+
+      return filteredCategories;
     } catch (error) {
       this.logger.error(
         `❌ Error getting menu categories: ${error.message}`,
@@ -2886,6 +2906,14 @@ export class BuyerService {
 
         processedItems.push(variantMenuItem);
       }
+
+      // Sort items: preorder items first, then by rating (highest first)
+      processedItems.sort((a, b) => {
+        const aPreorder = a.is_preorder_available === true ? 1 : 0;
+        const bPreorder = b.is_preorder_available === true ? 1 : 0;
+        if (bPreorder !== aPreorder) return bPreorder - aPreorder;
+        return b.rating - a.rating;
+      });
 
       return processedItems;
     } catch (error) {
@@ -4514,8 +4542,13 @@ export class BuyerService {
           processedItems.push(variantRestaurantItem);
         }
 
-        // Sort items by rating (highest first)
-        processedItems.sort((a, b) => b.rating - a.rating);
+        // Sort items: preorder items first, then by rating (highest first)
+        processedItems.sort((a, b) => {
+          const aPreorder = a.is_preorder_available === true ? 1 : 0;
+          const bPreorder = b.is_preorder_available === true ? 1 : 0;
+          if (bPreorder !== aPreorder) return bPreorder - aPreorder;
+          return b.rating - a.rating;
+        });
 
         if (processedItems.length > 0) {
           processedCategories.push({
@@ -4528,6 +4561,14 @@ export class BuyerService {
           });
         }
       }
+
+      // Sort categories: categories with preorder items first, then preserve display_rank order
+      processedCategories.sort((a, b) => {
+        const aHasPreorder = a.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        const bHasPreorder = b.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        if (bHasPreorder !== aHasPreorder) return bHasPreorder - aHasPreorder;
+        return 0;
+      });
 
       this.logger.log(
         `✅ Found ${processedCategories.length} categories with items`,
