@@ -245,7 +245,7 @@ Response: {
 - `max_discount_amount` is **required** for percent type
 - `type_meta.nth` is required for `nth_order` type
 - `type_meta.delivery_fee_cap` is optional for `free_delivery` type
-- `priority` defaults to `0` if not provided. Higher priority coupons are selected first when multiple coupons match the same item (e.g., multiple preorder coupons for the same item_id)
+- `priority` defaults to `0` if not provided. Higher priority coupons are selected first when multiple coupons match the same item (e.g., multiple preorder coupons for the same `item_reference_id`)
 
 ---
 

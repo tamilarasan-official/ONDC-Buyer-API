@@ -673,7 +673,7 @@ export class CartService {
       .where("coupon.type = :type", { type: CouponType.PREORDER })
       .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
       .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-      .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: itemId.toString() })
+      .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: itemId.toString() })
       .andWhere(
         "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
         { storeId }
@@ -1991,7 +1991,7 @@ export class CartService {
               .where("coupon.type = :type", { type: CouponType.PREORDER })
               .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
               .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: String(cartItem.item.id) })
+              .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: String(cartItem.item.id) })
               .andWhere(
                 "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
                 { storeId: cart.store.id },
@@ -2044,12 +2044,24 @@ export class CartService {
       });
 
       if (coupon && coupon.type === CouponType.PREORDER) {
-        // If free delivery is included, set delivery fee and tax to 0
+        // If free delivery is included, apply optional delivery fee cap
         if (coupon.type_meta?.free_delivery === true) {
-          deliveryFee = 0;
-          deliveryFeeTax = 0;
-          if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
-            await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
+          const cap =
+            coupon.type_meta?.delivery_fee_cap !== undefined &&
+            coupon.type_meta?.delivery_fee_cap !== null
+              ? Number(coupon.type_meta.delivery_fee_cap)
+              : deliveryFee;
+          const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
+          deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
+          deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
+          if (
+            cart.delivery_fee !== Number(deliveryFee) ||
+            cart.delivery_fee_tax !== Number(deliveryFeeTax)
+          ) {
+            await this.cartRepository.update(cart.id, {
+              delivery_fee: deliveryFee,
+              delivery_fee_tax: deliveryFeeTax,
+            });
           }
         }
       } else if (coupon && coupon.type === CouponType.PERCENT && coupon.type_meta?.free_delivery === true) {
@@ -2082,13 +2094,25 @@ export class CartService {
           });
 
           if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
-            deliveryFee = 0;
-            deliveryFeeTax = 0;
-            if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
-              await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
+            const cap =
+              preorderCoupon.type_meta?.delivery_fee_cap !== undefined &&
+              preorderCoupon.type_meta?.delivery_fee_cap !== null
+                ? Number(preorderCoupon.type_meta.delivery_fee_cap)
+                : deliveryFee;
+            const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
+            deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
+            deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
+            if (
+              cart.delivery_fee !== Number(deliveryFee) ||
+              cart.delivery_fee_tax !== Number(deliveryFeeTax)
+            ) {
+              await this.cartRepository.update(cart.id, {
+                delivery_fee: deliveryFee,
+                delivery_fee_tax: deliveryFeeTax,
+              });
             }
             this.logger.log(
-              `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,
+              `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart, cap=${cap})`,
             );
           }
         }
@@ -2447,8 +2471,8 @@ export class CartService {
               cartCoupon &&
               cartCoupon.type === CouponType.PREORDER &&
               cartCoupon.type_meta &&
-              cartCoupon.type_meta.item_id &&
-              Number(cartCoupon.type_meta.item_id) === item.item.id
+              cartCoupon.type_meta.internal_item_id &&
+              Number(cartCoupon.type_meta.internal_item_id) === item.item.id
             ) {
               // This item matches the preorder coupon - add preorder info
               let availableSlots = 0;
@@ -2506,7 +2530,7 @@ export class CartService {
               .where("coupon.type = :type", { type: CouponType.PREORDER })
               .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
               .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.item.id.toString() })
+              .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: item.item.id.toString() })
               .andWhere(
                 "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
                 { storeId: cart.store.id }
@@ -3650,7 +3674,7 @@ export class CartService {
       return internalItemIds;
     }
 
-    const singleItemId = Number(coupon.type_meta?.item_id);
+    const singleItemId = Number(coupon.type_meta?.internal_item_id);
     if (Number.isFinite(singleItemId) && singleItemId > 0) {
       return [singleItemId];
     }

@@ -2843,4 +2843,253 @@ describe("CouponService", () => {
       expect(qr.manager.count).not.toHaveBeenCalled();
     });
   });
+
+  describe("generateCodes - preorder type", () => {
+    it("should reject preorder coupon when type_meta is missing", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when store_reference_id cannot be resolved", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-MISSING",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when item_reference_id cannot be resolved", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-MISSING",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when delivery_date is in the past", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: "2020-01-01T00:00:00Z",
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should resolve references, enrich type_meta, and set applicable_store_ids on generated coupons", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockCouponRepo.find.mockResolvedValue([]);
+      mockCouponRepo.create.mockImplementation((v: any) => v);
+      mockCouponRepo.save.mockResolvedValue([{ id: 200, code: "PREORDER1" }]);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+      mockRedisService.initializeQuota.mockResolvedValue(undefined);
+
+      const futureDate = new Date(Date.now() + 86400000 * 30).toISOString();
+
+      const result = await service.generateCodes(1, {
+        count: 1,
+        type: CouponType.PREORDER,
+        value: 15,
+        value_type: ValueType.PERCENT,
+        max_discount_amount: 300,
+        global_usage_limit: 100,
+        type_meta: {
+          store_reference_id: "STORE-REF-44",
+          item_reference_id: "ITEM-REF-123",
+          delivery_date: futureDate,
+          title: "Special Preorder",
+          free_delivery: true,
+          delivery_fee_cap: 40,
+        },
+      } as any);
+
+      expect(result.preview).toBe(false);
+      expect(result.codes).toHaveLength(1);
+
+      // Verify enriched type_meta was written onto each coupon
+      const savedCoupons = mockCouponRepo.create.mock.calls[0][0];
+      expect(savedCoupons.type_meta.internal_store_id).toBe(44);
+      expect(savedCoupons.type_meta.internal_item_id).toBe(123);
+      expect(savedCoupons.type_meta.store_reference_id).toBe("STORE-REF-44");
+      expect(savedCoupons.type_meta.item_reference_id).toBe("ITEM-REF-123");
+      expect(savedCoupons.applicable_store_ids).toEqual([44]);
+    });
+
+    it("should reject preorder coupon when store_reference_id is empty string", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "   ",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when item_reference_id is empty string", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe("validateCouponConfiguration - preorder", () => {
+    it("should return INVALID_COUPON_CONFIG when preorder coupon is missing internal_item_id", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_store_id: 44 }, // missing internal_item_id
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should return INVALID_COUPON_CONFIG when preorder coupon is missing internal_store_id", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_item_id: 123 }, // missing internal_store_id
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should pass config validation when preorder coupon has both internal IDs", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_store_id: 44, internal_item_id: 123 },
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("runValidationChecks - preorder", () => {
+    const makePreorderCoupon = (typeMeta: Record<string, any>) =>
+      ({
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        campaign: { status: "active" },
+        type_meta: typeMeta,
+      }) as any;
+
+    it("should return INVALID_COUPON_CONFIG when stored preorder coupon has no internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44 }); // no internal_item_id
+      const dto = { user_id: 1, cart_total: 500, store_id: 44 } as any;
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should return INVALID_ITEM when cart item_id does not match coupon internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44, internal_item_id: 123 });
+      const dto = { user_id: 1, cart_total: 500, store_id: 44, item_id: 999 } as any;
+      mockRedisService.getQuota.mockResolvedValue(10);
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_ITEM");
+    });
+
+    it("should pass validation when item_id matches internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44, internal_item_id: 123 });
+      const dto = { user_id: 1, cart_total: 500, store_id: 44, item_id: 123 } as any;
+      mockRedisService.getQuota.mockResolvedValue(10);
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(true);
+    });
+  });
 });

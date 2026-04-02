@@ -321,71 +321,21 @@ export class CouponService {
       }
     }
 
-    // NEW: Validate preorder coupon specific fields
+    // Validate and enrich preorder coupon specific fields
     if (dto.type === CouponType.PREORDER) {
-      const preorderTypeMeta = dto.type_meta as Record<string, any>;
-
       if (!dto.type_meta) {
         throw new BadRequestException(
           "type_meta is required for preorder coupons",
         );
       }
-
-      // Validate item_id exists
-      if (!preorderTypeMeta.item_id) {
-        throw new BadRequestException(
-          "item_id is required in type_meta for preorder coupons",
-        );
+      const preorderMetaValidation = this.validatePreorderCouponTypeMeta(
+        dto.type_meta as Record<string, any>,
+      );
+      if (!preorderMetaValidation.valid) {
+        throw new BadRequestException(preorderMetaValidation.message);
       }
-
-      const itemId = Number(preorderTypeMeta.item_id);
-      if (isNaN(itemId) || itemId <= 0) {
-        throw new BadRequestException(
-          "item_id must be a valid positive number",
-        );
-      }
-
-      const item = await this.itemRepository.findOne({
-        where: { id: itemId },
-      });
-
-      if (!item) {
-        throw new BadRequestException(`Item with ID ${itemId} not found`);
-      }
-
-      // Validate delivery_date exists
-      if (!preorderTypeMeta.delivery_date) {
-        throw new BadRequestException(
-          "delivery_date is required in type_meta for preorder coupons",
-        );
-      }
-
-      // Parse delivery_date
-      const deliveryDate = new Date(preorderTypeMeta.delivery_date);
-      if (isNaN(deliveryDate.getTime())) {
-        throw new BadRequestException(
-          "delivery_date must be a valid ISO datetime string",
-        );
-      }
-
-      // For preorder coupons, delivery_date can be after expires_at
-      // This is valid because:
-      // - expires_at: When campaign ends (no new orders can be placed)
-      // - delivery_date: When delivery happens (for orders already placed)
-      // So we don't validate delivery_date against expires_at for preorder type
-      // The delivery_date just needs to be a valid future date
-      if (deliveryDate < new Date()) {
-        throw new BadRequestException(
-          `delivery_date (${preorderTypeMeta.delivery_date}) must be a future date`,
-        );
-      }
-
-      // NOTE: We no longer require type_meta.final_price for preorder coupons.
-      // Discount and effective final price are derived from coupon.value and value_type,
-      // together with max_discount_amount, in the cart and order flows.
-
-      this.logger.log(
-        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${preorderTypeMeta.delivery_date}`,
+      dto.type_meta = await this.enrichPreorderCouponTypeMeta(
+        dto.type_meta as Record<string, any>,
       );
     }
 
@@ -449,6 +399,11 @@ export class CouponService {
         status: CouponStatus.ACTIVE,
         start_at: dto.start_at ? new Date(dto.start_at) : undefined,
         end_at: dto.expires_at ? new Date(dto.expires_at) : undefined,
+        applicable_store_ids:
+          dto.type === CouponType.PREORDER &&
+          (dto.type_meta as any)?.internal_store_id
+            ? [(dto.type_meta as any).internal_store_id]
+            : undefined,
       });
 
       return coupon;
@@ -834,9 +789,21 @@ export class CouponService {
 
     // PREORDER-specific validations
     if (coupon.type === CouponType.PREORDER) {
-      // Validate item_id matches (if provided in DTO)
-      if (coupon.type_meta?.item_id && (dto as any).item_id) {
-        if (coupon.type_meta.item_id !== (dto as any).item_id) {
+      // Guard: stored coupon must have resolved internal_item_id
+      if (!coupon.type_meta?.internal_item_id) {
+        return {
+          valid: false,
+          reason_code: "INVALID_COUPON_CONFIG",
+          message: "Invalid coupon configuration",
+        };
+      }
+
+      // Validate internal_item_id matches (if cart provides item_id)
+      if ((dto as any).item_id) {
+        if (
+          Number(coupon.type_meta.internal_item_id) !==
+          Number((dto as any).item_id)
+        ) {
           return {
             valid: false,
             reason_code: "INVALID_ITEM",
@@ -1084,6 +1051,20 @@ export class CouponService {
         coupon.type_meta,
       );
       if (!metaValidation.valid) {
+        return {
+          valid: false,
+          reason_code: "INVALID_COUPON_CONFIG",
+          message: "Invalid coupon configuration",
+        };
+      }
+    }
+
+    if (coupon.type === CouponType.PREORDER) {
+      // Stored preorder coupons must have resolved internal IDs (set at generation time)
+      if (
+        !coupon.type_meta?.internal_item_id ||
+        !coupon.type_meta?.internal_store_id
+      ) {
         return {
           valid: false,
           reason_code: "INVALID_COUPON_CONFIG",
@@ -1386,6 +1367,80 @@ export class CouponService {
         valid: false,
         message: `Unknown type_meta keys for free_delivery coupons: ${unknownKeys.join(", ")}`,
       };
+    }
+
+    return { valid: true };
+  }
+
+  private validatePreorderCouponTypeMeta(typeMeta?: Record<string, any>): {
+    valid: boolean;
+    message?: string;
+  } {
+    if (!typeMeta || typeof typeMeta !== "object") {
+      return {
+        valid: false,
+        message: "type_meta is required for preorder coupons",
+      };
+    }
+
+    if (
+      typeof typeMeta.store_reference_id !== "string" ||
+      typeMeta.store_reference_id.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "store_reference_id must be a non-empty string",
+      };
+    }
+
+    if (
+      typeof typeMeta.item_reference_id !== "string" ||
+      typeMeta.item_reference_id.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "item_reference_id must be a non-empty string",
+      };
+    }
+
+    if (
+      typeof typeMeta.delivery_date !== "string" ||
+      typeMeta.delivery_date.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "delivery_date must be a non-empty string",
+      };
+    }
+
+    if (
+      typeMeta.free_delivery !== undefined &&
+      typeof typeMeta.free_delivery !== "boolean"
+    ) {
+      return {
+        valid: false,
+        message: "free_delivery must be a boolean",
+      };
+    }
+
+    if (typeMeta.delivery_fee_cap !== undefined) {
+      if (
+        typeof typeMeta.delivery_fee_cap !== "number" ||
+        Number.isNaN(typeMeta.delivery_fee_cap) ||
+        typeMeta.delivery_fee_cap < 0
+      ) {
+        return {
+          valid: false,
+          message: "delivery_fee_cap must be a non-negative number",
+        };
+      }
+
+      if (typeMeta.free_delivery !== true) {
+        return {
+          valid: false,
+          message: "delivery_fee_cap can be used only when free_delivery is true",
+        };
+      }
     }
 
     return { valid: true };
@@ -1810,8 +1865,25 @@ export class CouponService {
           discountAmount = Math.min(coupon.value || 0, cartTotal);
         }
 
-        // Check if free delivery is included
-        deliveryWaived = coupon.type_meta?.free_delivery === true;
+        // Check if free delivery is included (with optional delivery fee cap)
+        if (coupon.type_meta?.free_delivery === true) {
+          const deliveryFeeFromContext =
+            typeof actualDeliveryFee === "number" &&
+            Number.isFinite(actualDeliveryFee) &&
+            actualDeliveryFee >= 0
+              ? actualDeliveryFee
+              : 0;
+          const cap =
+            coupon.type_meta?.delivery_fee_cap !== undefined &&
+            coupon.type_meta?.delivery_fee_cap !== null
+              ? Number(coupon.type_meta.delivery_fee_cap)
+              : deliveryFeeFromContext;
+          const waivedAmount = Math.min(
+            Math.max(deliveryFeeFromContext, 0),
+            Math.max(cap, 0),
+          );
+          deliveryWaived = waivedAmount > 0;
+        }
         break;
 
       default:
@@ -2457,6 +2529,77 @@ export class CouponService {
     typeMeta?: Record<string, any>,
   ): Promise<Record<string, any>> {
     return this.enrichPercentCouponTypeMeta(typeMeta);
+  }
+
+  private async enrichPreorderCouponTypeMeta(
+    typeMeta: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    const enrichedMeta = { ...typeMeta };
+
+    if (!enrichedMeta.store_reference_id?.trim()) {
+      throw new BadRequestException(
+        "store_reference_id is required in type_meta for preorder coupons",
+      );
+    }
+
+    if (!enrichedMeta.item_reference_id?.trim()) {
+      throw new BadRequestException(
+        "item_reference_id is required in type_meta for preorder coupons",
+      );
+    }
+
+    const store = await this.storeRepository.findOne({
+      where: { reference_id: enrichedMeta.store_reference_id.trim() },
+    });
+
+    if (!store) {
+      throw new BadRequestException(
+        `Store with reference_id '${enrichedMeta.store_reference_id}' not found`,
+      );
+    }
+
+    enrichedMeta.internal_store_id = Number(store.id);
+
+    const item = await this.itemRepository.findOne({
+      where: {
+        reference_id: enrichedMeta.item_reference_id.trim(),
+        store: { id: enrichedMeta.internal_store_id },
+      },
+      relations: ["store"],
+    });
+
+    if (!item) {
+      throw new BadRequestException(
+        `Item with reference_id '${enrichedMeta.item_reference_id}' not found for store '${enrichedMeta.store_reference_id}'`,
+      );
+    }
+
+    enrichedMeta.internal_item_id = Number(item.id);
+
+    if (!enrichedMeta.delivery_date) {
+      throw new BadRequestException(
+        "delivery_date is required in type_meta for preorder coupons",
+      );
+    }
+
+    const deliveryDate = new Date(enrichedMeta.delivery_date);
+    if (isNaN(deliveryDate.getTime())) {
+      throw new BadRequestException(
+        "delivery_date must be a valid ISO datetime string",
+      );
+    }
+
+    if (deliveryDate < new Date()) {
+      throw new BadRequestException(
+        `delivery_date (${enrichedMeta.delivery_date}) must be a future date`,
+      );
+    }
+
+    this.logger.log(
+      `✅ Preorder coupon enriched: store_reference_id=${enrichedMeta.store_reference_id} -> internal_store_id=${enrichedMeta.internal_store_id}, item_reference_id=${enrichedMeta.item_reference_id} -> internal_item_id=${enrichedMeta.internal_item_id}`,
+    );
+
+    return enrichedMeta;
   }
 
   private async validatePercentCouponScope(
