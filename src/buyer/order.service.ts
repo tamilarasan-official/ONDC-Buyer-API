@@ -665,7 +665,7 @@ export class OrderService {
       }
 
       this.logger.log(
-        `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, delivery_fee_tax=${cartToUse.delivery_fee_tax}, platform_fee=${cartToUse.platform_fee}, platform_fee_tax=${cartToUse.platform_fee_tax}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
+        `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, delivery_fee_tax=${cartToUse.delivery_fee_tax}, delivery_waived=${cartToUse.delivery_waived}, original_delivery_fee=${cartToUse.original_delivery_fee}, platform_fee=${cartToUse.platform_fee}, platform_fee_tax=${cartToUse.platform_fee_tax}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, coupon_id=${cartToUse.coupon_id}, coupon_code=${cartToUse.coupon_code}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
       );
 
       let totalTaxAmount = Number(cartToUse.tax_amount || 0) + Number(cartToUse.delivery_fee_tax || 0) + Number(cartToUse.platform_fee_tax || 0);
@@ -692,10 +692,15 @@ export class OrderService {
           delivery_fee: cartToUse.delivery_fee,
           delivery_fee_tax: cartToUse.delivery_fee_tax || 0,
           delivery_percent: cartToUse.delivery_percent || 18.00,
+          // Snapshot from cart: coupon identity + delivery waiver audit (seller-push reads these from Order)
+          delivery_waived: cartToUse.delivery_waived || false,
+          original_delivery_fee: cartToUse.original_delivery_fee,
           platform_fee: cartToUse.platform_fee || 0,
           platform_fee_tax: cartToUse.platform_fee_tax || 0,
           platform_percent: cartToUse.platform_percent || 18.00,
           discount_amount: cartToUse.discount_amount,
+          coupon_id: cartToUse.coupon_id,
+          coupon_code: cartToUse.coupon_code,
           tip_amount: cartToUse.tip_amount || 0,
           total_tax_amount: totalTaxAmount || 0,
           total_amount: cartToUse.final_amount,
@@ -745,7 +750,7 @@ export class OrderService {
       });
 
       this.logger.log(
-        `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
+        `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, delivery_waived=${savedOrder.delivery_waived}, original_delivery_fee=${savedOrder.original_delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, coupon_id=${savedOrder.coupon_id}, coupon_code=${savedOrder.coupon_code}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
       );
 
       // NEW: If preorder, redeem coupon after order is created

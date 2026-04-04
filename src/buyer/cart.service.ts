@@ -1026,6 +1026,8 @@ export class CartService {
             coupon_reservation_token: null as any,
             coupon_id: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
         }
 
@@ -1174,6 +1176,8 @@ export class CartService {
             coupon_reservation_token: null as any,
             coupon_id: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
         }
 
@@ -1291,6 +1295,8 @@ export class CartService {
             coupon_code: null as any,
             coupon_reservation_token: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
           this.logger.log(`✅ Rolled back cart-level coupon for cart ${cartId}`);
         } catch (err) {
@@ -1699,19 +1705,29 @@ export class CartService {
       deliveryTax = 0;
     }
 
-    // Check for free_delivery on the applied coupon BEFORE saving.
-    // Handles PREORDER, PERCENT, FLAT, and FREE_DELIVERY coupon types.
+    // Free delivery (after live delivery quote):
+    // - Qualifies if coupon.type === FREE_DELIVERY OR type_meta.free_delivery === true (PERCENT/FLAT/PREORDER).
+    // - No delivery_fee_cap → waive up to full quoted fee. With cap → waive min(cap, fee); remainder stays in delivery_fee.
+    // - delivery_waived = any waiver > 0; original_delivery_fee = quoted fee before waiver (audit).
+    // - Item discounts stay in discount_amount; FREE_DELIVERY-only coupons use discount_amount 0 (benefit is fee line only).
     const hasPreorderItems = cartItems.some((item) => item.is_preorder === true);
     const currentCart = await this.cartRepository.findOne({
       where: { id: cartId },
     });
+
+    let deliveryWaived = false;
+    const originalDeliveryFee = deliveryFee;
 
     if (currentCart?.coupon_id) {
       const coupon = await this.couponRepository.findOne({
         where: { id: currentCart.coupon_id },
       });
 
-      if (coupon && coupon.type_meta?.free_delivery === true) {
+      const hasFreeDelivery =
+        coupon?.type === CouponType.FREE_DELIVERY ||
+        coupon?.type_meta?.free_delivery === true;
+
+      if (coupon && hasFreeDelivery) {
         const cap =
           coupon.type_meta?.delivery_fee_cap !== undefined &&
           coupon.type_meta?.delivery_fee_cap !== null
@@ -1723,6 +1739,7 @@ export class CartService {
         );
         deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
         deliveryTax = Number(((deliveryFee * (currentCart.delivery_percent || 18)) / 100).toFixed(2));
+        deliveryWaived = waivedAmount > 0;
       }
     } else if (hasPreorderItems) {
       // FALLBACK: Check preorder item's campaign directly when no cart coupon
@@ -1744,6 +1761,7 @@ export class CartService {
           );
           deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
           deliveryTax = Number(((deliveryFee * (currentCart?.delivery_percent || 18)) / 100).toFixed(2));
+          deliveryWaived = waivedAmount > 0;
         }
       }
     }
@@ -1833,9 +1851,11 @@ export class CartService {
       delivery_fee: deliveryFee,
       delivery_fee_tax: deliveryTax,
       delivery_percent: deliveryPercent,
+      delivery_waived: deliveryWaived,
+      original_delivery_fee: deliveryWaived ? originalDeliveryFee : null as any,
       platform_fee: platformFeeForCalculation,
       platform_fee_tax: platformFeeTaxForCalculation,
-      platform_percent:18.00,
+      platform_percent: 18.00,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
       tip_amount: tipAmount,
@@ -2050,88 +2070,33 @@ export class CartService {
       }
     }
 
-    if (cart.coupon_id) {
+    // Delivery waiver: use values already computed by updateCartTotals (stored on cart entity).
+    // This avoids duplicating the free_delivery logic here. If cart.delivery_waived is true,
+    // updateCartTotals already zeroed delivery_fee and set original_delivery_fee for audit.
+    let summaryDeliveryWaived = cart.delivery_waived === true;
+    let summaryOriginalDeliveryFee = Number(cart.original_delivery_fee || 0);
+
+    // If updateCartTotals hasn't run yet (stale cart), do a defensive check
+    if (!summaryDeliveryWaived && cart.coupon_id) {
       const coupon = await this.couponRepository.findOne({
         where: { id: cart.coupon_id },
       });
 
-      if (coupon && coupon.type === CouponType.PREORDER) {
-        // If free delivery is included, apply optional delivery fee cap
-        if (coupon.type_meta?.free_delivery === true) {
-          const cap =
-            coupon.type_meta?.delivery_fee_cap !== undefined &&
-            coupon.type_meta?.delivery_fee_cap !== null
-              ? Number(coupon.type_meta.delivery_fee_cap)
-              : deliveryFee;
-          const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-          deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-          deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-          if (
-            cart.delivery_fee !== Number(deliveryFee) ||
-            cart.delivery_fee_tax !== Number(deliveryFeeTax)
-          ) {
-            await this.cartRepository.update(cart.id, {
-              delivery_fee: deliveryFee,
-              delivery_fee_tax: deliveryFeeTax,
-            });
-          }
-        }
-      } else if (coupon && coupon.type === CouponType.PERCENT && coupon.type_meta?.free_delivery === true) {
-        const cap =
-          coupon.type_meta?.delivery_fee_cap !== undefined &&
-          coupon.type_meta?.delivery_fee_cap !== null
-            ? Number(coupon.type_meta.delivery_fee_cap)
-            : deliveryFee;
-        const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-        deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-      } else if (coupon && coupon.type === CouponType.FLAT && coupon.type_meta?.free_delivery === true) {
-        const cap =
-          coupon.type_meta?.delivery_fee_cap !== undefined &&
-          coupon.type_meta?.delivery_fee_cap !== null
-            ? Number(coupon.type_meta.delivery_fee_cap)
-            : deliveryFee;
-        const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-        deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-      }
-    } else if (hasPreorderItems) {
-      // FALLBACK: Check if any preorder item has free_delivery even if coupon not applied
-      // This handles cases where item was added before preorder campaign
-      try {
-        const preorderCartItem = cart.cart_items?.find((item) => item.is_preorder === true && item.preorder_campaign_id);
-        if (preorderCartItem?.preorder_campaign_id) {
-          const preorderCoupon = await this.couponRepository.findOne({
-            where: { id: preorderCartItem.preorder_campaign_id },
-          });
+      const hasFreeDelivery =
+        coupon?.type === CouponType.FREE_DELIVERY ||
+        coupon?.type_meta?.free_delivery === true;
 
-          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
-            const cap =
-              preorderCoupon.type_meta?.delivery_fee_cap !== undefined &&
-              preorderCoupon.type_meta?.delivery_fee_cap !== null
-                ? Number(preorderCoupon.type_meta.delivery_fee_cap)
-                : deliveryFee;
-            const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-            deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-            deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-            if (
-              cart.delivery_fee !== Number(deliveryFee) ||
-              cart.delivery_fee_tax !== Number(deliveryFeeTax)
-            ) {
-              await this.cartRepository.update(cart.id, {
-                delivery_fee: deliveryFee,
-                delivery_fee_tax: deliveryFeeTax,
-              });
-            }
-            this.logger.log(
-              `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart, cap=${cap})`,
-            );
-          }
-        }
-      } catch (error) {
-        this.logger.warn(
-          `Could not check free_delivery for preorder items: ${error.message}`,
-        );
+      if (coupon && hasFreeDelivery && deliveryFee > 0) {
+        const cap =
+          coupon.type_meta?.delivery_fee_cap !== undefined &&
+          coupon.type_meta?.delivery_fee_cap !== null
+            ? Number(coupon.type_meta.delivery_fee_cap)
+            : deliveryFee;
+        const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
+        summaryOriginalDeliveryFee = deliveryFee;
+        deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
+        summaryDeliveryWaived = waivedAmount > 0;
       }
     }
 
@@ -2278,6 +2243,10 @@ export class CartService {
       delivery_fee: Number(deliveryFee.toFixed(2)),
       delivery_fee_tax: deliveryFeeTax,
       delivery_percent: deliveryPercent,
+      delivery_waived: summaryDeliveryWaived,
+      original_delivery_fee: summaryDeliveryWaived
+        ? Number(summaryOriginalDeliveryFee.toFixed(2))
+        : undefined,
       platform_fee: platformFee,
       platform_fee_tax: platformFeeTax,
       platform_percent: platformPercent,
@@ -2290,7 +2259,7 @@ export class CartService {
       final_amount: Number(finalAmount.toFixed(2)),
       estimated_delivery_time: estimatedDeliveryTime,
       applied_offer:
-        discountAmount > 0
+        discountAmount > 0 || summaryDeliveryWaived
           ? {
             id: appliedCoupon?.id || 1,
             name: appliedCoupon ? "Applied Coupon" : "Applied Offer",
@@ -2299,7 +2268,7 @@ export class CartService {
           }
           : undefined,
       applied_coupon:
-        discountAmount > 0 && appliedCoupon
+        (discountAmount > 0 || summaryDeliveryWaived) && appliedCoupon
           ? {
             ...appliedCoupon,
             discount_amount: Number(discountAmount.toFixed(2)),
@@ -2967,10 +2936,11 @@ export class CartService {
             where: { code: applyCouponDto.coupon_code },
           });
 
+          const isFreeDeliveryOnly = coupon?.type === CouponType.FREE_DELIVERY;
           cart.coupon_code = applyCouponDto.coupon_code;
           cart.coupon_reservation_token = existingToken;
           cart.coupon_id = coupon?.id;
-          cart.discount_amount = validation.discount_amount || 0;
+          cart.discount_amount = isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0);
 
           if (validation.delivery_waived) {
             cart.delivery_fee = 0;
@@ -3001,7 +2971,7 @@ export class CartService {
           );
 
           this.logger.log(
-            `✅ Coupon reapplied using existing reservation. Discount: ₹${validation.discount_amount}`,
+            `✅ Coupon reapplied using existing reservation. Discount: ₹${cart.discount_amount}, delivery_waived: ${validation.delivery_waived}`,
           );
 
           return {
@@ -3009,7 +2979,7 @@ export class CartService {
             message: "Coupon applied successfully",
             data: {
               coupon_code: applyCouponDto.coupon_code,
-              discount_amount: validation.discount_amount || 0,
+              discount_amount: isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0),
               delivery_waived: validation.delivery_waived || false,
               reservation_token: existingToken,
               coupon_validation: couponValidation,
@@ -3067,13 +3037,15 @@ export class CartService {
         where: { code: applyCouponDto.coupon_code },
       });
 
-      // Update cart with coupon details
+      // Update cart with coupon details.
+      // For FREE_DELIVERY coupons, discount_amount is 0 because the benefit is
+      // expressed through the zeroed delivery_fee, not as an item discount.
+      const isFreeDeliveryOnly = coupon?.type === CouponType.FREE_DELIVERY;
       cart.coupon_code = applyCouponDto.coupon_code;
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = coupon?.id;
-      cart.discount_amount = validation.discount_amount || 0;
+      cart.discount_amount = isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0);
 
-      // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
         cart.delivery_fee = 0;
         cart.delivery_fee_tax = 0;
@@ -3081,10 +3053,9 @@ export class CartService {
 
       await this.cartRepository.save(cart);
 
-      // Recalculate cart totals
+      // Recalculate cart totals (sets delivery_waived + original_delivery_fee)
       await this.updateCartTotals(cart.id);
 
-      // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
         where: { id: cart.id },
         relations: [
@@ -3106,7 +3077,7 @@ export class CartService {
       );
 
       this.logger.log(
-        `✅ Coupon applied successfully. Discount: ₹${validation.discount_amount}`,
+        `✅ Coupon applied successfully. Discount: ₹${cart.discount_amount}, delivery_waived: ${validation.delivery_waived}`,
       );
 
       return {
@@ -3114,7 +3085,7 @@ export class CartService {
         message: "Coupon applied successfully",
         data: {
           coupon_code: applyCouponDto.coupon_code,
-          discount_amount: validation.discount_amount || 0,
+          discount_amount: isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0),
           delivery_waived: validation.delivery_waived || false,
           reservation_token: validation.reservation_token,
           coupon_validation: couponValidation,
@@ -3477,6 +3448,8 @@ export class CartService {
       cart.coupon_reservation_token = null as any;
       cart.coupon_id = null as any;
       cart.discount_amount = 0;
+      cart.delivery_waived = false;
+      cart.original_delivery_fee = null as any;
 
       await this.cartRepository.save(cart);
 
@@ -3964,6 +3937,8 @@ export class CartService {
       coupon_reservation_token: null as any,
       coupon_id: null as any,
       discount_amount: 0,
+      delivery_waived: false,
+      original_delivery_fee: null as any,
     });
     await this.updateCartTotals(cartId);
 

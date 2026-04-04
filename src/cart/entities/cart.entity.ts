@@ -58,6 +58,14 @@ export class Cart {
   @Column({ type: "boolean", default: true })
   is_active: boolean;
 
+  /** Mirrors updateCartTotals waiver state; copied to order on place order. */
+  @Column({ type: "boolean", default: false })
+  delivery_waived: boolean;
+
+  /** Pre-waiver delivery fee when delivery_waived; cleared when coupon removed. */
+  @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
+  original_delivery_fee?: number;
+
   @Column({ type: "varchar", length: 64, nullable: true })
   coupon_code?: string;
 
