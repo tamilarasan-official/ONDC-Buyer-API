@@ -185,7 +185,8 @@ export class CartSummaryDto {
   tax_amount: number;
 
   @ApiProperty({
-    description: "Total tax amount (includes item tax, delivery tax, and platform fee tax)",
+    description:
+      "Tax included in the payable total: item tax + delivery tax + platform fee tax only when include_platform_fee is true.",
     example: 115.54,
     type: "number",
     required: false,
@@ -215,14 +216,16 @@ export class CartSummaryDto {
   max_tip_amount?: number;
 
   @ApiProperty({
-    description: "Platform fee amount (always shown for display). If include_platform_fee is false, show this amount with strikethrough and use 0 in total calculation.",
+    description:
+      "Configured platform fee from app settings (always returned). When include_platform_fee is false, strike through in UI — not added to final_amount. When true, same value is included in the total.",
     example: 50.0,
     type: "number",
   })
   platform_fee: number;
 
   @ApiProperty({
-    description: "Whether platform fee is included in final_amount calculation. If false, platform_fee is shown but not added to total (show with strikethrough in UI).",
+    description:
+      "When false, platform_fee and platform_fee_tax in the payload are for display/strikethrough only; final_amount and total_tax_amount exclude them.",
     example: true,
     type: "boolean",
   })

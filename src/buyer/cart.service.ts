@@ -1506,9 +1506,11 @@ export class CartService {
       const tipAmountValue = Number(cart.tip_amount || 0);
 
       const platformFeeConfig = await this.getPlatformFee();
-      // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
+        : 0;
+      const platformFeeTaxForCalculation = platformFeeConfig.isEnabled
+        ? platformFeeConfig.tax
         : 0;
 
       const finalAmount =
@@ -1517,8 +1519,8 @@ export class CartService {
         deliveryFeeTax +
         taxAmount +
         tipAmountValue +
-        platformFeeForCalculation + 
-        platformFeeConfig.tax -
+        platformFeeForCalculation +
+        platformFeeTaxForCalculation -
         discountAmount;
 
       cart.final_amount = Number(Math.max(0, finalAmount).toFixed(2));
@@ -1968,15 +1970,18 @@ export class CartService {
             Number(userLocation.lng),
           );
 
-          // Override delivery fee from partner quote (if present)
+          // Partner quote: refresh percent always; fee/tax only when coupon did not waive delivery.
+          // Otherwise we overwrite updateCartTotals (0/0) and inflate final_amount + DB row.
           if (deliveryInfo.charge > 0) {
-            deliveryFee = Number(deliveryInfo.charge);
-            deliveryFeeTax = Number(deliveryInfo.tax);
             deliveryPercent = Number(deliveryInfo.percent || 0);
+            if (cart.delivery_waived !== true) {
+              deliveryFee = Number(deliveryInfo.charge);
+              deliveryFeeTax = Number(deliveryInfo.tax);
+            }
           }
 
           this.logger.log(
-            `🚚 Delivery GST from API percent=${deliveryPercent}% | deliveryTax=${deliveryFeeTax} | platformTax=${platformFeeTax}`,
+            `🚚 Delivery GST from API percent=${deliveryPercent}% | deliveryFee=${deliveryFee} | deliveryTax=${deliveryFeeTax} | platformTax=${platformFeeTax} | delivery_waived=${cart.delivery_waived === true}`,
           );
         }
       }
@@ -1984,6 +1989,14 @@ export class CartService {
       this.logger.warn(
         `⚠️ Delivery pricing lookup failed — setting taxes to 0: ${err.message}`,
       );
+    }
+
+    // When updateCartTotals already applied a delivery waiver, trust cart.delivery_fee / tax
+    // for this summary (not the live API quote). Otherwise a pre-fix server or any path that
+    // merged the quote in-memory leaves delivery_waived true with non-zero fee in the response.
+    if (cart.delivery_waived === true) {
+      deliveryFee = Number(cart.delivery_fee ?? 0);
+      deliveryFeeTax = Number(cart.delivery_fee_tax ?? 0);
     }
 
     await this.cartRepository.update(cart.id, {
@@ -2235,8 +2248,18 @@ export class CartService {
       }
     }
 
-    const totalTaxAmount = taxAmount + deliveryFeeTax + platformFeeConfig.tax;
+    // Only add platform GST when platform fee is included in payable total (matches final_amount).
+    const totalTaxAmount =
+      taxAmount +
+      deliveryFeeTax +
+      (platformFeeConfig.isEnabled ? platformFeeTax : 0);
     const appliedCoupon = await this.getAppliedCouponSummary(cart);
+
+    // Summary lists configured platform fee + GST for display. When include_platform_fee is false,
+    // clients should strike these through (not in final_amount / total_tax_amount). Charged amounts
+    // remain platformFee / platformFeeTax (often 0) above for persistence and totals.
+    const platformFeeDisplay = Number(platformFeeConfig.amount.toFixed(2));
+    const platformFeeTaxDisplay = Number(platformFeeConfig.tax.toFixed(2));
 
     return {
       subtotal: Number(subtotal.toFixed(2)),
@@ -2247,8 +2270,8 @@ export class CartService {
       original_delivery_fee: summaryDeliveryWaived
         ? Number(summaryOriginalDeliveryFee.toFixed(2))
         : undefined,
-      platform_fee: platformFee,
-      platform_fee_tax: platformFeeTax,
+      platform_fee: platformFeeDisplay,
+      platform_fee_tax: platformFeeTaxDisplay,
       platform_percent: platformPercent,
       tax_amount: Number(taxAmount.toFixed(2)),
       discount_amount: Number(discountAmount.toFixed(2)),

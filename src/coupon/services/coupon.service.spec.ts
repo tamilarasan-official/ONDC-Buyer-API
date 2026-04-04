@@ -1295,6 +1295,20 @@ describe("CouponService", () => {
         } as any),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it("should accept free_delivery without value and value_type (defaults to 0 and rupees)", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockCouponRepo.find.mockResolvedValue([]);
+
+      const result = await service.generateCodes(1, {
+        count: 1,
+        preview: true,
+        type: CouponType.FREE_DELIVERY,
+      } as any);
+
+      expect(result.preview).toBe(true);
+      expect(result.codes).toHaveLength(1);
+    });
   });
 
   describe("generateCodes - code format standard", () => {
