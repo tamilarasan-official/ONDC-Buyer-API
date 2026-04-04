@@ -1020,11 +1020,11 @@ export class CartService {
             }
           }
 
-          // Clear coupon fields directly
+          // Clear coupon fields directly (use null — TypeORM skips undefined in UPDATE)
           await this.cartRepository.update(cartId, {
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
-            coupon_id: undefined,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
+            coupon_id: null as any,
             discount_amount: 0,
           });
         }
@@ -1170,9 +1170,9 @@ export class CartService {
 
           // Clear coupon fields directly (don't call removeCoupon since cart will be deactivated)
           await this.cartRepository.update(cartId, {
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
-            coupon_id: undefined,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
+            coupon_id: null as any,
             discount_amount: 0,
           });
         }
@@ -1287,9 +1287,9 @@ export class CartService {
             reason: "Cart deactivated",
           });
           await this.cartRepository.update(cartId, {
-            coupon_id: undefined,
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
+            coupon_id: null as any,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
             discount_amount: 0,
           });
           this.logger.log(`✅ Rolled back cart-level coupon for cart ${cartId}`);
@@ -1699,53 +1699,55 @@ export class CartService {
       deliveryTax = 0;
     }
 
-    // NEW: Check for preorder free delivery BEFORE saving
-    // This ensures free delivery is applied during recalculation
+    // Check for free_delivery on the applied coupon BEFORE saving.
+    // Handles PREORDER, PERCENT, FLAT, and FREE_DELIVERY coupon types.
     const hasPreorderItems = cartItems.some((item) => item.is_preorder === true);
+    const currentCart = await this.cartRepository.findOne({
+      where: { id: cartId },
+    });
 
-    if (hasPreorderItems) {
-      this.logger.log(`🛒 Cart has preorder items, checking for free_delivery...`);
-
-      // Check cart for preorder coupon
-      const currentCart = await this.cartRepository.findOne({
-        where: { id: cartId },
+    if (currentCart?.coupon_id) {
+      const coupon = await this.couponRepository.findOne({
+        where: { id: currentCart.coupon_id },
       });
 
-      if (currentCart?.coupon_id) {
-        const coupon = await this.couponRepository.findOne({
-          where: { id: currentCart.coupon_id },
+      if (coupon && coupon.type_meta?.free_delivery === true) {
+        const cap =
+          coupon.type_meta?.delivery_fee_cap !== undefined &&
+          coupon.type_meta?.delivery_fee_cap !== null
+            ? Number(coupon.type_meta.delivery_fee_cap)
+            : deliveryFee;
+        const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
+        this.logger.log(
+          `✅ Coupon ${coupon.code} (${coupon.type}) has free_delivery, waiving ₹${waivedAmount} of ₹${deliveryFee} delivery fee (cap=${cap})`,
+        );
+        deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+        deliveryTax = Number(((deliveryFee * (currentCart.delivery_percent || 18)) / 100).toFixed(2));
+      }
+    } else if (hasPreorderItems) {
+      // FALLBACK: Check preorder item's campaign directly when no cart coupon
+      const preorderCartItem = cartItems.find((item) => item.is_preorder === true && item.preorder_campaign_id);
+      if (preorderCartItem?.preorder_campaign_id) {
+        const preorderCoupon = await this.couponRepository.findOne({
+          where: { id: preorderCartItem.preorder_campaign_id },
         });
 
-        if (coupon && coupon.type === CouponType.PREORDER && coupon.type_meta?.free_delivery === true) {
+        if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
+          const cap =
+            preorderCoupon.type_meta?.delivery_fee_cap !== undefined &&
+            preorderCoupon.type_meta?.delivery_fee_cap !== null
+              ? Number(preorderCoupon.type_meta.delivery_fee_cap)
+              : deliveryFee;
+          const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
           this.logger.log(
-            `✅ Preorder has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
+            `✅ Preorder campaign has free_delivery, waiving ₹${waivedAmount} of ₹${deliveryFee} delivery fee (cap=${cap})`,
           );
-          deliveryFee = 0;
-          deliveryTax = 0;
-        }
-      } else {
-        // FALLBACK: Check preorder item's campaign directly
-        const preorderCartItem = cartItems.find((item) => item.is_preorder === true && item.preorder_campaign_id);
-        if (preorderCartItem?.preorder_campaign_id) {
-          const preorderCoupon = await this.couponRepository.findOne({
-            where: { id: preorderCartItem.preorder_campaign_id },
-          });
-
-          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
-            this.logger.log(
-              `✅ Preorder campaign has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
-            );
-            deliveryFee = 0;
-            deliveryTax = 0;
-          }
+          deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+          deliveryTax = Number(((deliveryFee * (currentCart?.delivery_percent || 18)) / 100).toFixed(2));
         }
       }
     }
 
-    // Get current tip amount and discount (preserve existing tip)
-    const currentCart = await this.cartRepository.findOne({
-      where: { id: cartId },
-    });
     const tipAmount = Number(currentCart?.tip_amount || 0);
     const discountAmount = Number(currentCart?.discount_amount || 0);
 
@@ -3470,10 +3472,10 @@ export class CartService {
         }
       }
 
-      // Remove coupon from cart
-      cart.coupon_code = undefined;
-      cart.coupon_reservation_token = undefined;
-      cart.coupon_id = undefined;
+      // Remove coupon from cart (use null, not undefined — TypeORM skips undefined in UPDATE)
+      cart.coupon_code = null as any;
+      cart.coupon_reservation_token = null as any;
+      cart.coupon_id = null as any;
       cart.discount_amount = 0;
 
       await this.cartRepository.save(cart);
@@ -3958,9 +3960,9 @@ export class CartService {
     }
 
     await this.cartRepository.update(cartId, {
-      coupon_code: undefined,
-      coupon_reservation_token: undefined,
-      coupon_id: undefined,
+      coupon_code: null as any,
+      coupon_reservation_token: null as any,
+      coupon_id: null as any,
       discount_amount: 0,
     });
     await this.updateCartTotals(cartId);
