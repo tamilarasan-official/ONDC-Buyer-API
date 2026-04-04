@@ -428,7 +428,7 @@ export class CartService {
         );
 
         finalOrderPrice = preorderPricing.final_order_price;
-        preorderDiscountAmount = preorderPricing.total_discount;
+        preorderDiscountAmount = preorderPricing.base_discount_total;
 
         this.logger.log(
           `💰 Preorder item pricing: base_price=₹${unitPrice}, final_per_unit=₹${preorderPricing.final_price_per_unit}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount}`,
@@ -476,7 +476,6 @@ export class CartService {
             await this.removeCoupon(userId);
           }
 
-          // Preorder discount for cart (already total for this line, includes quantity)
           const preorderDiscountForCart = preorderDiscountAmount;
 
           // Apply preorder coupon with correct cart total and discount
@@ -1750,24 +1749,39 @@ export class CartService {
     const tipAmount = Number(currentCart?.tip_amount || 0);
     const discountAmount = Number(currentCart?.discount_amount || 0);
 
-    // Calculate tax based on item's tax rate and type
-    // IMPORTANT: Tax is initially calculated on base_price (subtotal) for ALL items.
-    // For preorder items, discount_amount includes both base discount and the tax portion
-    // on the discounted amount, so that the customer effectively pays GST on the
-    // discounted price (balance amount) rather than on the original price.
+    // For regular items: tax on full subtotal.
+    // For preorder items: tax on the discounted subtotal so the customer
+    // pays GST on the balance amount after the coupon's flat/percent discount.
     let taxAmount = 0;
 
     for (const cartItem of cartItems) {
       if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
-        // For ALL items (including preorder), calculate tax on base_price (total_price/subtotal)
-        const itemPrice = Number(cartItem.total_price); // Base price (subtotal)
-        const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
-        taxAmount += itemTax;
+        const itemPrice = Number(cartItem.total_price);
 
-        if (cartItem.is_preorder) {
-          this.logger.log(
-            `💰 Preorder item tax calculation: item_id=${cartItem.item.id}, base_price=₹${itemPrice}, tax_rate=${cartItem.item.tax_rate}%, tax_amount=₹${itemTax}`,
-          );
+        if (cartItem.is_preorder && cartItem.preorder_campaign_id) {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: cartItem.preorder_campaign_id },
+          });
+
+          if (preorderCoupon) {
+            const pricing = this.calculatePreorderPricingBreakdown(
+              Number(cartItem.unit_price ?? itemPrice / (cartItem.quantity || 1)),
+              cartItem.quantity || 1,
+              cartItem.item.tax_rate,
+              preorderCoupon,
+            );
+            taxAmount += pricing.tax_on_discounted_subtotal;
+
+            this.logger.log(
+              `💰 Preorder item tax (on discounted subtotal): item_id=${cartItem.item.id}, base_price=₹${itemPrice}, discount=₹${pricing.base_discount_total}, discounted_subtotal=₹${(itemPrice - pricing.base_discount_total).toFixed(2)}, tax_rate=${cartItem.item.tax_rate}%, tax=₹${pricing.tax_on_discounted_subtotal}`,
+            );
+          } else {
+            const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
+            taxAmount += itemTax;
+          }
+        } else {
+          const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
+          taxAmount += itemTax;
         }
       }
     }
@@ -1963,11 +1977,9 @@ export class CartService {
     // Check if cart has preorder items (either via coupon_id or cart items)
     const hasPreorderItems = cart.cart_items?.some((item) => item.is_preorder === true);
 
-    // Calculate preorder discount if not already set in cart
-    // For preorder items: discount = base_discount + tax_saved, where:
-    //   base_discount = reduction in item base price from coupon value/value_type
-    //   tax_saved    = GST on the discounted portion of the base price
-    // This ensures the customer pays GST on the discounted base (balance amount).
+    // Calculate preorder discount if not already set in cart.
+    // Discount = base discount only (flat coupon value, not inflated with tax).
+    // Tax on the discounted subtotal is handled by updateCartTotals.
     if (hasPreorderItems && discountAmount === 0 && cart.store?.id) {
       try {
         let calculatedDiscount = 0;
@@ -2015,20 +2027,18 @@ export class CartService {
             taxRate,
             preorderCoupon,
           );
-          const itemDiscount = preorderPricing.total_discount;
+          const itemDiscount = preorderPricing.base_discount_total;
           calculatedDiscount += itemDiscount;
 
-          const itemSubtotalTotal = basePrice * quantity;
-
           this.logger.log(
-            `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, subtotal=₹${itemSubtotalTotal.toFixed(2)}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, discount_tax_component=₹${preorderPricing.discount_tax_component.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)}, total_discount=₹${itemDiscount.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
+            `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
           );
         }
 
         if (calculatedDiscount > 0) {
           discountAmount = Number(calculatedDiscount.toFixed(2));
           this.logger.log(
-            `💰 Calculated preorder discount: ₹${discountAmount} (base_discount + tax_saved for all preorder items)`,
+            `💰 Calculated preorder discount: ₹${discountAmount}`,
           );
         }
       } catch (error) {
@@ -3226,60 +3236,17 @@ export class CartService {
           cart.coupon_id = coupon?.id;
 
           if (coupon?.type === CouponType.PREORDER) {
-            // Calculate preorder discount using coupon.value/value_type
-            // For preorder items: discount = base_discount + tax_saved so that GST is
-            // charged on the discounted base (balance amount)
-            let preorderDiscount = 0;
-
             const cartItems = await this.cartItemRepository.find({
               where: { cart: { id: cart.id } },
               relations: ["item"],
             });
 
-            for (const cartItem of cartItems) {
-              if (!cartItem.is_preorder) continue;
-              const quantity = cartItem.quantity || 1;
-              const itemSubtotalPerUnit =
-                Number(cartItem.total_price || 0) / quantity;
-              const basePrice = itemSubtotalPerUnit;
-
-              const couponValue = Number(coupon.value ?? 0);
-              const valueType = (coupon.value_type ?? ValueType.RUPEES) as ValueType;
-              const maxDiscount =
-                coupon.max_discount_amount != null
-                  ? Number(coupon.max_discount_amount)
-                  : Infinity;
-
-              let itemDiscountAmount = 0;
-              if (basePrice > 0) {
-                if (valueType === ValueType.PERCENT) {
-                  const percentDiscount = (basePrice * couponValue) / 100;
-                  itemDiscountAmount = Math.min(
-                    percentDiscount,
-                    maxDiscount,
-                    basePrice,
-                  );
-                } else {
-                  itemDiscountAmount = Math.min(couponValue, basePrice);
-                }
-                itemDiscountAmount = Math.max(0, itemDiscountAmount);
-              }
-
-              const baseDiscountPerUnit = itemDiscountAmount;
-              const baseDiscountTotal = baseDiscountPerUnit * quantity;
-              const taxRate = cartItem.item.tax_rate || 0;
-              const discountTaxComponent =
-                (baseDiscountTotal * taxRate) / 100;
-              const itemDiscount = Math.max(
-                0,
-                baseDiscountTotal + discountTaxComponent,
-              );
-              preorderDiscount += itemDiscount;
-            }
-
-            cart.discount_amount = Number(preorderDiscount.toFixed(2));
+            cart.discount_amount = this.calculatePreorderDiscountForCart(
+              cartItems,
+              coupon,
+            );
             this.logger.log(
-              `💰 Preorder coupon discount (reuse): ₹${cart.discount_amount} (base_discount + tax_saved)`,
+              `💰 Preorder coupon discount (reuse): ₹${cart.discount_amount}`,
             );
           } else {
             cart.discount_amount = validation.discount_amount || 0;
@@ -3343,62 +3310,18 @@ export class CartService {
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = coupon?.id;
 
-      // For preorder coupons: calculate discount using coupon.value/value_type
-      // For preorder items: discount = base_discount + tax_saved so that GST is
-      // charged on the discounted base (balance amount)
       if (coupon?.type === CouponType.PREORDER) {
-        let preorderDiscount = 0;
-
         const cartItems = await this.cartItemRepository.find({
           where: { cart: { id: cart.id } },
           relations: ["item"],
         });
 
-        for (const cartItem of cartItems) {
-          if (!cartItem.is_preorder) continue;
-          const quantity = cartItem.quantity || 1;
-          const itemSubtotalPerUnit =
-            Number(cartItem.total_price || 0) / quantity;
-          const basePrice = itemSubtotalPerUnit;
-
-          const couponValue = Number(coupon.value ?? 0);
-          const valueType = (coupon.value_type ?? ValueType.RUPEES) as ValueType;
-          const maxDiscount =
-            coupon.max_discount_amount != null
-              ? Number(coupon.max_discount_amount)
-              : Infinity;
-
-          let itemDiscountAmount = 0;
-          if (basePrice > 0) {
-            if (valueType === ValueType.PERCENT) {
-              const percentDiscount = (basePrice * couponValue) / 100;
-              itemDiscountAmount = Math.min(
-                percentDiscount,
-                maxDiscount,
-                basePrice,
-              );
-            } else {
-              itemDiscountAmount = Math.min(couponValue, basePrice);
-            }
-            itemDiscountAmount = Math.max(0, itemDiscountAmount);
-          }
-
-          const baseDiscountPerUnit = itemDiscountAmount;
-          const baseDiscountTotal = baseDiscountPerUnit * quantity;
-          const taxRate = cartItem.item.tax_rate || 0;
-          const discountTaxComponent =
-            (baseDiscountTotal * taxRate) / 100;
-
-          const itemDiscount = Math.max(
-            0,
-            baseDiscountTotal + discountTaxComponent,
-          );
-          preorderDiscount += itemDiscount;
-        }
-
-        cart.discount_amount = Number(preorderDiscount.toFixed(2));
+        cart.discount_amount = this.calculatePreorderDiscountForCart(
+          cartItems,
+          coupon,
+        );
         this.logger.log(
-          `💰 Preorder coupon discount: ₹${cart.discount_amount} (base_discount + tax_saved)`,
+          `💰 Preorder coupon discount: ₹${cart.discount_amount}`,
         );
       } else {
         cart.discount_amount = validation.discount_amount || 0;
@@ -3426,8 +3349,8 @@ export class CartService {
 
   /**
    * Apply preorder coupon with calculated discount amount
-   * For preorder items: discount = base_discount + tax_saved
-   * (so that GST is effectively charged on the discounted base amount)
+   * For preorder items: discount = base_discount only (flat coupon value).
+   * GST is computed on the discounted subtotal in updateCartTotals.
    */
   private async applyPreorderCouponWithDiscount(
     userId: number,
@@ -3437,7 +3360,7 @@ export class CartService {
   ) {
     try {
       this.logger.log(
-        `🎟️ Applying preorder coupon ${preorderCoupon.code} with discount: ₹${discountAmount} (base_discount + tax_saved)`,
+        `🎟️ Applying preorder coupon ${preorderCoupon.code} with discount: ₹${discountAmount}`,
       );
 
       // Get user's active cart
@@ -3484,11 +3407,10 @@ export class CartService {
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = preorderCoupon.id;
 
-      // For preorder coupons: set discount_amount = base_discount + tax_saved
       cart.discount_amount = discountAmount;
 
       this.logger.log(
-        `💰 Preorder coupon discount: ₹${discountAmount} (base_discount + tax_saved)`,
+        `💰 Preorder coupon discount: ₹${discountAmount}`,
       );
 
       // If delivery is waived, set delivery fee to 0
@@ -3986,7 +3908,7 @@ export class CartService {
     if (snapshot.coupon_validation.is_valid) {
       let syncedDiscountAmount = Number(snapshot.validation?.discount_amount || 0);
 
-      // Preserve preorder discount semantics: base_discount + tax_saved.
+      // Preorder discount uses base_discount only (tax computed on discounted subtotal).
       if (snapshot.coupon?.type === CouponType.PREORDER) {
         syncedDiscountAmount = this.calculatePreorderDiscountForCart(
           cart.cart_items || [],
@@ -4071,7 +3993,7 @@ export class CartService {
         preorderCoupon,
       );
 
-      preorderDiscount += preorderPricing.total_discount;
+      preorderDiscount += preorderPricing.base_discount_total;
     }
 
     return Number(preorderDiscount.toFixed(2));
