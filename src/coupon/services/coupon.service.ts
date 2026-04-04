@@ -3059,13 +3059,14 @@ export class CouponService {
         `[${correlationId}] ⏰ Running markExpiredCoupons cron`,
       );
 
+      const now = TimezoneUtil.getCurrentISTTime();
       const result = await this.couponRepository
         .createQueryBuilder()
         .update(Coupon)
         .set({ status: CouponStatus.EXPIRED })
         .where("status = :active", { active: CouponStatus.ACTIVE })
         .andWhere("end_at IS NOT NULL")
-        .andWhere("end_at < :now", { now: new Date() })
+        .andWhere("end_at < :now", { now })
         .execute();
 
       const updated = result.affected ?? 0;
