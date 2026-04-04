@@ -248,28 +248,43 @@ export class GenerateCodesDto {
   type: CouponType;
 
   @ApiProperty({
-    description: "Discount value (rupees or percent)",
+    description:
+      "Discount value (rupees or percent). Omit for free_delivery — server defaults to 0.",
     example: 20,
+    required: false,
   })
+  @ValidateIf((o) => o.type !== CouponType.FREE_DELIVERY)
   @IsNotEmpty()
   @Type(() => Number)
   @IsNumber()
-  @ValidateIf((o) => o.value_type === ValueType.PERCENT || o.type === CouponType.PERCENT)
+  @ValidateIf(
+    (o) =>
+      o.type !== CouponType.FREE_DELIVERY &&
+      (o.value_type === ValueType.PERCENT || o.type === CouponType.PERCENT),
+  )
   @Min(1)
   @Max(100)
-  @ValidateIf((o) => o.value_type !== ValueType.PERCENT && o.type !== CouponType.PERCENT)
+  @ValidateIf(
+    (o) =>
+      o.type !== CouponType.FREE_DELIVERY &&
+      o.value_type !== ValueType.PERCENT &&
+      o.type !== CouponType.PERCENT,
+  )
   @Min(0)
-  value: number;
+  value?: number;
 
   @ApiProperty({
-    description: "Value type. Use 'percent' for percentage discount, 'rupees' for flat discount",
+    description:
+      "Value type. Omit for free_delivery — server defaults to rupees (value 0).",
     enum: ValueType,
     example: ValueType.PERCENT,
     enumName: "ValueType",
+    required: false,
   })
+  @ValidateIf((o) => o.type !== CouponType.FREE_DELIVERY)
   @IsNotEmpty()
   @IsEnum(ValueType)
-  value_type: ValueType;
+  value_type?: ValueType;
 
   @ApiProperty({
     description: "Maximum discount amount (required for percent type)",

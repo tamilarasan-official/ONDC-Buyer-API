@@ -217,6 +217,22 @@ export class CouponService {
   ): Promise<{ codes: string[]; preview: boolean }> {
     const campaign = await this.getCampaign(campaignId);
 
+    if (dto.type === CouponType.FREE_DELIVERY) {
+      if (dto.value_type === undefined || dto.value_type === null) {
+        dto.value_type = ValueType.RUPEES;
+      }
+      if (dto.value === undefined || dto.value === null) {
+        dto.value = 0;
+      }
+    } else {
+      if (dto.value === undefined || dto.value === null) {
+        throw new BadRequestException("value is required for this coupon type");
+      }
+      if (dto.value_type === undefined || dto.value_type === null) {
+        throw new BadRequestException("value_type is required for this coupon type");
+      }
+    }
+
     if (
       dto.type === CouponType.PERCENT &&
       dto.value_type !== ValueType.PERCENT

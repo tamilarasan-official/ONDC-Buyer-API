@@ -11,8 +11,8 @@ export class AddUniqueActivePreorderPerItem1776200000000
     // The partial WHERE clause ensures the constraint only applies to active preorder coupons,
     // so expired/revoked coupons for the same item do not block new campaign creation.
     await queryRunner.query(`
-      CREATE UNIQUE INDEX "uq_preorder_active_item"
-      ON "coupon" ((type_meta->>'internal_item_id'))
+      CREATE UNIQUE INDEX IF NOT EXISTS "uq_preorder_active_item"
+      ON "coupons" ((type_meta->>'internal_item_id'))
       WHERE type = 'preorder' AND status = 'active'
     `);
   }
