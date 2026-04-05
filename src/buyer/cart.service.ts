@@ -1787,7 +1787,26 @@ export class CartService {
     }
 
     const tipAmount = Number(currentCart?.tip_amount || 0);
-    const discountAmount = Number(currentCart?.discount_amount || 0);
+    let discountAmount = Number(currentCart?.discount_amount || 0);
+
+    // Item-level preorder: campaign lives on cart_item; cart.coupon_id/discount_amount may be unset.
+    // calculateCartSummary infers preorder discount for display — same must run here or GET /cart
+    // final_amount disagrees with checkout/Razorpay (tax on discounted subtotal but subtotal not reduced).
+    if (discountAmount === 0 && hasPreorderItems && cart?.store?.id) {
+      try {
+        const preorderDiscount = await this.computePreorderLineDiscountTotal(
+          cartItems,
+          cart.store.id,
+        );
+        if (preorderDiscount > 0) {
+          discountAmount = preorderDiscount;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Could not compute preorder discount in updateCartTotals: ${(error as Error).message}`,
+        );
+      }
+    }
 
     // For regular items: tax on full subtotal.
     // For preorder items: tax on the discounted subtotal so the customer
@@ -2035,68 +2054,19 @@ export class CartService {
     // Tax on the discounted subtotal is handled by updateCartTotals.
     if (hasPreorderItems && discountAmount === 0 && cart.store?.id) {
       try {
-        let calculatedDiscount = 0;
-
-        for (const cartItem of cart.cart_items || []) {
-          if (!cartItem.is_preorder || !cartItem.item) {
-            continue;
-          }
-          // Resolve coupon: by preorder_campaign_id first, then by item + store (same as formatCartData fallback)
-          let preorderCoupon: Coupon | null = null;
-          if (cartItem.preorder_campaign_id) {
-            const id = cartItem.preorder_campaign_id;
-            preorderCoupon = await this.couponRepository.findOne({
-              where: { id: typeof id === "string" ? Number(id) : id },
-            });
-          }
-          if (!preorderCoupon && cartItem.item?.id != null) {
-            const preorderCoupons = await this.couponRepository
-              .createQueryBuilder("coupon")
-              .leftJoinAndSelect("coupon.campaign", "campaign")
-              .where("coupon.type = :type", { type: CouponType.PREORDER })
-              .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
-              .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-              .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: String(cartItem.item.id) })
-              .andWhere(
-                "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
-                { storeId: cart.store.id },
-              )
-              .orderBy("coupon.priority", "DESC", "NULLS LAST")
-              .addOrderBy("coupon.created_at", "DESC")
-              .take(1)
-              .getMany();
-            preorderCoupon = preorderCoupons[0] ?? null;
-          }
-          if (!preorderCoupon || preorderCoupon.type !== CouponType.PREORDER) {
-            continue;
-          }
-
-          const quantity = cartItem.quantity || 1;
-          const basePrice = Number(cartItem.unit_price ?? 0);
-          const taxRate = Number(cartItem.item?.tax_rate ?? 0);
-          const preorderPricing = this.calculatePreorderPricingBreakdown(
-            basePrice,
-            quantity,
-            taxRate,
-            preorderCoupon,
-          );
-          const itemDiscount = preorderPricing.base_discount_total;
-          calculatedDiscount += itemDiscount;
-
-          this.logger.log(
-            `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
-          );
-        }
-
+        const calculatedDiscount = await this.computePreorderLineDiscountTotal(
+          cart.cart_items || [],
+          cart.store.id,
+        );
         if (calculatedDiscount > 0) {
-          discountAmount = Number(calculatedDiscount.toFixed(2));
+          discountAmount = calculatedDiscount;
           this.logger.log(
             `💰 Calculated preorder discount: ₹${discountAmount}`,
           );
         }
       } catch (error) {
         this.logger.warn(
-          `Could not calculate preorder discount: ${error.message}`,
+          `Could not calculate preorder discount: ${(error as Error).message}`,
         );
       }
     }
@@ -2668,6 +2638,72 @@ export class CartService {
       created_at: cart.created_at.toISOString(),
       updated_at: cart.updated_at.toISOString(),
     };
+  }
+
+  /**
+   * Base preorder discount (line total) for items with is_preorder, matching cart summary resolution.
+   */
+  private async computePreorderLineDiscountTotal(
+    cartItems: CartItem[],
+    storeId: number,
+  ): Promise<number> {
+    let calculatedDiscount = 0;
+
+    for (const cartItem of cartItems) {
+      if (!cartItem.is_preorder || !cartItem.item) {
+        continue;
+      }
+
+      let preorderCoupon: Coupon | null = null;
+      if (cartItem.preorder_campaign_id) {
+        const id = cartItem.preorder_campaign_id;
+        preorderCoupon = await this.couponRepository.findOne({
+          where: { id: typeof id === "string" ? Number(id) : id },
+        });
+      }
+      if (!preorderCoupon && cartItem.item?.id != null) {
+        const preorderCoupons = await this.couponRepository
+          .createQueryBuilder("coupon")
+          .leftJoinAndSelect("coupon.campaign", "campaign")
+          .where("coupon.type = :type", { type: CouponType.PREORDER })
+          .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+          .andWhere("campaign.status = :campaignStatus", {
+            campaignStatus: CampaignStatus.ACTIVE,
+          })
+          .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", {
+            itemId: String(cartItem.item.id),
+          })
+          .andWhere(
+            "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+            { storeId },
+          )
+          .orderBy("coupon.priority", "DESC", "NULLS LAST")
+          .addOrderBy("coupon.created_at", "DESC")
+          .take(1)
+          .getMany();
+        preorderCoupon = preorderCoupons[0] ?? null;
+      }
+      if (!preorderCoupon || preorderCoupon.type !== CouponType.PREORDER) {
+        continue;
+      }
+
+      const quantity = cartItem.quantity || 1;
+      const basePrice = Number(cartItem.unit_price ?? 0);
+      const taxRate = Number(cartItem.item?.tax_rate ?? 0);
+      const preorderPricing = this.calculatePreorderPricingBreakdown(
+        basePrice,
+        quantity,
+        taxRate,
+        preorderCoupon,
+      );
+      calculatedDiscount += preorderPricing.base_discount_total;
+
+      this.logger.log(
+        `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
+      );
+    }
+
+    return Number(calculatedDiscount.toFixed(2));
   }
 
   private calculatePreorderPricingBreakdown(
