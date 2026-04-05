@@ -478,11 +478,20 @@ export class OrderService {
           this.logger.error(
             `❌ Failed to save cart item with reservation token: ${saveError.message}. Releasing reservation.`
           );
-          if (cartItem.preorder_campaign_id && reservationToken) {
-            await this.redisCouponService.releaseReservation(
-              cartItem.preorder_campaign_id,
-              reservationToken
-            );
+          if (reservationToken) {
+            try {
+              await this.couponService.rollbackCoupon({
+                reservation_token: reservationToken,
+                reason: "Cart item save failed after preorder reserve",
+              });
+            } catch {
+              if (cartItem.preorder_campaign_id) {
+                await this.redisCouponService.releaseReservation(
+                  cartItem.preorder_campaign_id,
+                  reservationToken,
+                );
+              }
+            }
           }
           throw saveError;
         }
@@ -1052,19 +1061,29 @@ export class OrderService {
           );
 
           for (const cartItem of preorderItems) {
-            if (cartItem.preorder_campaign_id && cartItem.preorder_reservation_token) {
+            if (cartItem.preorder_reservation_token) {
               try {
-                await this.redisCouponService.releaseReservation(
-                  cartItem.preorder_campaign_id,
-                  cartItem.preorder_reservation_token
-                );
+                await this.couponService.rollbackCoupon({
+                  reservation_token: cartItem.preorder_reservation_token,
+                  reason: "Order creation failed after preorder reserve",
+                });
                 this.logger.log(
-                  `✅ Restored quota for preorder coupon ${cartItem.preorder_campaign_id} after order creation failure`
+                  `✅ Rolled back preorder reservation after order creation failure`,
                 );
               } catch (rollbackError) {
                 this.logger.error(
-                  `❌ Failed to restore quota after order creation failure: ${rollbackError.message}`
+                  `❌ Preorder rollback after order failure: ${rollbackError.message}`,
                 );
+                if (cartItem.preorder_campaign_id) {
+                  try {
+                    await this.redisCouponService.releaseReservation(
+                      cartItem.preorder_campaign_id,
+                      cartItem.preorder_reservation_token,
+                    );
+                  } catch {
+                    /* best effort */
+                  }
+                }
               }
             }
           }
@@ -1934,10 +1953,21 @@ export class OrderService {
       // Update payment status to failed
       await this.updatePaymentStatus(order.id, "failed");
 
-      // Policy: do NOT restore coupon quota for placed orders on payment failure.
-      this.logger.log(
-        `ℹ️ Skipping coupon quota restore for order ${orderId} on payment failure (preorder/nth lock policy)`,
-      );
+      // Abandoned online payment: roll back RESERVED redemptions linked to this order so quota and
+      // user can reserve again (rollbackCoupon restores Redis quota when order is not paid).
+      try {
+        await this.couponService.rollbackReservedRedemptionsForOrder(
+          order.id,
+          "Online payment failed or abandoned",
+        );
+        this.logger.log(
+          `✅ Rolled back reserved coupon redemptions for unpaid order ${orderId}`,
+        );
+      } catch (rollbackErr) {
+        this.logger.warn(
+          `⚠️ Coupon rollback after payment failure for order ${orderId}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+        );
+      }
 
       // Reactivate cart to allow user to retry payment or modify cart
       try {

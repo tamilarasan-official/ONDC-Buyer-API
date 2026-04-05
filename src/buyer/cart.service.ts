@@ -1125,18 +1125,26 @@ export class CartService {
       const cartId = cartItem.cart.id;
       const cart = cartItem.cart;
 
-      // NEW: Release reservation if preorder item has reservation token
+      // NEW: Roll back DB redemption + Redis quota (not Redis-only release — avoids RESERVED+order_id user-limit leaks)
       if (cartItem.is_preorder && cartItem.preorder_campaign_id) {
         if (cartItem.preorder_reservation_token) {
-          // Release reservation and restore quota
-          // releaseReservation() always restores quota, even if reservation expired
-          await this.redisCouponService.releaseReservation(
-            cartItem.preorder_campaign_id,
-            cartItem.preorder_reservation_token
-          );
-          this.logger.log(
-            `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id}`
-          );
+          try {
+            await this.couponService.rollbackCoupon({
+              reservation_token: cartItem.preorder_reservation_token,
+              reason: "Preorder item removed from cart",
+            });
+            this.logger.log(
+              `✅ Rolled back preorder reservation for coupon ${cartItem.preorder_campaign_id}`,
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Preorder rollback failed, falling back to Redis release: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            await this.redisCouponService.releaseReservation(
+              cartItem.preorder_campaign_id,
+              cartItem.preorder_reservation_token,
+            );
+          }
         } else {
           // No reservation token - quota was never consumed (item added but checkout never happened)
           this.logger.log(
@@ -1270,17 +1278,27 @@ export class CartService {
       );
       for (const cartItem of preorderItems) {
         try {
-          await this.redisCouponService.releaseReservation(
-            cartItem.preorder_campaign_id!,
-            cartItem.preorder_reservation_token!,
-          );
+          await this.couponService.rollbackCoupon({
+            reservation_token: cartItem.preorder_reservation_token!,
+            reason: "Cart cleared or deactivated",
+          });
           this.logger.log(
-            `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id} (cart ${cartId} deactivated)`,
+            `✅ Rolled back preorder reservation for coupon ${cartItem.preorder_campaign_id} (cart ${cartId})`,
           );
         } catch (err) {
           this.logger.warn(
-            `Failed to release preorder quota for cart ${cartId}, coupon ${cartItem.preorder_campaign_id}: ${err.message}`,
+            `Preorder rollback failed for cart ${cartId}, falling back to Redis: ${err instanceof Error ? err.message : String(err)}`,
           );
+          try {
+            await this.redisCouponService.releaseReservation(
+              cartItem.preorder_campaign_id!,
+              cartItem.preorder_reservation_token!,
+            );
+          } catch (e2) {
+            this.logger.warn(
+              `Failed to release preorder quota for cart ${cartId}: ${e2.message}`,
+            );
+          }
         }
       }
       // Rollback cart-level coupon reservation if present
