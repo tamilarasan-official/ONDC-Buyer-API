@@ -31,6 +31,7 @@ import { Item } from "../../item/entities/item.entity";
 import { Store } from "../../store/entities/store.entity";
 import { Cart } from "../../cart/entities/cart.entity";
 import { CartItem } from "../../cart/entities/cart-item.entity";
+import { Order } from "../../order/entities/order.entity";
 import { RedisCouponService } from "./redis-coupon.service";
 import { CreateCampaignDto } from "../dto/create-campaign.dto";
 import { UpdateCampaignDto } from "../dto/update-campaign.dto";
@@ -65,6 +66,8 @@ export class CouponService {
     private readonly cartRepository: Repository<Cart>,
     @InjectRepository(CartItem)
     private readonly cartItemRepository: Repository<CartItem>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly redisCouponService: RedisCouponService,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
@@ -714,29 +717,37 @@ export class CouponService {
 
     // Check per-user usage limit
     if (dto.user_id) {
+      // PREORDER: only REDEEMED counts as "used" (paid). RESERVED on unpaid orders must not block re-reserve after rollback/clear.
+      // NTH/FIRST: RESERVED+order_id still blocks parallel checkouts; ROLLED_BACK must not consume the slot forever.
       const userRedemptions =
-        coupon.type === CouponType.PREORDER ||
-        coupon.type === CouponType.NTH_ORDER ||
-        coupon.type === CouponType.FIRST_ORDER
+        coupon.type === CouponType.PREORDER
           ? await this.redemptionRepository.count({
               where: {
                 coupon_id: coupon.id,
                 user_id: dto.user_id,
-                order_id: Not(IsNull()),
-                status: In([
-                  RedemptionStatus.RESERVED,
-                  RedemptionStatus.REDEEMED,
-                  RedemptionStatus.ROLLED_BACK,
-                ]),
+                status: RedemptionStatus.REDEEMED,
               },
             })
-          : await this.redemptionRepository.count({
-              where: {
-                coupon_id: coupon.id,
-                user_id: dto.user_id,
-                status: In([RedemptionStatus.REDEEMED]),
-              },
-            });
+          : coupon.type === CouponType.NTH_ORDER ||
+              coupon.type === CouponType.FIRST_ORDER
+            ? await this.redemptionRepository.count({
+                where: {
+                  coupon_id: coupon.id,
+                  user_id: dto.user_id,
+                  order_id: Not(IsNull()),
+                  status: In([
+                    RedemptionStatus.RESERVED,
+                    RedemptionStatus.REDEEMED,
+                  ]),
+                },
+              })
+            : await this.redemptionRepository.count({
+                where: {
+                  coupon_id: coupon.id,
+                  user_id: dto.user_id,
+                  status: In([RedemptionStatus.REDEEMED]),
+                },
+              });
 
       if (userRedemptions >= coupon.user_usage_limit) {
         return {
@@ -2985,11 +2996,19 @@ export class CouponService {
           coupon.type === CouponType.NTH_ORDER) &&
         redemption.order_id != null
       ) {
-        // Keep usage consumed for placed orders even if later cancelled.
-        shouldRestoreQuota = false;
-        this.logger.log(
-          `[${correlationId}] Skipping quota restore for ${coupon.type} reservation ${dto.reservation_token} linked to order ${redemption.order_id}`,
-        );
+        const order = await this.orderRepository.findOne({
+          where: { id: redemption.order_id },
+          select: ["id", "payment_status"],
+        });
+        const paid =
+          order?.payment_status != null &&
+          String(order.payment_status).toLowerCase() === "paid";
+        if (paid) {
+          shouldRestoreQuota = false;
+          this.logger.log(
+            `[${correlationId}] Skipping quota restore for ${coupon.type} reservation ${dto.reservation_token} linked to paid order ${redemption.order_id}`,
+          );
+        }
       }
     }
 
@@ -3051,6 +3070,41 @@ export class CouponService {
     );
 
     return { success: true };
+  }
+
+  /**
+   * Roll back all RESERVED coupon rows linked to an order (e.g. online payment abandoned).
+   * Idempotent per token via rollbackCoupon.
+   */
+  async rollbackReservedRedemptionsForOrder(
+    orderId: number,
+    reason: string,
+  ): Promise<void> {
+    const correlationId = this.createCorrelationId("order-reserved-rollback");
+    const redemptions = await this.redemptionRepository.find({
+      where: {
+        order_id: orderId,
+        status: RedemptionStatus.RESERVED,
+      },
+    });
+    for (const r of redemptions) {
+      if (!r.reserved_token) {
+        continue;
+      }
+      try {
+        await this.rollbackCoupon(
+          {
+            reservation_token: r.reserved_token,
+            reason,
+          },
+          correlationId,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[${correlationId}] rollbackReservedRedemptionsForOrder: token ${r.reserved_token} — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
   }
 
   /**

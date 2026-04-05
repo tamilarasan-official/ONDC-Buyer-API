@@ -23,6 +23,7 @@ import { Item } from "../../item/entities/item.entity";
 import { Store } from "../../store/entities/store.entity";
 import { Cart } from "../../cart/entities/cart.entity";
 import { CartItem } from "../../cart/entities/cart-item.entity";
+import { Order } from "../../order/entities/order.entity";
 
 describe("CouponService", () => {
   let service: CouponService;
@@ -34,6 +35,7 @@ describe("CouponService", () => {
   let mockStoreRepo: any;
   let mockCartRepo: any;
   let mockCartItemRepo: any;
+  let mockOrderRepo: any;
   let mockRedisService: any;
   let mockDataSource: any;
   let mockConfigService: any;
@@ -96,6 +98,10 @@ describe("CouponService", () => {
       find: jest.fn(),
     };
 
+    mockOrderRepo = {
+      findOne: jest.fn(),
+    };
+
     mockRedisService = {
       initializeQuota: jest.fn(),
       initializeQuotaIfAbsent: jest.fn(),
@@ -154,6 +160,10 @@ describe("CouponService", () => {
         {
           provide: getRepositoryToken(CartItem),
           useValue: mockCartItemRepo,
+        },
+        {
+          provide: getRepositoryToken(Order),
+          useValue: mockOrderRepo,
         },
         {
           provide: RedisCouponService,
@@ -2337,7 +2347,7 @@ describe("CouponService", () => {
   });
 
   describe("rollbackCoupon - no restore policy", () => {
-    it("should mark preorder placed reservation as rolled_back without restoring quota", async () => {
+    it("should mark preorder placed reservation as rolled_back without restoring quota when order is paid", async () => {
       mockRedisService.getReservation.mockResolvedValue({
         coupon_id: 300,
       });
@@ -2353,6 +2363,11 @@ describe("CouponService", () => {
       mockCouponRepo.findOne.mockResolvedValue({
         id: 300,
         type: CouponType.PREORDER,
+      });
+
+      mockOrderRepo.findOne.mockResolvedValue({
+        id: 456,
+        payment_status: "paid",
       });
 
       mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
@@ -2377,6 +2392,44 @@ describe("CouponService", () => {
         "placed-token-1",
       );
       expect(mockRedisService.releaseReservation).not.toHaveBeenCalled();
+    });
+
+    it("should restore quota for preorder reservation linked to unpaid order", async () => {
+      mockRedisService.getReservation.mockResolvedValue({
+        coupon_id: 301,
+      });
+
+      mockRedemptionRepo.findOne.mockResolvedValue({
+        id: 998,
+        coupon_id: 301,
+        order_id: 789,
+        status: RedemptionStatus.RESERVED,
+        reserved_token: "unpaid-preorder-token",
+      });
+
+      mockCouponRepo.findOne.mockResolvedValue({
+        id: 301,
+        type: CouponType.PREORDER,
+      });
+
+      mockOrderRepo.findOne.mockResolvedValue({
+        id: 789,
+        payment_status: "pending",
+      });
+
+      mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
+      mockRedisService.releaseReservation.mockResolvedValue(true);
+
+      const result = await service.rollbackCoupon({
+        reservation_token: "unpaid-preorder-token",
+        reason: "Online payment abandoned",
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockRedisService.releaseReservation).toHaveBeenCalledWith(
+        301,
+        "unpaid-preorder-token",
+      );
     });
 
     it("should not restore quota for already rolled back reservation", async () => {
