@@ -54,14 +54,7 @@ export class BannerService {
           throw new BadRequestException("Restaurant not found");
         }
       }
-      if (promotion_type === "category_id") {
-        // promotion_id = await this.categoryRepository.findOne({ where: { reference_id: promotion_link } });
-        throw new BadRequestException("Category not supported yet");
-      }
-      if (promotion_type === "url") {
-        promotion_id = null;
-        throw new BadRequestException("URL not supported yet");
-      }
+      // organization type: no store lookup required, promotion_link and cta_button are optional
 
       // Generate file name from banner title (remove spaces and special characters)
       // Include timestamp for cache busting
