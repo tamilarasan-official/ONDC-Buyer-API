@@ -78,7 +78,7 @@ export class BannerService {
       // Generate file name from banner title (remove spaces and special characters)
       // Include timestamp for cache busting
       const timestamp = Date.now();
-      const fileName = createBannerDto.title.replace(/[^a-zA-Z0-9]/g, "");
+      const fileName = (createBannerDto.title ?? "banner").replace(/[^a-zA-Z0-9]/g, "") || "banner";
       const fileExtension = imageFile.originalname.split(".").pop();
       const s3Key = `banners/${fileName}-${timestamp}.${fileExtension}`;
 
