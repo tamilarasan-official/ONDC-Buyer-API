@@ -186,7 +186,7 @@ export class BuyerService {
       const [
         restaurantsResult,
         whatsOnYourMind,
-        promotionalBanner,
+        { promotional_banner: promotionalBanner, organization_banner: organizationBanner },
         appOperationStatus,
         homeScreenCardStyle,
         codEnabled,
@@ -245,6 +245,7 @@ export class BuyerService {
         },
         whats_on_your_mind: whatsOnYourMind,
         promotional_banner: promotionalBanner,
+        organization_banner: organizationBanner,
         app_operation_status: {
           is_open: appOperationStatus.isOpen,
           reason: appOperationStatus.reason,
@@ -617,8 +618,24 @@ export class BuyerService {
 
   /**
    * Get promotional banner data from database
+   * Returns banners split into promotional_banner (restaurant_id, category_id, url) and organization_banner (organization)
    */
-  private async getPromotionalBanner() {
+  private async getPromotionalBanner(): Promise<{
+    promotional_banner: any[];
+    organization_banner: any[];
+  }> {
+    const defaultBanner = [
+      {
+        title: "Craving Something Delicious?",
+        subtitle:
+          "Get your favorite meals delivered hot & fast—right to your doorstep.",
+        cta_button: "Order Now!",
+        image_url:
+          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
+        background_color: "#14b8a6",
+      },
+    ];
+
     try {
       // Get all active banners ordered by sequence
       const banners = await this.bannerRepository.find({
@@ -629,21 +646,11 @@ export class BuyerService {
       // Return default banner if no active banners found
       if (!banners || banners.length === 0) {
         this.logger.warn("No active banners found, returning default banner");
-        return [
-          {
-            title: "Craving Something Delicious?",
-            subtitle:
-              "Get your favorite meals delivered hot & fast—right to your doorstep.",
-            cta_button: "Order Now!",
-            image_url:
-              "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-            background_color: "#14b8a6",
-          },
-        ];
+        return { promotional_banner: defaultBanner, organization_banner: [] };
       }
 
-      // Return all banner data from database
-      return Promise.all(
+      // Map all banners to their response shape
+      const mapped = await Promise.all(
         banners.map(async (banner) => {
           if (banner.promotion_type === "restaurant_id") {
             const restaurant = await this.storeRepository.findOne({
@@ -658,12 +665,37 @@ export class BuyerService {
               cta_button: banner.cta_button || undefined,
               image_url: banner.image_url,
               background_color: banner.background_color || undefined,
-              promotion_type: banner.promotion_type || undefined,
+              promotion_type: banner.promotion_type,
               promotion_link:
                 restaurant?.id?.toString() || banner.promotion_link || undefined,
               sequence: banner.sequence,
             };
+          } else if (banner.promotion_type === "category_id") {
+            // category_id: pass promotion_link as-is (category identifier)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
+          } else if (banner.promotion_type === "url") {
+            // url: pass promotion_link as-is (external URL)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
           } else {
+            // organization and any other types
             return {
               title: banner.title,
               subtitle: banner.subtitle || undefined,
@@ -677,23 +709,23 @@ export class BuyerService {
           }
         }),
       );
+
+      // Split into promotional (non-organization) and organization banners
+      const validBanners = mapped.filter((b) => b !== null);
+      const promotional_banner = validBanners.filter(
+        (b) => b.promotion_type !== "organization",
+      );
+      const organization_banner = validBanners.filter(
+        (b) => b.promotion_type === "organization",
+      );
+
+      return { promotional_banner, organization_banner };
     } catch (error) {
       this.logger.error(
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      // Return default banner on error
-      return [
-        {
-          title: "Craving Something Delicious?",
-          subtitle:
-            "Get your favorite meals delivered hot & fast—right to your doorstep.",
-          cta_button: "Order Now!",
-          image_url:
-            "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-          background_color: "#14b8a6",
-        },
-      ];
+      return { promotional_banner: defaultBanner, organization_banner: [] };
     }
   }
 

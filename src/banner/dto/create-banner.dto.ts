@@ -1,6 +1,6 @@
 import {
   IsBoolean,
-  IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -54,13 +54,13 @@ export class CreateBannerDto {
 
   @ApiProperty({
     description:
-      "Promotion type - defines what happens when user clicks the banner: restaurant_id (navigates to restaurant detail page), category_id (navigates to category listing), url (opens external link)",
+      "Promotion type - defines what happens when user clicks the banner: restaurant_id (navigates to restaurant detail page), category_id (navigates to category page), url (opens external URL), organization (links to organization page)",
     example: "restaurant_id",
-    enum: ["restaurant_id", "category_id", "url"],
+    enum: ["restaurant_id", "category_id", "url", "organization"],
     required: false,
   })
   @IsOptional()
-  @IsEnum(["restaurant_id", "category_id", "url"])
+  @IsIn(["restaurant_id", "category_id", "url", "organization"])
   promotion_type?: string;
 
   @ApiProperty({
