@@ -53,6 +53,25 @@ export class BannerService {
         if (!promotion_id) {
           throw new BadRequestException("Restaurant not found");
         }
+      } else if (promotion_type === "category_id") {
+        if (!promotion_link) {
+          throw new BadRequestException(
+            "promotion_link is required for category_id type",
+          );
+        }
+      } else if (promotion_type === "url") {
+        if (!promotion_link) {
+          throw new BadRequestException(
+            "promotion_link is required for url type",
+          );
+        }
+        try {
+          new URL(promotion_link);
+        } catch {
+          throw new BadRequestException(
+            "promotion_link must be a valid URL for url type",
+          );
+        }
       }
       // organization type: no store lookup required, promotion_link and cta_button are optional
 

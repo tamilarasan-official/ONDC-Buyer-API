@@ -31,7 +31,7 @@ export class Banner {
     type: "varchar",
     length: 50,
     nullable: true,
-    enum: ["restaurant_id", "organization"],
+    enum: ["restaurant_id", "category_id", "url", "organization"],
   })
   promotion_type?: string;
 

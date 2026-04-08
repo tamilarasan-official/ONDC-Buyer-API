@@ -618,7 +618,7 @@ export class BuyerService {
 
   /**
    * Get promotional banner data from database
-   * Returns banners split into promotional_banner (restaurant_id) and organization_banner (organization)
+   * Returns banners split into promotional_banner (restaurant_id, category_id, url) and organization_banner (organization)
    */
   private async getPromotionalBanner(): Promise<{
     promotional_banner: any[];
@@ -670,7 +670,32 @@ export class BuyerService {
                 restaurant?.id?.toString() || banner.promotion_link || undefined,
               sequence: banner.sequence,
             };
+          } else if (banner.promotion_type === "category_id") {
+            // category_id: pass promotion_link as-is (category identifier)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
+          } else if (banner.promotion_type === "url") {
+            // url: pass promotion_link as-is (external URL)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
           } else {
+            // organization and any other types
             return {
               title: banner.title,
               subtitle: banner.subtitle || undefined,
