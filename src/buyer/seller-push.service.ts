@@ -289,12 +289,22 @@ export class SellerPushService {
       pickup_date_time: "",
       payment_method: order.payment_method,
       payment_status: order.payment_status === "paid" ? "received" : "pending",
+      // Amounts match order row: delivery_charge is post-waiver; original_delivery_fee + delivery_waived explain reductions; coupon_* from order snapshot.
       delivery_charge: Number(order.delivery_fee || 0).toFixed(2),
+      delivery_waived: order.delivery_waived || false,
+      original_delivery_fee: order.delivery_waived
+        ? Number(order.original_delivery_fee || 0).toFixed(2)
+        : undefined,
       platform_charge: Number(order.platform_fee || 0).toFixed(2),
       delivery_percent: Number(order.delivery_percent || 18.00).toFixed(2),
       platform_percent: Number(order.platform_percent || 18.00).toFixed(2),
       delivery_fee_tax: Number(order.delivery_fee_tax || 0).toFixed(2),
       platform_fee_tax: Number(order.platform_fee_tax || 0).toFixed(2),
+      coupon_id:
+        order.coupon_id !== undefined && order.coupon_id !== null
+          ? Number(order.coupon_id)
+          : undefined,
+      coupon_code: order.coupon_code || undefined,
       discount_amount: Number(order.discount_amount || 0).toFixed(2),
       tax_amount: Number(order.tax_amount || 0).toFixed(2),
       total_tax_amount: Number(order.total_tax_amount || 0).toFixed(2),

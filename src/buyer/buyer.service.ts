@@ -186,7 +186,7 @@ export class BuyerService {
       const [
         restaurantsResult,
         whatsOnYourMind,
-        promotionalBanner,
+        { promotional_banner: promotionalBanner, organization_banner: organizationBanner },
         appOperationStatus,
         homeScreenCardStyle,
         codEnabled,
@@ -245,6 +245,7 @@ export class BuyerService {
         },
         whats_on_your_mind: whatsOnYourMind,
         promotional_banner: promotionalBanner,
+        organization_banner: organizationBanner,
         app_operation_status: {
           is_open: appOperationStatus.isOpen,
           reason: appOperationStatus.reason,
@@ -617,8 +618,37 @@ export class BuyerService {
 
   /**
    * Get promotional banner data from database
+   * Returns banners split into promotional_banner (restaurant_id, category_id, url) and organization_banner (organization)
    */
-  private async getPromotionalBanner() {
+  private async getPromotionalBanner(): Promise<{
+    promotional_banner: any[];
+    organization_banner: any[];
+  }> {
+    const defaultBanner = [
+      {
+        title: "Craving Something Delicious?",
+        subtitle:
+          "Get your favorite meals delivered hot & fast—right to your doorstep.",
+        cta_button: "Order Now!",
+        image_url:
+          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
+        background_color: "#14b8a6",
+      },
+    ];
+
+    const defaultOrganizationBanner = [
+      {
+        title: "50% OFF",
+        subtitle:
+          "Fresh flavours, delivered fast — order now and save big on every bite.",
+        image_url:
+          "https://in-maa-1.linodeobjects.com/sqc-bucket/staging/banners/50OFF-1775645094098.jpg",
+        background_color: "#8b1d2c",
+        promotion_type: "organization",
+        sequence: 1,
+      },
+    ];
+
     try {
       // Get all active banners ordered by sequence
       const banners = await this.bannerRepository.find({
@@ -629,21 +659,11 @@ export class BuyerService {
       // Return default banner if no active banners found
       if (!banners || banners.length === 0) {
         this.logger.warn("No active banners found, returning default banner");
-        return [
-          {
-            title: "Craving Something Delicious?",
-            subtitle:
-              "Get your favorite meals delivered hot & fast—right to your doorstep.",
-            cta_button: "Order Now!",
-            image_url:
-              "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-            background_color: "#14b8a6",
-          },
-        ];
+        return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
       }
 
-      // Return all banner data from database
-      return Promise.all(
+      // Map all banners to their response shape
+      const mapped = await Promise.all(
         banners.map(async (banner) => {
           if (banner.promotion_type === "restaurant_id") {
             const restaurant = await this.storeRepository.findOne({
@@ -658,12 +678,37 @@ export class BuyerService {
               cta_button: banner.cta_button || undefined,
               image_url: banner.image_url,
               background_color: banner.background_color || undefined,
-              promotion_type: banner.promotion_type || undefined,
+              promotion_type: banner.promotion_type,
               promotion_link:
                 restaurant?.id?.toString() || banner.promotion_link || undefined,
               sequence: banner.sequence,
             };
+          } else if (banner.promotion_type === "category_id") {
+            // category_id: pass promotion_link as-is (category identifier)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
+          } else if (banner.promotion_type === "url") {
+            // url: pass promotion_link as-is (external URL)
+            return {
+              title: banner.title,
+              subtitle: banner.subtitle || undefined,
+              cta_button: banner.cta_button || undefined,
+              image_url: banner.image_url,
+              background_color: banner.background_color || undefined,
+              promotion_type: banner.promotion_type,
+              promotion_link: banner.promotion_link || undefined,
+              sequence: banner.sequence,
+            };
           } else {
+            // organization and any other types
             return {
               title: banner.title,
               subtitle: banner.subtitle || undefined,
@@ -677,23 +722,29 @@ export class BuyerService {
           }
         }),
       );
+
+      // Split into promotional (non-organization) and organization banners
+      const validBanners = mapped.filter((b) => b !== null);
+      const promotional_banner = validBanners.filter(
+        (b) => b.promotion_type !== "organization",
+      );
+      const organization_banner = validBanners.filter(
+        (b) => b.promotion_type === "organization",
+      );
+
+      return {
+        promotional_banner,
+        organization_banner:
+          organization_banner.length > 0
+            ? organization_banner
+            : defaultOrganizationBanner,
+      };
     } catch (error) {
       this.logger.error(
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      // Return default banner on error
-      return [
-        {
-          title: "Craving Something Delicious?",
-          subtitle:
-            "Get your favorite meals delivered hot & fast—right to your doorstep.",
-          cta_button: "Order Now!",
-          image_url:
-            "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-          background_color: "#14b8a6",
-        },
-      ];
+      return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
     }
   }
 
@@ -1147,9 +1198,13 @@ export class BuyerService {
           sortOrder.toUpperCase() as "ASC" | "DESC",
         );
       } else if (sortBy === "best_sellers") {
-        queryBuilder = queryBuilder.orderBy("s.name", "ASC"); // TODO: Add order count logic
+        // Not yet implemented — fall back to distance sort
+        this.logger.warn(`sort_by=best_sellers is not yet implemented, falling back to distance sort`);
+        queryBuilder = queryBuilder.orderBy("distance", "ASC");
       } else if (sortBy === "highly_ordered") {
-        queryBuilder = queryBuilder.orderBy("s.name", "ASC"); // TODO: Add popularity logic
+        // Not yet implemented — fall back to distance sort
+        this.logger.warn(`sort_by=highly_ordered is not yet implemented, falling back to distance sort`);
+        queryBuilder = queryBuilder.orderBy("distance", "ASC");
       }
 
       // Apply pagination
@@ -1385,7 +1440,9 @@ export class BuyerService {
       } else if (sortBy === "best_sellers") {
         queryBuilder = queryBuilder.orderBy("i.is_recommended", "DESC");
       } else if (sortBy === "highly_ordered") {
-        queryBuilder = queryBuilder.orderBy("i.name", "ASC"); // TODO: Add order count logic
+        // Not yet implemented — fall back to is_recommended (same as best_sellers)
+        this.logger.warn(`sort_by=highly_ordered is not yet implemented, falling back to is_recommended sort`);
+        queryBuilder = queryBuilder.orderBy("i.is_recommended", "DESC");
       }
 
       // Apply pagination
@@ -1473,7 +1530,7 @@ export class BuyerService {
         .where("coupon.type = :type", { type: CouponType.PREORDER })
         .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
         .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-        .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.id.toString() })
+        .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: item.id.toString() })
         .andWhere(
           "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
           { storeId }
@@ -1814,6 +1871,10 @@ export class BuyerService {
         .andWhere("o.valid_to >= :now", { now })
         .getCount();
 
+      // Fetch delivery fee from app settings (configurable, falls back to 30 if not set)
+      const deliveryFeeRaw = await this.appSettingsService.getNumber("DELIVERY_FEE", 30);
+      const deliveryFee = Number(deliveryFeeRaw ?? 30);
+
       // Format response
       const restaurantDetails: any = {
         id: restaurant.id,
@@ -1893,7 +1954,7 @@ export class BuyerService {
         is_open: storeOpenData.isOpen,
         delivery_time: deliveryTime,
         min_order_value: restaurant.configs?.[0]?.min_order_value || 0,
-        delivery_fee: 30.0, // TODO: Calculate based on distance and store config
+        delivery_fee: deliveryFee,
         phone_number: deliveryFulfillment?.contact_phone || null,
         email: deliveryFulfillment?.contact_email || null,
       };
@@ -2625,9 +2686,19 @@ export class BuyerService {
       );
 
       // Filter out empty categories if search or filters are applied
-      return categoriesWithItems.filter(
+      const filteredCategories = categoriesWithItems.filter(
         (category) => category.items.length > 0,
       );
+
+      // Sort categories: categories with preorder items first, then preserve display_rank order
+      filteredCategories.sort((a, b) => {
+        const aHasPreorder = a.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        const bHasPreorder = b.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        if (bHasPreorder !== aHasPreorder) return bHasPreorder - aHasPreorder;
+        return 0;
+      });
+
+      return filteredCategories;
     } catch (error) {
       this.logger.error(
         `❌ Error getting menu categories: ${error.message}`,
@@ -2886,6 +2957,14 @@ export class BuyerService {
 
         processedItems.push(variantMenuItem);
       }
+
+      // Sort items: preorder items first, then by rating (highest first)
+      processedItems.sort((a, b) => {
+        const aPreorder = a.is_preorder_available === true ? 1 : 0;
+        const bPreorder = b.is_preorder_available === true ? 1 : 0;
+        if (bPreorder !== aPreorder) return bPreorder - aPreorder;
+        return b.rating - a.rating;
+      });
 
       return processedItems;
     } catch (error) {
@@ -4514,8 +4593,13 @@ export class BuyerService {
           processedItems.push(variantRestaurantItem);
         }
 
-        // Sort items by rating (highest first)
-        processedItems.sort((a, b) => b.rating - a.rating);
+        // Sort items: preorder items first, then by rating (highest first)
+        processedItems.sort((a, b) => {
+          const aPreorder = a.is_preorder_available === true ? 1 : 0;
+          const bPreorder = b.is_preorder_available === true ? 1 : 0;
+          if (bPreorder !== aPreorder) return bPreorder - aPreorder;
+          return b.rating - a.rating;
+        });
 
         if (processedItems.length > 0) {
           processedCategories.push({
@@ -4528,6 +4612,14 @@ export class BuyerService {
           });
         }
       }
+
+      // Sort categories: categories with preorder items first, then preserve display_rank order
+      processedCategories.sort((a, b) => {
+        const aHasPreorder = a.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        const bHasPreorder = b.items.some((i: any) => i.is_preorder_available === true) ? 1 : 0;
+        if (bHasPreorder !== aHasPreorder) return bHasPreorder - aHasPreorder;
+        return 0;
+      });
 
       this.logger.log(
         `✅ Found ${processedCategories.length} categories with items`,

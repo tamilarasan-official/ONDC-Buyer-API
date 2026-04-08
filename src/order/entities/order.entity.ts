@@ -57,8 +57,8 @@ export class Order {
   @Column({ type: "bigint", nullable: true })
   delivery_alternate_phone: number;
 
-  @Column({ type: "varchar", length: 20, default: "pending" })
-  status: string; // pending, confirmed, preparing, out_for_delivery, delivered, cancelled
+  @Column({ type: "varchar", length: 50, default: "pending" })
+  status: string; // buyer + seller pipeline statuses (aligned with order_tracking.status width)
 
   @Column({ type: "decimal", precision: 10, scale: 2 })
   subtotal: number;
@@ -89,6 +89,22 @@ export class Order {
 
   @Column({ type: "decimal", precision: 10, scale: 2 })
   discount_amount: number;
+
+  /** True if coupon waived any part of delivery (full or capped); see original_delivery_fee + delivery_fee. */
+  @Column({ type: "boolean", default: false })
+  delivery_waived: boolean;
+
+  /** Quoted delivery fee before waiver; set when delivery_waived so zero delivery_fee is explainable. */
+  @Column({ type: "decimal", precision: 10, scale: 2, nullable: true })
+  original_delivery_fee?: number;
+
+  /** Applied coupon row id at checkout (complements coupon_redemptions). */
+  @Column({ type: "bigint", nullable: true })
+  coupon_id?: number;
+
+  /** Applied coupon code at checkout. */
+  @Column({ type: "varchar", length: 64, nullable: true })
+  coupon_code?: string;
 
   @Column({ type: "decimal", precision: 10, scale: 2, default: 0 })
   tip_amount: number;

@@ -31,6 +31,7 @@ import { Item } from "../../item/entities/item.entity";
 import { Store } from "../../store/entities/store.entity";
 import { Cart } from "../../cart/entities/cart.entity";
 import { CartItem } from "../../cart/entities/cart-item.entity";
+import { Order } from "../../order/entities/order.entity";
 import { RedisCouponService } from "./redis-coupon.service";
 import { CreateCampaignDto } from "../dto/create-campaign.dto";
 import { UpdateCampaignDto } from "../dto/update-campaign.dto";
@@ -65,12 +66,15 @@ export class CouponService {
     private readonly cartRepository: Repository<Cart>,
     @InjectRepository(CartItem)
     private readonly cartItemRepository: Repository<CartItem>,
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
     private readonly redisCouponService: RedisCouponService,
     private readonly dataSource: DataSource,
     private readonly configService: ConfigService,
     private readonly schedulerRegistry: SchedulerRegistry,
   ) {
     this.registerAutoRollbackCron();
+    this.registerExpiryMarkingCron();
   }
 
   /**
@@ -105,6 +109,31 @@ export class CouponService {
 
     this.logger.log(
       `Registered auto-rollback cron with expression "${expr}" (Asia/Kolkata)`,
+    );
+  }
+
+  /**
+   * Register a cron job that marks coupons as EXPIRED when their end_at has passed.
+   * Env: COUPON_EXPIRY_CRON_EXPRESSION (default: every hour at minute 0)
+   */
+  private registerExpiryMarkingCron() {
+    const expr =
+      this.configService.get<string>("COUPON_EXPIRY_CRON_EXPRESSION") ||
+      "0 * * * *"; // default: every hour
+
+    const job = new CronJob(
+      expr,
+      () => { void this.markExpiredCoupons(); },
+      null,
+      false,
+      "Asia/Kolkata",
+    );
+
+    this.schedulerRegistry.addCronJob("mark_expired_coupons", job);
+    job.start();
+
+    this.logger.log(
+      `Registered expiry-marking cron with expression "${expr}" (Asia/Kolkata)`,
     );
   }
 
@@ -190,6 +219,22 @@ export class CouponService {
     dto: GenerateCodesDto,
   ): Promise<{ codes: string[]; preview: boolean }> {
     const campaign = await this.getCampaign(campaignId);
+
+    if (dto.type === CouponType.FREE_DELIVERY) {
+      if (dto.value_type === undefined || dto.value_type === null) {
+        dto.value_type = ValueType.RUPEES;
+      }
+      if (dto.value === undefined || dto.value === null) {
+        dto.value = 0;
+      }
+    } else {
+      if (dto.value === undefined || dto.value === null) {
+        throw new BadRequestException("value is required for this coupon type");
+      }
+      if (dto.value_type === undefined || dto.value_type === null) {
+        throw new BadRequestException("value_type is required for this coupon type");
+      }
+    }
 
     if (
       dto.type === CouponType.PERCENT &&
@@ -295,72 +340,59 @@ export class CouponService {
       }
     }
 
-    // NEW: Validate preorder coupon specific fields
+    // Validate and enrich preorder coupon specific fields
     if (dto.type === CouponType.PREORDER) {
-      const preorderTypeMeta = dto.type_meta as Record<string, any>;
-
       if (!dto.type_meta) {
         throw new BadRequestException(
           "type_meta is required for preorder coupons",
         );
       }
 
-      // Validate item_id exists
-      if (!preorderTypeMeta.item_id) {
+      // PREORDER coupons must be generated one at a time — each campaign is a single unique code.
+      // count > 1 creates N independent quota pools for the same item, causing overselling.
+      if (dto.count > 1) {
         throw new BadRequestException(
-          "item_id is required in type_meta for preorder coupons",
+          "PREORDER coupons must be generated one at a time (count must be 1). Each preorder campaign requires exactly one coupon code.",
         );
       }
 
-      const itemId = Number(preorderTypeMeta.item_id);
-      if (isNaN(itemId) || itemId <= 0) {
+      // global_usage_limit is mandatory for PREORDER — it is the slot count for the campaign.
+      // Without it, the preorder has no capacity control and allows unlimited reservations.
+      if (!dto.global_usage_limit || dto.global_usage_limit < 1) {
         throw new BadRequestException(
-          "item_id must be a valid positive number",
+          "global_usage_limit is required for PREORDER coupons and must be at least 1. It defines the maximum number of preorder slots available.",
         );
       }
 
-      const item = await this.itemRepository.findOne({
-        where: { id: itemId },
-      });
-
-      if (!item) {
-        throw new BadRequestException(`Item with ID ${itemId} not found`);
-      }
-
-      // Validate delivery_date exists
-      if (!preorderTypeMeta.delivery_date) {
-        throw new BadRequestException(
-          "delivery_date is required in type_meta for preorder coupons",
-        );
-      }
-
-      // Parse delivery_date
-      const deliveryDate = new Date(preorderTypeMeta.delivery_date);
-      if (isNaN(deliveryDate.getTime())) {
-        throw new BadRequestException(
-          "delivery_date must be a valid ISO datetime string",
-        );
-      }
-
-      // For preorder coupons, delivery_date can be after expires_at
-      // This is valid because:
-      // - expires_at: When campaign ends (no new orders can be placed)
-      // - delivery_date: When delivery happens (for orders already placed)
-      // So we don't validate delivery_date against expires_at for preorder type
-      // The delivery_date just needs to be a valid future date
-      if (deliveryDate < new Date()) {
-        throw new BadRequestException(
-          `delivery_date (${preorderTypeMeta.delivery_date}) must be a future date`,
-        );
-      }
-
-      // NOTE: We no longer require type_meta.final_price for preorder coupons.
-      // Discount and effective final price are derived from coupon.value and value_type,
-      // together with max_discount_amount, in the cart and order flows.
-
-      this.logger.log(
-        `✅ Preorder coupon validation passed: item_id=${itemId}, delivery_date=${preorderTypeMeta.delivery_date}`,
+      const preorderMetaValidation = this.validatePreorderCouponTypeMeta(
+        dto.type_meta as Record<string, any>,
       );
+      if (!preorderMetaValidation.valid) {
+        throw new BadRequestException(preorderMetaValidation.message);
+      }
+      dto.type_meta = await this.enrichPreorderCouponTypeMeta(
+        dto.type_meta as Record<string, any>,
+      );
+
+      // Guard: Only one active PREORDER coupon per item is allowed at a time.
+      // Multiple active campaigns for the same item split quota and can cause overselling.
+      const internalItemId = (dto.type_meta as any)?.internal_item_id;
+      if (internalItemId) {
+        const existingActive = await this.couponRepository
+          .createQueryBuilder("c")
+          .where("c.type = :type", { type: CouponType.PREORDER })
+          .andWhere("c.status = :status", { status: CouponStatus.ACTIVE })
+          .andWhere("c.type_meta->>'internal_item_id' = :itemId", {
+            itemId: String(internalItemId),
+          })
+          .getOne();
+
+        if (existingActive) {
+          throw new BadRequestException(
+            `An active preorder campaign already exists for this item (coupon id: ${existingActive.id}). Revoke or expire it before creating a new one.`,
+          );
+        }
+      }
     }
 
     const codeLength = dto.length || 8;
@@ -423,6 +455,11 @@ export class CouponService {
         status: CouponStatus.ACTIVE,
         start_at: dto.start_at ? new Date(dto.start_at) : undefined,
         end_at: dto.expires_at ? new Date(dto.expires_at) : undefined,
+        applicable_store_ids:
+          dto.type === CouponType.PREORDER &&
+          (dto.type_meta as any)?.internal_store_id
+            ? [(dto.type_meta as any).internal_store_id]
+            : undefined,
       });
 
       return coupon;
@@ -662,10 +699,13 @@ export class CouponService {
     }
 
     // Check store eligibility
+    // NOTE: applicable_store_ids is bigint[] in Postgres; the pg driver returns bigint values as
+    // strings, so the array may contain "113" while dto.store_id is the number 113.
+    // Use Number() on both sides to avoid strict-equality type mismatch.
     if (coupon.applicable_store_ids && coupon.applicable_store_ids.length > 0) {
       if (
         !dto.store_id ||
-        !coupon.applicable_store_ids.includes(dto.store_id)
+        !coupon.applicable_store_ids.map(Number).includes(Number(dto.store_id))
       ) {
         return {
           valid: false,
@@ -677,27 +717,37 @@ export class CouponService {
 
     // Check per-user usage limit
     if (dto.user_id) {
+      // PREORDER: only REDEEMED counts as "used" (paid). RESERVED on unpaid orders must not block re-reserve after rollback/clear.
+      // NTH/FIRST: RESERVED+order_id still blocks parallel checkouts; ROLLED_BACK must not consume the slot forever.
       const userRedemptions =
-        coupon.type === CouponType.PREORDER || coupon.type === CouponType.NTH_ORDER
+        coupon.type === CouponType.PREORDER
           ? await this.redemptionRepository.count({
               where: {
                 coupon_id: coupon.id,
                 user_id: dto.user_id,
-                order_id: Not(IsNull()),
-                status: In([
-                  RedemptionStatus.RESERVED,
-                  RedemptionStatus.REDEEMED,
-                  RedemptionStatus.ROLLED_BACK,
-                ]),
+                status: RedemptionStatus.REDEEMED,
               },
             })
-          : await this.redemptionRepository.count({
-              where: {
-                coupon_id: coupon.id,
-                user_id: dto.user_id,
-                status: In([RedemptionStatus.REDEEMED]),
-              },
-            });
+          : coupon.type === CouponType.NTH_ORDER ||
+              coupon.type === CouponType.FIRST_ORDER
+            ? await this.redemptionRepository.count({
+                where: {
+                  coupon_id: coupon.id,
+                  user_id: dto.user_id,
+                  order_id: Not(IsNull()),
+                  status: In([
+                    RedemptionStatus.RESERVED,
+                    RedemptionStatus.REDEEMED,
+                  ]),
+                },
+              })
+            : await this.redemptionRepository.count({
+                where: {
+                  coupon_id: coupon.id,
+                  user_id: dto.user_id,
+                  status: In([RedemptionStatus.REDEEMED]),
+                },
+              });
 
       if (userRedemptions >= coupon.user_usage_limit) {
         return {
@@ -806,9 +856,21 @@ export class CouponService {
 
     // PREORDER-specific validations
     if (coupon.type === CouponType.PREORDER) {
-      // Validate item_id matches (if provided in DTO)
-      if (coupon.type_meta?.item_id && (dto as any).item_id) {
-        if (coupon.type_meta.item_id !== (dto as any).item_id) {
+      // Guard: stored coupon must have resolved internal_item_id
+      if (!coupon.type_meta?.internal_item_id) {
+        return {
+          valid: false,
+          reason_code: "INVALID_COUPON_CONFIG",
+          message: "Invalid coupon configuration",
+        };
+      }
+
+      // Validate internal_item_id matches (if cart provides item_id)
+      if ((dto as any).item_id) {
+        if (
+          Number(coupon.type_meta.internal_item_id) !==
+          Number((dto as any).item_id)
+        ) {
           return {
             valid: false,
             reason_code: "INVALID_ITEM",
@@ -888,29 +950,11 @@ export class CouponService {
   /**
    * Count consumed quota slots from DB as a safety source of truth.
    * RESERVED always consumes a slot until explicit rollback.
-   * PREORDER/NTH_ORDER can intentionally retain consumed usage as ROLLED_BACK when linked to an order.
+   * ROLLED_BACK is excluded: cancelOrder now restores Redis quota on cancellation
+   * for all coupon types (PREORDER, NTH_ORDER, FLAT, PERCENT, etc), so the DB
+   * fallback must not count cancelled redemptions as still consuming capacity.
    */
   private async countConsumedQuotaSlots(coupon: Coupon): Promise<number> {
-    if (coupon.type === CouponType.PREORDER || coupon.type === CouponType.NTH_ORDER) {
-      return this.redemptionRepository.count({
-        where: [
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.RESERVED,
-          },
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.REDEEMED,
-          },
-          {
-            coupon_id: coupon.id,
-            status: RedemptionStatus.ROLLED_BACK,
-            order_id: Not(IsNull()),
-          },
-        ],
-      });
-    }
-
     return this.redemptionRepository.count({
       where: {
         coupon_id: coupon.id,
@@ -1056,6 +1100,20 @@ export class CouponService {
         coupon.type_meta,
       );
       if (!metaValidation.valid) {
+        return {
+          valid: false,
+          reason_code: "INVALID_COUPON_CONFIG",
+          message: "Invalid coupon configuration",
+        };
+      }
+    }
+
+    if (coupon.type === CouponType.PREORDER) {
+      // Stored preorder coupons must have resolved internal IDs (set at generation time)
+      if (
+        !coupon.type_meta?.internal_item_id ||
+        !coupon.type_meta?.internal_store_id
+      ) {
         return {
           valid: false,
           reason_code: "INVALID_COUPON_CONFIG",
@@ -1358,6 +1416,80 @@ export class CouponService {
         valid: false,
         message: `Unknown type_meta keys for free_delivery coupons: ${unknownKeys.join(", ")}`,
       };
+    }
+
+    return { valid: true };
+  }
+
+  private validatePreorderCouponTypeMeta(typeMeta?: Record<string, any>): {
+    valid: boolean;
+    message?: string;
+  } {
+    if (!typeMeta || typeof typeMeta !== "object") {
+      return {
+        valid: false,
+        message: "type_meta is required for preorder coupons",
+      };
+    }
+
+    if (
+      typeof typeMeta.store_reference_id !== "string" ||
+      typeMeta.store_reference_id.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "store_reference_id must be a non-empty string",
+      };
+    }
+
+    if (
+      typeof typeMeta.item_reference_id !== "string" ||
+      typeMeta.item_reference_id.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "item_reference_id must be a non-empty string",
+      };
+    }
+
+    if (
+      typeof typeMeta.delivery_date !== "string" ||
+      typeMeta.delivery_date.trim().length === 0
+    ) {
+      return {
+        valid: false,
+        message: "delivery_date must be a non-empty string",
+      };
+    }
+
+    if (
+      typeMeta.free_delivery !== undefined &&
+      typeof typeMeta.free_delivery !== "boolean"
+    ) {
+      return {
+        valid: false,
+        message: "free_delivery must be a boolean",
+      };
+    }
+
+    if (typeMeta.delivery_fee_cap !== undefined) {
+      if (
+        typeof typeMeta.delivery_fee_cap !== "number" ||
+        Number.isNaN(typeMeta.delivery_fee_cap) ||
+        typeMeta.delivery_fee_cap < 0
+      ) {
+        return {
+          valid: false,
+          message: "delivery_fee_cap must be a non-negative number",
+        };
+      }
+
+      if (typeMeta.free_delivery !== true) {
+        return {
+          valid: false,
+          message: "delivery_fee_cap can be used only when free_delivery is true",
+        };
+      }
     }
 
     return { valid: true };
@@ -1782,8 +1914,25 @@ export class CouponService {
           discountAmount = Math.min(coupon.value || 0, cartTotal);
         }
 
-        // Check if free delivery is included
-        deliveryWaived = coupon.type_meta?.free_delivery === true;
+        // Check if free delivery is included (with optional delivery fee cap)
+        if (coupon.type_meta?.free_delivery === true) {
+          const deliveryFeeFromContext =
+            typeof actualDeliveryFee === "number" &&
+            Number.isFinite(actualDeliveryFee) &&
+            actualDeliveryFee >= 0
+              ? actualDeliveryFee
+              : 0;
+          const cap =
+            coupon.type_meta?.delivery_fee_cap !== undefined &&
+            coupon.type_meta?.delivery_fee_cap !== null
+              ? Number(coupon.type_meta.delivery_fee_cap)
+              : deliveryFeeFromContext;
+          const waivedAmount = Math.min(
+            Math.max(deliveryFeeFromContext, 0),
+            Math.max(cap, 0),
+          );
+          deliveryWaived = waivedAmount > 0;
+        }
         break;
 
       default:
@@ -1906,11 +2055,17 @@ export class CouponService {
     correlationId: string,
   ): Promise<number> {
     // Fallback path to keep eligibility correct while metrics model is warming up.
+    // Counts any order that is actively placed (confirmed or later), excluding:
+    //   - 'created'/'pending': unpaid online orders not yet confirmed
+    //   - 'cancelled'/'refunded': voided orders
+    // This ensures COD orders (which start as 'confirmed' with payment_status='pending')
+    // are counted immediately at placement, preventing reuse of nth/first-order coupons.
+    // Must stay consistent with metricEligibleStatuses in OrderService.
     const query = `
       SELECT COUNT(*)::int as count
       FROM "order"
-      WHERE user_id = $1
-      AND status IN ('paid', 'delivered', 'confirmed', 'completed')
+      WHERE "userId" = $1
+      AND status NOT IN ('created', 'cancelled')
     `;
 
     try {
@@ -1921,11 +2076,9 @@ export class CouponService {
         `[${correlationId}] Error counting paid orders for user ${userId}: ${error.message}`,
         error instanceof Error ? error.stack : undefined,
       );
-      this.logger.warn(
-        `[${correlationId}] Falling back to 0 paid orders count for user ${userId} due to query error`,
+      throw new InternalServerErrorException(
+        "Failed to determine order eligibility for coupon validation",
       );
-      // Fallback: return 0 to allow coupon validation to proceed
-      return 0;
     }
   }
 
@@ -2203,10 +2356,18 @@ export class CouponService {
 
       await queryRunner.manager.save(redemption);
 
-      // If single-use, update coupon status
-      if (coupon.global_usage_limit === 1) {
-        coupon.status = CouponStatus.REVOKED;
-        await queryRunner.manager.save(coupon);
+      // Auto-revoke when quota is exhausted (covers single-use and multi-use coupons)
+      if (coupon.global_usage_limit != null) {
+        const redeemedCount = await queryRunner.manager.count(CouponRedemption, {
+          where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
+        });
+        if (redeemedCount >= Number(coupon.global_usage_limit)) {
+          coupon.status = CouponStatus.REVOKED;
+          await queryRunner.manager.save(coupon);
+          this.logger.log(
+            `[${correlationId}] Coupon ${coupon.code} marked REVOKED after reaching global_usage_limit (${coupon.global_usage_limit})`,
+          );
+        }
       }
 
       await queryRunner.commitTransaction();
@@ -2327,6 +2488,23 @@ export class CouponService {
       `[${correlationId}] Redeemed coupon via DB fallback for token ${dto.reservation_token} and order ${dto.order_id} after Redis reservation expiry`,
     );
 
+    // Auto-revoke when quota is exhausted (same logic as main redeem path)
+    if (coupon.global_usage_limit != null) {
+      const redeemedCount = await this.redemptionRepository.count({
+        where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
+      });
+      if (redeemedCount >= Number(coupon.global_usage_limit)) {
+        // Conditional update guards against concurrent revokes
+        await this.couponRepository.update(
+          { id: coupon.id, status: CouponStatus.ACTIVE },
+          { status: CouponStatus.REVOKED },
+        );
+        this.logger.log(
+          `[${correlationId}] Coupon ${coupon.code} marked REVOKED (DB fallback path) after reaching global_usage_limit (${coupon.global_usage_limit})`,
+        );
+      }
+    }
+
     return {
       success: true,
       discount_amount: resolvedDiscount,
@@ -2403,6 +2581,77 @@ export class CouponService {
     typeMeta?: Record<string, any>,
   ): Promise<Record<string, any>> {
     return this.enrichPercentCouponTypeMeta(typeMeta);
+  }
+
+  private async enrichPreorderCouponTypeMeta(
+    typeMeta: Record<string, any>,
+  ): Promise<Record<string, any>> {
+    const enrichedMeta = { ...typeMeta };
+
+    if (!enrichedMeta.store_reference_id?.trim()) {
+      throw new BadRequestException(
+        "store_reference_id is required in type_meta for preorder coupons",
+      );
+    }
+
+    if (!enrichedMeta.item_reference_id?.trim()) {
+      throw new BadRequestException(
+        "item_reference_id is required in type_meta for preorder coupons",
+      );
+    }
+
+    const store = await this.storeRepository.findOne({
+      where: { reference_id: enrichedMeta.store_reference_id.trim() },
+    });
+
+    if (!store) {
+      throw new BadRequestException(
+        `Store with reference_id '${enrichedMeta.store_reference_id}' not found`,
+      );
+    }
+
+    enrichedMeta.internal_store_id = Number(store.id);
+
+    const item = await this.itemRepository.findOne({
+      where: {
+        reference_id: enrichedMeta.item_reference_id.trim(),
+        store: { id: enrichedMeta.internal_store_id },
+      },
+      relations: ["store"],
+    });
+
+    if (!item) {
+      throw new BadRequestException(
+        `Item with reference_id '${enrichedMeta.item_reference_id}' not found for store '${enrichedMeta.store_reference_id}'`,
+      );
+    }
+
+    enrichedMeta.internal_item_id = Number(item.id);
+
+    if (!enrichedMeta.delivery_date) {
+      throw new BadRequestException(
+        "delivery_date is required in type_meta for preorder coupons",
+      );
+    }
+
+    const deliveryDate = new Date(enrichedMeta.delivery_date);
+    if (isNaN(deliveryDate.getTime())) {
+      throw new BadRequestException(
+        "delivery_date must be a valid ISO datetime string",
+      );
+    }
+
+    if (deliveryDate < new Date()) {
+      throw new BadRequestException(
+        `delivery_date (${enrichedMeta.delivery_date}) must be a future date`,
+      );
+    }
+
+    this.logger.log(
+      `✅ Preorder coupon enriched: store_reference_id=${enrichedMeta.store_reference_id} -> internal_store_id=${enrichedMeta.internal_store_id}, item_reference_id=${enrichedMeta.item_reference_id} -> internal_item_id=${enrichedMeta.internal_item_id}`,
+    );
+
+    return enrichedMeta;
   }
 
   private async validatePercentCouponScope(
@@ -2747,11 +2996,19 @@ export class CouponService {
           coupon.type === CouponType.NTH_ORDER) &&
         redemption.order_id != null
       ) {
-        // Keep usage consumed for placed orders even if later cancelled.
-        shouldRestoreQuota = false;
-        this.logger.log(
-          `[${correlationId}] Skipping quota restore for ${coupon.type} reservation ${dto.reservation_token} linked to order ${redemption.order_id}`,
-        );
+        const order = await this.orderRepository.findOne({
+          where: { id: redemption.order_id },
+          select: ["id", "payment_status"],
+        });
+        const paid =
+          order?.payment_status != null &&
+          String(order.payment_status).toLowerCase() === "paid";
+        if (paid) {
+          shouldRestoreQuota = false;
+          this.logger.log(
+            `[${correlationId}] Skipping quota restore for ${coupon.type} reservation ${dto.reservation_token} linked to paid order ${redemption.order_id}`,
+          );
+        }
       }
     }
 
@@ -2816,6 +3073,41 @@ export class CouponService {
   }
 
   /**
+   * Roll back all RESERVED coupon rows linked to an order (e.g. online payment abandoned).
+   * Idempotent per token via rollbackCoupon.
+   */
+  async rollbackReservedRedemptionsForOrder(
+    orderId: number,
+    reason: string,
+  ): Promise<void> {
+    const correlationId = this.createCorrelationId("order-reserved-rollback");
+    const redemptions = await this.redemptionRepository.find({
+      where: {
+        order_id: orderId,
+        status: RedemptionStatus.RESERVED,
+      },
+    });
+    for (const r of redemptions) {
+      if (!r.reserved_token) {
+        continue;
+      }
+      try {
+        await this.rollbackCoupon(
+          {
+            reservation_token: r.reserved_token,
+            reason,
+          },
+          correlationId,
+        );
+      } catch (err) {
+        this.logger.warn(
+          `[${correlationId}] rollbackReservedRedemptionsForOrder: token ${r.reserved_token} — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
+  /**
    * Check if a reservation token is still valid in Redis.
    * Used by cart service to decide whether to reuse an existing reservation.
    */
@@ -2823,6 +3115,43 @@ export class CouponService {
     const reservation =
       await this.redisCouponService.getReservation(reservationToken);
     return reservation != null;
+  }
+
+  /**
+   * Bulk-marks coupons as EXPIRED when their end_at timestamp has passed.
+   * Runs on schedule via registerExpiryMarkingCron().
+   * This keeps coupon.status in sync with the time-based expiry already enforced at validation.
+   */
+  async markExpiredCoupons(): Promise<{ updated: number }> {
+    const correlationId = this.createCorrelationId("coupon-expiry-cron");
+    try {
+      this.logger.log(
+        `[${correlationId}] ⏰ Running markExpiredCoupons cron`,
+      );
+
+      const now = TimezoneUtil.getCurrentISTTime();
+      const result = await this.couponRepository
+        .createQueryBuilder()
+        .update(Coupon)
+        .set({ status: CouponStatus.EXPIRED })
+        .where("status = :active", { active: CouponStatus.ACTIVE })
+        .andWhere("end_at IS NOT NULL")
+        .andWhere("end_at < :now", { now })
+        .execute();
+
+      const updated = result.affected ?? 0;
+      this.logger.log(
+        `[${correlationId}] ✅ markExpiredCoupons: marked ${updated} coupon(s) as EXPIRED`,
+      );
+
+      return { updated };
+    } catch (error) {
+      this.logger.error(
+        `[${correlationId}] ❌ Error during markExpiredCoupons: ${error instanceof Error ? error.message : String(error)}`,
+        error instanceof Error ? error.stack : undefined,
+      );
+      return { updated: 0 };
+    }
   }
 
   async autoRollbackStaleReservations() {
@@ -2916,15 +3245,23 @@ export class CouponService {
     let valid = coupon.status === CouponStatus.ACTIVE;
     let message = "";
 
-    if (coupon.start_at && now < coupon.start_at) {
+    // Check terminal system-managed states first — these take priority over time checks
+    if (coupon.status === CouponStatus.REVOKED) {
+      valid = false;
+      message = "Coupon has been revoked";
+    } else if (coupon.status === CouponStatus.EXPIRED) {
+      valid = false;
+      message = "Coupon has expired";
+    } else if (coupon.status === CouponStatus.INACTIVE) {
+      valid = false;
+      message = "Coupon is inactive";
+    } else if (coupon.start_at && now < coupon.start_at) {
       valid = false;
       message = "Coupon not yet valid";
     } else if (coupon.end_at && now > coupon.end_at) {
+      // end_at passed but cron hasn't run yet — status is still ACTIVE
       valid = false;
-      message = "Coupon expired";
-    } else if (coupon.status !== CouponStatus.ACTIVE) {
-      valid = false;
-      message = "Coupon is inactive";
+      message = "Coupon has expired";
     } else if (coupon.campaign.status !== CampaignStatus.ACTIVE) {
       valid = false;
       message = "Campaign is inactive";
@@ -2939,6 +3276,55 @@ export class CouponService {
   }
 
   // ==================== Quota Management ====================
+
+  /**
+   * Update the status of a single coupon (admin-driven).
+   * Only ACTIVE ↔ INACTIVE transitions are allowed through this endpoint.
+   * EXPIRED and REVOKED are system-managed states and cannot be set manually.
+   */
+  async updateCouponStatus(
+    couponId: number,
+    newStatus: CouponStatus.ACTIVE | CouponStatus.INACTIVE,
+  ): Promise<Coupon> {
+    const coupon = await this.couponRepository.findOne({
+      where: { id: couponId },
+    });
+
+    if (!coupon) {
+      throw new NotFoundException(`Coupon with ID ${couponId} not found`);
+    }
+
+    if (coupon.status === CouponStatus.REVOKED) {
+      throw new BadRequestException(
+        "Cannot change the status of a revoked coupon",
+      );
+    }
+
+    if (coupon.status === CouponStatus.EXPIRED) {
+      throw new BadRequestException(
+        "Cannot change the status of an expired coupon",
+      );
+    }
+
+    if (
+      newStatus === CouponStatus.ACTIVE &&
+      coupon.end_at &&
+      coupon.end_at < new Date()
+    ) {
+      throw new BadRequestException(
+        "Cannot re-activate a coupon whose end_at has already passed",
+      );
+    }
+
+    coupon.status = newStatus;
+    await this.couponRepository.save(coupon);
+
+    this.logger.log(
+      `Admin updated coupon ${coupon.code} (id: ${couponId}) status to ${newStatus}`,
+    );
+
+    return coupon;
+  }
 
   /**
    * Get current quota for a coupon

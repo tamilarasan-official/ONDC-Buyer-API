@@ -428,7 +428,7 @@ export class CartService {
         );
 
         finalOrderPrice = preorderPricing.final_order_price;
-        preorderDiscountAmount = preorderPricing.total_discount;
+        preorderDiscountAmount = preorderPricing.base_discount_total;
 
         this.logger.log(
           `💰 Preorder item pricing: base_price=₹${unitPrice}, final_per_unit=₹${preorderPricing.final_price_per_unit}, final_order_price=₹${finalOrderPrice}, discount_amount=₹${preorderDiscountAmount}`,
@@ -476,7 +476,6 @@ export class CartService {
             await this.removeCoupon(userId);
           }
 
-          // Preorder discount for cart (already total for this line, includes quantity)
           const preorderDiscountForCart = preorderDiscountAmount;
 
           // Apply preorder coupon with correct cart total and discount
@@ -673,7 +672,7 @@ export class CartService {
       .where("coupon.type = :type", { type: CouponType.PREORDER })
       .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
       .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-      .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: itemId.toString() })
+      .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: itemId.toString() })
       .andWhere(
         "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
         { storeId }
@@ -1021,12 +1020,14 @@ export class CartService {
             }
           }
 
-          // Clear coupon fields directly
+          // Clear coupon fields directly (use null — TypeORM skips undefined in UPDATE)
           await this.cartRepository.update(cartId, {
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
-            coupon_id: undefined,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
+            coupon_id: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
         }
 
@@ -1124,18 +1125,26 @@ export class CartService {
       const cartId = cartItem.cart.id;
       const cart = cartItem.cart;
 
-      // NEW: Release reservation if preorder item has reservation token
+      // NEW: Roll back DB redemption + Redis quota (not Redis-only release — avoids RESERVED+order_id user-limit leaks)
       if (cartItem.is_preorder && cartItem.preorder_campaign_id) {
         if (cartItem.preorder_reservation_token) {
-          // Release reservation and restore quota
-          // releaseReservation() always restores quota, even if reservation expired
-          await this.redisCouponService.releaseReservation(
-            cartItem.preorder_campaign_id,
-            cartItem.preorder_reservation_token
-          );
-          this.logger.log(
-            `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id}`
-          );
+          try {
+            await this.couponService.rollbackCoupon({
+              reservation_token: cartItem.preorder_reservation_token,
+              reason: "Preorder item removed from cart",
+            });
+            this.logger.log(
+              `✅ Rolled back preorder reservation for coupon ${cartItem.preorder_campaign_id}`,
+            );
+          } catch (err) {
+            this.logger.warn(
+              `Preorder rollback failed, falling back to Redis release: ${err instanceof Error ? err.message : String(err)}`,
+            );
+            await this.redisCouponService.releaseReservation(
+              cartItem.preorder_campaign_id,
+              cartItem.preorder_reservation_token,
+            );
+          }
         } else {
           // No reservation token - quota was never consumed (item added but checkout never happened)
           this.logger.log(
@@ -1171,10 +1180,12 @@ export class CartService {
 
           // Clear coupon fields directly (don't call removeCoupon since cart will be deactivated)
           await this.cartRepository.update(cartId, {
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
-            coupon_id: undefined,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
+            coupon_id: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
         }
 
@@ -1267,17 +1278,27 @@ export class CartService {
       );
       for (const cartItem of preorderItems) {
         try {
-          await this.redisCouponService.releaseReservation(
-            cartItem.preorder_campaign_id!,
-            cartItem.preorder_reservation_token!,
-          );
+          await this.couponService.rollbackCoupon({
+            reservation_token: cartItem.preorder_reservation_token!,
+            reason: "Cart cleared or deactivated",
+          });
           this.logger.log(
-            `✅ Released reservation and restored quota for preorder coupon ${cartItem.preorder_campaign_id} (cart ${cartId} deactivated)`,
+            `✅ Rolled back preorder reservation for coupon ${cartItem.preorder_campaign_id} (cart ${cartId})`,
           );
         } catch (err) {
           this.logger.warn(
-            `Failed to release preorder quota for cart ${cartId}, coupon ${cartItem.preorder_campaign_id}: ${err.message}`,
+            `Preorder rollback failed for cart ${cartId}, falling back to Redis: ${err instanceof Error ? err.message : String(err)}`,
           );
+          try {
+            await this.redisCouponService.releaseReservation(
+              cartItem.preorder_campaign_id!,
+              cartItem.preorder_reservation_token!,
+            );
+          } catch (e2) {
+            this.logger.warn(
+              `Failed to release preorder quota for cart ${cartId}: ${e2.message}`,
+            );
+          }
         }
       }
       // Rollback cart-level coupon reservation if present
@@ -1288,10 +1309,12 @@ export class CartService {
             reason: "Cart deactivated",
           });
           await this.cartRepository.update(cartId, {
-            coupon_id: undefined,
-            coupon_code: undefined,
-            coupon_reservation_token: undefined,
+            coupon_id: null as any,
+            coupon_code: null as any,
+            coupon_reservation_token: null as any,
             discount_amount: 0,
+            delivery_waived: false,
+            original_delivery_fee: null as any,
           });
           this.logger.log(`✅ Rolled back cart-level coupon for cart ${cartId}`);
         } catch (err) {
@@ -1501,9 +1524,11 @@ export class CartService {
       const tipAmountValue = Number(cart.tip_amount || 0);
 
       const platformFeeConfig = await this.getPlatformFee();
-      // Only include platform fee in calculation if enabled
       const platformFeeForCalculation = platformFeeConfig.isEnabled
         ? platformFeeConfig.amount
+        : 0;
+      const platformFeeTaxForCalculation = platformFeeConfig.isEnabled
+        ? platformFeeConfig.tax
         : 0;
 
       const finalAmount =
@@ -1512,8 +1537,8 @@ export class CartService {
         deliveryFeeTax +
         taxAmount +
         tipAmountValue +
-        platformFeeForCalculation + 
-        platformFeeConfig.tax -
+        platformFeeForCalculation +
+        platformFeeTaxForCalculation -
         discountAmount;
 
       cart.final_amount = Number(Math.max(0, finalAmount).toFixed(2));
@@ -1700,74 +1725,122 @@ export class CartService {
       deliveryTax = 0;
     }
 
-    // NEW: Check for preorder free delivery BEFORE saving
-    // This ensures free delivery is applied during recalculation
+    // Free delivery (after live delivery quote):
+    // - Qualifies if coupon.type === FREE_DELIVERY OR type_meta.free_delivery === true (PERCENT/FLAT/PREORDER).
+    // - No delivery_fee_cap → waive up to full quoted fee. With cap → waive min(cap, fee); remainder stays in delivery_fee.
+    // - delivery_waived = any waiver > 0; original_delivery_fee = quoted fee before waiver (audit).
+    // - Item discounts stay in discount_amount; FREE_DELIVERY-only coupons use discount_amount 0 (benefit is fee line only).
     const hasPreorderItems = cartItems.some((item) => item.is_preorder === true);
+    const currentCart = await this.cartRepository.findOne({
+      where: { id: cartId },
+    });
 
-    if (hasPreorderItems) {
-      this.logger.log(`🛒 Cart has preorder items, checking for free_delivery...`);
+    let deliveryWaived = false;
+    const originalDeliveryFee = deliveryFee;
 
-      // Check cart for preorder coupon
-      const currentCart = await this.cartRepository.findOne({
-        where: { id: cartId },
+    if (currentCart?.coupon_id) {
+      const coupon = await this.couponRepository.findOne({
+        where: { id: currentCart.coupon_id },
       });
 
-      if (currentCart?.coupon_id) {
-        const coupon = await this.couponRepository.findOne({
-          where: { id: currentCart.coupon_id },
+      const hasFreeDelivery =
+        coupon?.type === CouponType.FREE_DELIVERY ||
+        coupon?.type_meta?.free_delivery === true;
+
+      if (coupon && hasFreeDelivery) {
+        const cap =
+          coupon.type_meta?.delivery_fee_cap !== undefined &&
+          coupon.type_meta?.delivery_fee_cap !== null
+            ? Number(coupon.type_meta.delivery_fee_cap)
+            : deliveryFee;
+        const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
+        this.logger.log(
+          `✅ Coupon ${coupon.code} (${coupon.type}) has free_delivery, waiving ₹${waivedAmount} of ₹${deliveryFee} delivery fee (cap=${cap})`,
+        );
+        deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+        deliveryTax = Number(((deliveryFee * (currentCart.delivery_percent || 18)) / 100).toFixed(2));
+        deliveryWaived = waivedAmount > 0;
+      }
+    } else if (hasPreorderItems) {
+      // FALLBACK: Check preorder item's campaign directly when no cart coupon
+      const preorderCartItem = cartItems.find((item) => item.is_preorder === true && item.preorder_campaign_id);
+      if (preorderCartItem?.preorder_campaign_id) {
+        const preorderCoupon = await this.couponRepository.findOne({
+          where: { id: preorderCartItem.preorder_campaign_id },
         });
 
-        if (coupon && coupon.type === CouponType.PREORDER && coupon.type_meta?.free_delivery === true) {
+        if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
+          const cap =
+            preorderCoupon.type_meta?.delivery_fee_cap !== undefined &&
+            preorderCoupon.type_meta?.delivery_fee_cap !== null
+              ? Number(preorderCoupon.type_meta.delivery_fee_cap)
+              : deliveryFee;
+          const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
           this.logger.log(
-            `✅ Preorder has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
+            `✅ Preorder campaign has free_delivery, waiving ₹${waivedAmount} of ₹${deliveryFee} delivery fee (cap=${cap})`,
           );
-          deliveryFee = 0;
-          deliveryTax = 0;
-        }
-      } else {
-        // FALLBACK: Check preorder item's campaign directly
-        const preorderCartItem = cartItems.find((item) => item.is_preorder === true && item.preorder_campaign_id);
-        if (preorderCartItem?.preorder_campaign_id) {
-          const preorderCoupon = await this.couponRepository.findOne({
-            where: { id: preorderCartItem.preorder_campaign_id },
-          });
-
-          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
-            this.logger.log(
-              `✅ Preorder campaign has free_delivery enabled, setting delivery_fee to 0 (was ₹${deliveryFee})`,
-            );
-            deliveryFee = 0;
-            deliveryTax = 0;
-          }
+          deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+          deliveryTax = Number(((deliveryFee * (currentCart?.delivery_percent || 18)) / 100).toFixed(2));
+          deliveryWaived = waivedAmount > 0;
         }
       }
     }
 
-    // Get current tip amount and discount (preserve existing tip)
-    const currentCart = await this.cartRepository.findOne({
-      where: { id: cartId },
-    });
     const tipAmount = Number(currentCart?.tip_amount || 0);
-    const discountAmount = Number(currentCart?.discount_amount || 0);
+    let discountAmount = Number(currentCart?.discount_amount || 0);
 
-    // Calculate tax based on item's tax rate and type
-    // IMPORTANT: Tax is initially calculated on base_price (subtotal) for ALL items.
-    // For preorder items, discount_amount includes both base discount and the tax portion
-    // on the discounted amount, so that the customer effectively pays GST on the
-    // discounted price (balance amount) rather than on the original price.
+    // Item-level preorder: campaign lives on cart_item; cart.coupon_id/discount_amount may be unset.
+    // calculateCartSummary infers preorder discount for display — same must run here or GET /cart
+    // final_amount disagrees with checkout/Razorpay (tax on discounted subtotal but subtotal not reduced).
+    if (discountAmount === 0 && hasPreorderItems && cart?.store?.id) {
+      try {
+        const preorderDiscount = await this.computePreorderLineDiscountTotal(
+          cartItems,
+          cart.store.id,
+        );
+        if (preorderDiscount > 0) {
+          discountAmount = preorderDiscount;
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Could not compute preorder discount in updateCartTotals: ${(error as Error).message}`,
+        );
+      }
+    }
+
+    // For regular items: tax on full subtotal.
+    // For preorder items: tax on the discounted subtotal so the customer
+    // pays GST on the balance amount after the coupon's flat/percent discount.
     let taxAmount = 0;
 
     for (const cartItem of cartItems) {
       if (cartItem.item.tax_rate && cartItem.item.tax_rate > 0) {
-        // For ALL items (including preorder), calculate tax on base_price (total_price/subtotal)
-        const itemPrice = Number(cartItem.total_price); // Base price (subtotal)
-        const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
-        taxAmount += itemTax;
+        const itemPrice = Number(cartItem.total_price);
 
-        if (cartItem.is_preorder) {
-          this.logger.log(
-            `💰 Preorder item tax calculation: item_id=${cartItem.item.id}, base_price=₹${itemPrice}, tax_rate=${cartItem.item.tax_rate}%, tax_amount=₹${itemTax}`,
-          );
+        if (cartItem.is_preorder && cartItem.preorder_campaign_id) {
+          const preorderCoupon = await this.couponRepository.findOne({
+            where: { id: cartItem.preorder_campaign_id },
+          });
+
+          if (preorderCoupon) {
+            const pricing = this.calculatePreorderPricingBreakdown(
+              Number(cartItem.unit_price ?? itemPrice / (cartItem.quantity || 1)),
+              cartItem.quantity || 1,
+              cartItem.item.tax_rate,
+              preorderCoupon,
+            );
+            taxAmount += pricing.tax_on_discounted_subtotal;
+
+            this.logger.log(
+              `💰 Preorder item tax (on discounted subtotal): item_id=${cartItem.item.id}, base_price=₹${itemPrice}, discount=₹${pricing.base_discount_total}, discounted_subtotal=₹${(itemPrice - pricing.base_discount_total).toFixed(2)}, tax_rate=${cartItem.item.tax_rate}%, tax=₹${pricing.tax_on_discounted_subtotal}`,
+            );
+          } else {
+            const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
+            taxAmount += itemTax;
+          }
+        } else {
+          const itemTax = (itemPrice * cartItem.item.tax_rate) / 100;
+          taxAmount += itemTax;
         }
       }
     }
@@ -1817,9 +1890,11 @@ export class CartService {
       delivery_fee: deliveryFee,
       delivery_fee_tax: deliveryTax,
       delivery_percent: deliveryPercent,
+      delivery_waived: deliveryWaived,
+      original_delivery_fee: deliveryWaived ? originalDeliveryFee : null as any,
       platform_fee: platformFeeForCalculation,
       platform_fee_tax: platformFeeTaxForCalculation,
-      platform_percent:18.00,
+      platform_percent: 18.00,
       tax_amount: taxAmount,
       discount_amount: discountAmount,
       tip_amount: tipAmount,
@@ -1932,15 +2007,18 @@ export class CartService {
             Number(userLocation.lng),
           );
 
-          // Override delivery fee from partner quote (if present)
+          // Partner quote: refresh percent always; fee/tax only when coupon did not waive delivery.
+          // Otherwise we overwrite updateCartTotals (0/0) and inflate final_amount + DB row.
           if (deliveryInfo.charge > 0) {
-            deliveryFee = Number(deliveryInfo.charge);
-            deliveryFeeTax = Number(deliveryInfo.tax);
             deliveryPercent = Number(deliveryInfo.percent || 0);
+            if (cart.delivery_waived !== true) {
+              deliveryFee = Number(deliveryInfo.charge);
+              deliveryFeeTax = Number(deliveryInfo.tax);
+            }
           }
 
           this.logger.log(
-            `🚚 Delivery GST from API percent=${deliveryPercent}% | deliveryTax=${deliveryFeeTax} | platformTax=${platformFeeTax}`,
+            `🚚 Delivery GST from API percent=${deliveryPercent}% | deliveryFee=${deliveryFee} | deliveryTax=${deliveryFeeTax} | platformTax=${platformFeeTax} | delivery_waived=${cart.delivery_waived === true}`,
           );
         }
       }
@@ -1948,6 +2026,14 @@ export class CartService {
       this.logger.warn(
         `⚠️ Delivery pricing lookup failed — setting taxes to 0: ${err.message}`,
       );
+    }
+
+    // When updateCartTotals already applied a delivery waiver, trust cart.delivery_fee / tax
+    // for this summary (not the live API quote). Otherwise a pre-fix server or any path that
+    // merged the quote in-memory leaves delivery_waived true with non-zero fee in the response.
+    if (cart.delivery_waived === true) {
+      deliveryFee = Number(cart.delivery_fee ?? 0);
+      deliveryFeeTax = Number(cart.delivery_fee_tax ?? 0);
     }
 
     await this.cartRepository.update(cart.id, {
@@ -1963,139 +2049,55 @@ export class CartService {
     // Check if cart has preorder items (either via coupon_id or cart items)
     const hasPreorderItems = cart.cart_items?.some((item) => item.is_preorder === true);
 
-    // Calculate preorder discount if not already set in cart
-    // For preorder items: discount = base_discount + tax_saved, where:
-    //   base_discount = reduction in item base price from coupon value/value_type
-    //   tax_saved    = GST on the discounted portion of the base price
-    // This ensures the customer pays GST on the discounted base (balance amount).
+    // Calculate preorder discount if not already set in cart.
+    // Discount = base discount only (flat coupon value, not inflated with tax).
+    // Tax on the discounted subtotal is handled by updateCartTotals.
     if (hasPreorderItems && discountAmount === 0 && cart.store?.id) {
       try {
-        let calculatedDiscount = 0;
-
-        for (const cartItem of cart.cart_items || []) {
-          if (!cartItem.is_preorder || !cartItem.item) {
-            continue;
-          }
-          // Resolve coupon: by preorder_campaign_id first, then by item + store (same as formatCartData fallback)
-          let preorderCoupon: Coupon | null = null;
-          if (cartItem.preorder_campaign_id) {
-            const id = cartItem.preorder_campaign_id;
-            preorderCoupon = await this.couponRepository.findOne({
-              where: { id: typeof id === "string" ? Number(id) : id },
-            });
-          }
-          if (!preorderCoupon && cartItem.item?.id != null) {
-            const preorderCoupons = await this.couponRepository
-              .createQueryBuilder("coupon")
-              .leftJoinAndSelect("coupon.campaign", "campaign")
-              .where("coupon.type = :type", { type: CouponType.PREORDER })
-              .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
-              .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: String(cartItem.item.id) })
-              .andWhere(
-                "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
-                { storeId: cart.store.id },
-              )
-              .orderBy("coupon.priority", "DESC", "NULLS LAST")
-              .addOrderBy("coupon.created_at", "DESC")
-              .take(1)
-              .getMany();
-            preorderCoupon = preorderCoupons[0] ?? null;
-          }
-          if (!preorderCoupon || preorderCoupon.type !== CouponType.PREORDER) {
-            continue;
-          }
-
-          const quantity = cartItem.quantity || 1;
-          const basePrice = Number(cartItem.unit_price ?? 0);
-          const taxRate = Number(cartItem.item?.tax_rate ?? 0);
-          const preorderPricing = this.calculatePreorderPricingBreakdown(
-            basePrice,
-            quantity,
-            taxRate,
-            preorderCoupon,
-          );
-          const itemDiscount = preorderPricing.total_discount;
-          calculatedDiscount += itemDiscount;
-
-          const itemSubtotalTotal = basePrice * quantity;
-
-          this.logger.log(
-            `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, subtotal=₹${itemSubtotalTotal.toFixed(2)}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, discount_tax_component=₹${preorderPricing.discount_tax_component.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)}, total_discount=₹${itemDiscount.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
-          );
-        }
-
+        const calculatedDiscount = await this.computePreorderLineDiscountTotal(
+          cart.cart_items || [],
+          cart.store.id,
+        );
         if (calculatedDiscount > 0) {
-          discountAmount = Number(calculatedDiscount.toFixed(2));
+          discountAmount = calculatedDiscount;
           this.logger.log(
-            `💰 Calculated preorder discount: ₹${discountAmount} (base_discount + tax_saved for all preorder items)`,
+            `💰 Calculated preorder discount: ₹${discountAmount}`,
           );
         }
       } catch (error) {
         this.logger.warn(
-          `Could not calculate preorder discount: ${error.message}`,
+          `Could not calculate preorder discount: ${(error as Error).message}`,
         );
       }
     }
 
-    if (cart.coupon_id) {
+    // Delivery waiver: use values already computed by updateCartTotals (stored on cart entity).
+    // This avoids duplicating the free_delivery logic here. If cart.delivery_waived is true,
+    // updateCartTotals already zeroed delivery_fee and set original_delivery_fee for audit.
+    let summaryDeliveryWaived = cart.delivery_waived === true;
+    let summaryOriginalDeliveryFee = Number(cart.original_delivery_fee || 0);
+
+    // If updateCartTotals hasn't run yet (stale cart), do a defensive check
+    if (!summaryDeliveryWaived && cart.coupon_id) {
       const coupon = await this.couponRepository.findOne({
         where: { id: cart.coupon_id },
       });
 
-      if (coupon && coupon.type === CouponType.PREORDER) {
-        // If free delivery is included, set delivery fee and tax to 0
-        if (coupon.type_meta?.free_delivery === true) {
-          deliveryFee = 0;
-          deliveryFeeTax = 0;
-          if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
-            await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
-          }
-        }
-      } else if (coupon && coupon.type === CouponType.PERCENT && coupon.type_meta?.free_delivery === true) {
-        const cap =
-          coupon.type_meta?.delivery_fee_cap !== undefined &&
-          coupon.type_meta?.delivery_fee_cap !== null
-            ? Number(coupon.type_meta.delivery_fee_cap)
-            : deliveryFee;
-        const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-        deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-      } else if (coupon && coupon.type === CouponType.FLAT && coupon.type_meta?.free_delivery === true) {
-        const cap =
-          coupon.type_meta?.delivery_fee_cap !== undefined &&
-          coupon.type_meta?.delivery_fee_cap !== null
-            ? Number(coupon.type_meta.delivery_fee_cap)
-            : deliveryFee;
-        const waivedDeliveryFee = Math.min(Math.max(cap, 0), deliveryFee);
-        deliveryFee = Number(Math.max(0, deliveryFee - waivedDeliveryFee).toFixed(2));
-        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
-      }
-    } else if (hasPreorderItems) {
-      // FALLBACK: Check if any preorder item has free_delivery even if coupon not applied
-      // This handles cases where item was added before preorder campaign
-      try {
-        const preorderCartItem = cart.cart_items?.find((item) => item.is_preorder === true && item.preorder_campaign_id);
-        if (preorderCartItem?.preorder_campaign_id) {
-          const preorderCoupon = await this.couponRepository.findOne({
-            where: { id: preorderCartItem.preorder_campaign_id },
-          });
+      const hasFreeDelivery =
+        coupon?.type === CouponType.FREE_DELIVERY ||
+        coupon?.type_meta?.free_delivery === true;
 
-          if (preorderCoupon && preorderCoupon.type_meta?.free_delivery === true) {
-            deliveryFee = 0;
-            deliveryFeeTax = 0;
-            if (cart.delivery_fee !== 0 || cart.delivery_fee_tax !== 0) {
-              await this.cartRepository.update(cart.id, { delivery_fee: 0, delivery_fee_tax: 0 });
-            }
-            this.logger.log(
-              `✅ Applied free_delivery for preorder item ${preorderCartItem.item.id} (coupon not applied to cart)`,
-            );
-          }
-        }
-      } catch (error) {
-        this.logger.warn(
-          `Could not check free_delivery for preorder items: ${error.message}`,
-        );
+      if (coupon && hasFreeDelivery && deliveryFee > 0) {
+        const cap =
+          coupon.type_meta?.delivery_fee_cap !== undefined &&
+          coupon.type_meta?.delivery_fee_cap !== null
+            ? Number(coupon.type_meta.delivery_fee_cap)
+            : deliveryFee;
+        const waivedAmount = Math.min(Math.max(cap, 0), deliveryFee);
+        summaryOriginalDeliveryFee = deliveryFee;
+        deliveryFee = Number(Math.max(0, deliveryFee - waivedAmount).toFixed(2));
+        deliveryFeeTax = Number(((deliveryFee * deliveryPercent) / 100).toFixed(2));
+        summaryDeliveryWaived = waivedAmount > 0;
       }
     }
 
@@ -2234,16 +2236,30 @@ export class CartService {
       }
     }
 
-    const totalTaxAmount = taxAmount + deliveryFeeTax + platformFeeConfig.tax;
+    // Only add platform GST when platform fee is included in payable total (matches final_amount).
+    const totalTaxAmount =
+      taxAmount +
+      deliveryFeeTax +
+      (platformFeeConfig.isEnabled ? platformFeeTax : 0);
     const appliedCoupon = await this.getAppliedCouponSummary(cart);
+
+    // Summary lists configured platform fee + GST for display. When include_platform_fee is false,
+    // clients should strike these through (not in final_amount / total_tax_amount). Charged amounts
+    // remain platformFee / platformFeeTax (often 0) above for persistence and totals.
+    const platformFeeDisplay = Number(platformFeeConfig.amount.toFixed(2));
+    const platformFeeTaxDisplay = Number(platformFeeConfig.tax.toFixed(2));
 
     return {
       subtotal: Number(subtotal.toFixed(2)),
       delivery_fee: Number(deliveryFee.toFixed(2)),
       delivery_fee_tax: deliveryFeeTax,
       delivery_percent: deliveryPercent,
-      platform_fee: platformFee,
-      platform_fee_tax: platformFeeTax,
+      delivery_waived: summaryDeliveryWaived,
+      original_delivery_fee: summaryDeliveryWaived
+        ? Number(summaryOriginalDeliveryFee.toFixed(2))
+        : undefined,
+      platform_fee: platformFeeDisplay,
+      platform_fee_tax: platformFeeTaxDisplay,
       platform_percent: platformPercent,
       tax_amount: Number(taxAmount.toFixed(2)),
       discount_amount: Number(discountAmount.toFixed(2)),
@@ -2254,7 +2270,7 @@ export class CartService {
       final_amount: Number(finalAmount.toFixed(2)),
       estimated_delivery_time: estimatedDeliveryTime,
       applied_offer:
-        discountAmount > 0
+        discountAmount > 0 || summaryDeliveryWaived
           ? {
             id: appliedCoupon?.id || 1,
             name: appliedCoupon ? "Applied Coupon" : "Applied Offer",
@@ -2263,7 +2279,7 @@ export class CartService {
           }
           : undefined,
       applied_coupon:
-        discountAmount > 0 && appliedCoupon
+        (discountAmount > 0 || summaryDeliveryWaived) && appliedCoupon
           ? {
             ...appliedCoupon,
             discount_amount: Number(discountAmount.toFixed(2)),
@@ -2447,8 +2463,8 @@ export class CartService {
               cartCoupon &&
               cartCoupon.type === CouponType.PREORDER &&
               cartCoupon.type_meta &&
-              cartCoupon.type_meta.item_id &&
-              Number(cartCoupon.type_meta.item_id) === item.item.id
+              cartCoupon.type_meta.internal_item_id &&
+              Number(cartCoupon.type_meta.internal_item_id) === item.item.id
             ) {
               // This item matches the preorder coupon - add preorder info
               let availableSlots = 0;
@@ -2506,7 +2522,7 @@ export class CartService {
               .where("coupon.type = :type", { type: CouponType.PREORDER })
               .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
               .andWhere("campaign.status = :campaignStatus", { campaignStatus: CampaignStatus.ACTIVE })
-              .andWhere("coupon.type_meta->>'item_id' = :itemId", { itemId: item.item.id.toString() })
+              .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", { itemId: item.item.id.toString() })
               .andWhere(
                 "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
                 { storeId: cart.store.id }
@@ -2622,6 +2638,72 @@ export class CartService {
       created_at: cart.created_at.toISOString(),
       updated_at: cart.updated_at.toISOString(),
     };
+  }
+
+  /**
+   * Base preorder discount (line total) for items with is_preorder, matching cart summary resolution.
+   */
+  private async computePreorderLineDiscountTotal(
+    cartItems: CartItem[],
+    storeId: number,
+  ): Promise<number> {
+    let calculatedDiscount = 0;
+
+    for (const cartItem of cartItems) {
+      if (!cartItem.is_preorder || !cartItem.item) {
+        continue;
+      }
+
+      let preorderCoupon: Coupon | null = null;
+      if (cartItem.preorder_campaign_id) {
+        const id = cartItem.preorder_campaign_id;
+        preorderCoupon = await this.couponRepository.findOne({
+          where: { id: typeof id === "string" ? Number(id) : id },
+        });
+      }
+      if (!preorderCoupon && cartItem.item?.id != null) {
+        const preorderCoupons = await this.couponRepository
+          .createQueryBuilder("coupon")
+          .leftJoinAndSelect("coupon.campaign", "campaign")
+          .where("coupon.type = :type", { type: CouponType.PREORDER })
+          .andWhere("coupon.status = :status", { status: CouponStatus.ACTIVE })
+          .andWhere("campaign.status = :campaignStatus", {
+            campaignStatus: CampaignStatus.ACTIVE,
+          })
+          .andWhere("coupon.type_meta->>'internal_item_id' = :itemId", {
+            itemId: String(cartItem.item.id),
+          })
+          .andWhere(
+            "(coupon.applicable_store_ids IS NULL OR array_length(coupon.applicable_store_ids, 1) IS NULL OR :storeId = ANY(coupon.applicable_store_ids))",
+            { storeId },
+          )
+          .orderBy("coupon.priority", "DESC", "NULLS LAST")
+          .addOrderBy("coupon.created_at", "DESC")
+          .take(1)
+          .getMany();
+        preorderCoupon = preorderCoupons[0] ?? null;
+      }
+      if (!preorderCoupon || preorderCoupon.type !== CouponType.PREORDER) {
+        continue;
+      }
+
+      const quantity = cartItem.quantity || 1;
+      const basePrice = Number(cartItem.unit_price ?? 0);
+      const taxRate = Number(cartItem.item?.tax_rate ?? 0);
+      const preorderPricing = this.calculatePreorderPricingBreakdown(
+        basePrice,
+        quantity,
+        taxRate,
+        preorderCoupon,
+      );
+      calculatedDiscount += preorderPricing.base_discount_total;
+
+      this.logger.log(
+        `💰 Preorder discount calculation: item_id=${cartItem.item?.id}, base_discount=₹${preorderPricing.base_discount_total.toFixed(2)}, tax_on_discounted=₹${preorderPricing.tax_on_discounted_subtotal.toFixed(2)}, final=₹${preorderPricing.final_order_price.toFixed(2)} (coupon value=${Number(preorderCoupon.value ?? 0)} ${(preorderCoupon.value_type ?? ValueType.RUPEES) as ValueType})`,
+      );
+    }
+
+    return Number(calculatedDiscount.toFixed(2));
   }
 
   private calculatePreorderPricingBreakdown(
@@ -2931,10 +3013,11 @@ export class CartService {
             where: { code: applyCouponDto.coupon_code },
           });
 
+          const isFreeDeliveryOnly = coupon?.type === CouponType.FREE_DELIVERY;
           cart.coupon_code = applyCouponDto.coupon_code;
           cart.coupon_reservation_token = existingToken;
           cart.coupon_id = coupon?.id;
-          cart.discount_amount = validation.discount_amount || 0;
+          cart.discount_amount = isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0);
 
           if (validation.delivery_waived) {
             cart.delivery_fee = 0;
@@ -2965,7 +3048,7 @@ export class CartService {
           );
 
           this.logger.log(
-            `✅ Coupon reapplied using existing reservation. Discount: ₹${validation.discount_amount}`,
+            `✅ Coupon reapplied using existing reservation. Discount: ₹${cart.discount_amount}, delivery_waived: ${validation.delivery_waived}`,
           );
 
           return {
@@ -2973,7 +3056,7 @@ export class CartService {
             message: "Coupon applied successfully",
             data: {
               coupon_code: applyCouponDto.coupon_code,
-              discount_amount: validation.discount_amount || 0,
+              discount_amount: isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0),
               delivery_waived: validation.delivery_waived || false,
               reservation_token: existingToken,
               coupon_validation: couponValidation,
@@ -3031,13 +3114,15 @@ export class CartService {
         where: { code: applyCouponDto.coupon_code },
       });
 
-      // Update cart with coupon details
+      // Update cart with coupon details.
+      // For FREE_DELIVERY coupons, discount_amount is 0 because the benefit is
+      // expressed through the zeroed delivery_fee, not as an item discount.
+      const isFreeDeliveryOnly = coupon?.type === CouponType.FREE_DELIVERY;
       cart.coupon_code = applyCouponDto.coupon_code;
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = coupon?.id;
-      cart.discount_amount = validation.discount_amount || 0;
+      cart.discount_amount = isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0);
 
-      // If delivery is waived, set delivery fee to 0
       if (validation.delivery_waived) {
         cart.delivery_fee = 0;
         cart.delivery_fee_tax = 0;
@@ -3045,10 +3130,9 @@ export class CartService {
 
       await this.cartRepository.save(cart);
 
-      // Recalculate cart totals
+      // Recalculate cart totals (sets delivery_waived + original_delivery_fee)
       await this.updateCartTotals(cart.id);
 
-      // Get updated cart summary
       const updatedCart = await this.cartRepository.findOne({
         where: { id: cart.id },
         relations: [
@@ -3070,7 +3154,7 @@ export class CartService {
       );
 
       this.logger.log(
-        `✅ Coupon applied successfully. Discount: ₹${validation.discount_amount}`,
+        `✅ Coupon applied successfully. Discount: ₹${cart.discount_amount}, delivery_waived: ${validation.delivery_waived}`,
       );
 
       return {
@@ -3078,7 +3162,7 @@ export class CartService {
         message: "Coupon applied successfully",
         data: {
           coupon_code: applyCouponDto.coupon_code,
-          discount_amount: validation.discount_amount || 0,
+          discount_amount: isFreeDeliveryOnly ? 0 : (validation.discount_amount || 0),
           delivery_waived: validation.delivery_waived || false,
           reservation_token: validation.reservation_token,
           coupon_validation: couponValidation,
@@ -3202,60 +3286,17 @@ export class CartService {
           cart.coupon_id = coupon?.id;
 
           if (coupon?.type === CouponType.PREORDER) {
-            // Calculate preorder discount using coupon.value/value_type
-            // For preorder items: discount = base_discount + tax_saved so that GST is
-            // charged on the discounted base (balance amount)
-            let preorderDiscount = 0;
-
             const cartItems = await this.cartItemRepository.find({
               where: { cart: { id: cart.id } },
               relations: ["item"],
             });
 
-            for (const cartItem of cartItems) {
-              if (!cartItem.is_preorder) continue;
-              const quantity = cartItem.quantity || 1;
-              const itemSubtotalPerUnit =
-                Number(cartItem.total_price || 0) / quantity;
-              const basePrice = itemSubtotalPerUnit;
-
-              const couponValue = Number(coupon.value ?? 0);
-              const valueType = (coupon.value_type ?? ValueType.RUPEES) as ValueType;
-              const maxDiscount =
-                coupon.max_discount_amount != null
-                  ? Number(coupon.max_discount_amount)
-                  : Infinity;
-
-              let itemDiscountAmount = 0;
-              if (basePrice > 0) {
-                if (valueType === ValueType.PERCENT) {
-                  const percentDiscount = (basePrice * couponValue) / 100;
-                  itemDiscountAmount = Math.min(
-                    percentDiscount,
-                    maxDiscount,
-                    basePrice,
-                  );
-                } else {
-                  itemDiscountAmount = Math.min(couponValue, basePrice);
-                }
-                itemDiscountAmount = Math.max(0, itemDiscountAmount);
-              }
-
-              const baseDiscountPerUnit = itemDiscountAmount;
-              const baseDiscountTotal = baseDiscountPerUnit * quantity;
-              const taxRate = cartItem.item.tax_rate || 0;
-              const discountTaxComponent =
-                (baseDiscountTotal * taxRate) / 100;
-              const itemDiscount = Math.max(
-                0,
-                baseDiscountTotal + discountTaxComponent,
-              );
-              preorderDiscount += itemDiscount;
-            }
-
-            cart.discount_amount = Number(preorderDiscount.toFixed(2));
+            cart.discount_amount = this.calculatePreorderDiscountForCart(
+              cartItems,
+              coupon,
+            );
             this.logger.log(
-              `💰 Preorder coupon discount (reuse): ₹${cart.discount_amount} (base_discount + tax_saved)`,
+              `💰 Preorder coupon discount (reuse): ₹${cart.discount_amount}`,
             );
           } else {
             cart.discount_amount = validation.discount_amount || 0;
@@ -3319,62 +3360,18 @@ export class CartService {
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = coupon?.id;
 
-      // For preorder coupons: calculate discount using coupon.value/value_type
-      // For preorder items: discount = base_discount + tax_saved so that GST is
-      // charged on the discounted base (balance amount)
       if (coupon?.type === CouponType.PREORDER) {
-        let preorderDiscount = 0;
-
         const cartItems = await this.cartItemRepository.find({
           where: { cart: { id: cart.id } },
           relations: ["item"],
         });
 
-        for (const cartItem of cartItems) {
-          if (!cartItem.is_preorder) continue;
-          const quantity = cartItem.quantity || 1;
-          const itemSubtotalPerUnit =
-            Number(cartItem.total_price || 0) / quantity;
-          const basePrice = itemSubtotalPerUnit;
-
-          const couponValue = Number(coupon.value ?? 0);
-          const valueType = (coupon.value_type ?? ValueType.RUPEES) as ValueType;
-          const maxDiscount =
-            coupon.max_discount_amount != null
-              ? Number(coupon.max_discount_amount)
-              : Infinity;
-
-          let itemDiscountAmount = 0;
-          if (basePrice > 0) {
-            if (valueType === ValueType.PERCENT) {
-              const percentDiscount = (basePrice * couponValue) / 100;
-              itemDiscountAmount = Math.min(
-                percentDiscount,
-                maxDiscount,
-                basePrice,
-              );
-            } else {
-              itemDiscountAmount = Math.min(couponValue, basePrice);
-            }
-            itemDiscountAmount = Math.max(0, itemDiscountAmount);
-          }
-
-          const baseDiscountPerUnit = itemDiscountAmount;
-          const baseDiscountTotal = baseDiscountPerUnit * quantity;
-          const taxRate = cartItem.item.tax_rate || 0;
-          const discountTaxComponent =
-            (baseDiscountTotal * taxRate) / 100;
-
-          const itemDiscount = Math.max(
-            0,
-            baseDiscountTotal + discountTaxComponent,
-          );
-          preorderDiscount += itemDiscount;
-        }
-
-        cart.discount_amount = Number(preorderDiscount.toFixed(2));
+        cart.discount_amount = this.calculatePreorderDiscountForCart(
+          cartItems,
+          coupon,
+        );
         this.logger.log(
-          `💰 Preorder coupon discount: ₹${cart.discount_amount} (base_discount + tax_saved)`,
+          `💰 Preorder coupon discount: ₹${cart.discount_amount}`,
         );
       } else {
         cart.discount_amount = validation.discount_amount || 0;
@@ -3402,8 +3399,8 @@ export class CartService {
 
   /**
    * Apply preorder coupon with calculated discount amount
-   * For preorder items: discount = base_discount + tax_saved
-   * (so that GST is effectively charged on the discounted base amount)
+   * For preorder items: discount = base_discount only (flat coupon value).
+   * GST is computed on the discounted subtotal in updateCartTotals.
    */
   private async applyPreorderCouponWithDiscount(
     userId: number,
@@ -3413,7 +3410,7 @@ export class CartService {
   ) {
     try {
       this.logger.log(
-        `🎟️ Applying preorder coupon ${preorderCoupon.code} with discount: ₹${discountAmount} (base_discount + tax_saved)`,
+        `🎟️ Applying preorder coupon ${preorderCoupon.code} with discount: ₹${discountAmount}`,
       );
 
       // Get user's active cart
@@ -3460,11 +3457,10 @@ export class CartService {
       cart.coupon_reservation_token = validation.reservation_token;
       cart.coupon_id = preorderCoupon.id;
 
-      // For preorder coupons: set discount_amount = base_discount + tax_saved
       cart.discount_amount = discountAmount;
 
       this.logger.log(
-        `💰 Preorder coupon discount: ₹${discountAmount} (base_discount + tax_saved)`,
+        `💰 Preorder coupon discount: ₹${discountAmount}`,
       );
 
       // If delivery is waived, set delivery fee to 0
@@ -3524,11 +3520,13 @@ export class CartService {
         }
       }
 
-      // Remove coupon from cart
-      cart.coupon_code = undefined;
-      cart.coupon_reservation_token = undefined;
-      cart.coupon_id = undefined;
+      // Remove coupon from cart (use null, not undefined — TypeORM skips undefined in UPDATE)
+      cart.coupon_code = null as any;
+      cart.coupon_reservation_token = null as any;
+      cart.coupon_id = null as any;
       cart.discount_amount = 0;
+      cart.delivery_waived = false;
+      cart.original_delivery_fee = null as any;
 
       await this.cartRepository.save(cart);
 
@@ -3650,7 +3648,7 @@ export class CartService {
       return internalItemIds;
     }
 
-    const singleItemId = Number(coupon.type_meta?.item_id);
+    const singleItemId = Number(coupon.type_meta?.internal_item_id);
     if (Number.isFinite(singleItemId) && singleItemId > 0) {
       return [singleItemId];
     }
@@ -3962,7 +3960,7 @@ export class CartService {
     if (snapshot.coupon_validation.is_valid) {
       let syncedDiscountAmount = Number(snapshot.validation?.discount_amount || 0);
 
-      // Preserve preorder discount semantics: base_discount + tax_saved.
+      // Preorder discount uses base_discount only (tax computed on discounted subtotal).
       if (snapshot.coupon?.type === CouponType.PREORDER) {
         syncedDiscountAmount = this.calculatePreorderDiscountForCart(
           cart.cart_items || [],
@@ -4012,10 +4010,12 @@ export class CartService {
     }
 
     await this.cartRepository.update(cartId, {
-      coupon_code: undefined,
-      coupon_reservation_token: undefined,
-      coupon_id: undefined,
+      coupon_code: null as any,
+      coupon_reservation_token: null as any,
+      coupon_id: null as any,
       discount_amount: 0,
+      delivery_waived: false,
+      original_delivery_fee: null as any,
     });
     await this.updateCartTotals(cartId);
 
@@ -4047,7 +4047,7 @@ export class CartService {
         preorderCoupon,
       );
 
-      preorderDiscount += preorderPricing.total_discount;
+      preorderDiscount += preorderPricing.base_discount_total;
     }
 
     return Number(preorderDiscount.toFixed(2));

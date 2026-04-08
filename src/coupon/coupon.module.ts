@@ -9,6 +9,7 @@ import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
 import { Cart } from "../cart/entities/cart.entity";
 import { CartItem } from "../cart/entities/cart-item.entity";
+import { Order } from "../order/entities/order.entity";
 import { CouponService } from "./services/coupon.service";
 import { CouponExportService } from "./services/coupon-export.service";
 import { RedisCouponService } from "./services/redis-coupon.service";
@@ -32,6 +33,7 @@ import { AdminAccessModule } from "../super-admin-access/super-admin-access.modu
       Store,
       Cart,
       CartItem,
+      Order,
     ]),
   ],
   controllers: [AdminCouponController],

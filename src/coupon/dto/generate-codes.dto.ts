@@ -125,6 +125,66 @@ export class NthOrderCouponTypeMetaDto {
   nth: number;
 }
 
+export class PreorderCouponTypeMetaDto {
+  @ApiProperty({
+    description:
+      "Store reference ID. The preorder coupon is scoped to this store.",
+    example: "STORE-REF-44",
+  })
+  @IsNotEmpty()
+  @IsString()
+  store_reference_id: string;
+
+  @ApiProperty({
+    description:
+      "Item reference ID (single item). The preorder discount applies to this item.",
+    example: "ITEM-REF-123",
+  })
+  @IsNotEmpty()
+  @IsString()
+  item_reference_id: string;
+
+  @ApiProperty({
+    description:
+      "Optional display title shown to the buyer for this preorder campaign.",
+    example: "Special Preorder Offer",
+    required: false,
+  })
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @ApiProperty({
+    description:
+      "Delivery date for this preorder (ISO 8601). Must be a future date.",
+    example: "2025-02-15T12:00:00Z",
+  })
+  @IsNotEmpty()
+  @IsDateString()
+  delivery_date: string;
+
+  @ApiProperty({
+    description: "Waive delivery fee in addition to the preorder discount",
+    example: true,
+    required: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  free_delivery?: boolean;
+
+  @ApiProperty({
+    description:
+      "Optional delivery fee cap. Allowed only when free_delivery is true.",
+    example: 50,
+    required: false,
+  })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  delivery_fee_cap?: number;
+}
+
 export class GenerateCodesDto {
   @ApiProperty({
     description: "Number of codes to generate",
@@ -188,28 +248,43 @@ export class GenerateCodesDto {
   type: CouponType;
 
   @ApiProperty({
-    description: "Discount value (rupees or percent)",
+    description:
+      "Discount value (rupees or percent). Omit for free_delivery — server defaults to 0.",
     example: 20,
+    required: false,
   })
+  @ValidateIf((o) => o.type !== CouponType.FREE_DELIVERY)
   @IsNotEmpty()
   @Type(() => Number)
   @IsNumber()
-  @ValidateIf((o) => o.value_type === ValueType.PERCENT || o.type === CouponType.PERCENT)
+  @ValidateIf(
+    (o) =>
+      o.type !== CouponType.FREE_DELIVERY &&
+      (o.value_type === ValueType.PERCENT || o.type === CouponType.PERCENT),
+  )
   @Min(1)
   @Max(100)
-  @ValidateIf((o) => o.value_type !== ValueType.PERCENT && o.type !== CouponType.PERCENT)
+  @ValidateIf(
+    (o) =>
+      o.type !== CouponType.FREE_DELIVERY &&
+      o.value_type !== ValueType.PERCENT &&
+      o.type !== CouponType.PERCENT,
+  )
   @Min(0)
-  value: number;
+  value?: number;
 
   @ApiProperty({
-    description: "Value type. Use 'percent' for percentage discount, 'rupees' for flat discount",
+    description:
+      "Value type. Omit for free_delivery — server defaults to rupees (value 0).",
     enum: ValueType,
     example: ValueType.PERCENT,
     enumName: "ValueType",
+    required: false,
   })
+  @ValidateIf((o) => o.type !== CouponType.FREE_DELIVERY)
   @IsNotEmpty()
   @IsEnum(ValueType)
-  value_type: ValueType;
+  value_type?: ValueType;
 
   @ApiProperty({
     description: "Maximum discount amount (required for percent type)",
@@ -300,8 +375,9 @@ export class GenerateCodesDto {
   preview?: boolean;
 
   @ApiProperty({
-    description: "Type-specific metadata (JSON). Required fields vary by coupon type:\n" +
-      "- preorder: { item_id: number, title: string, delivery_date: string (ISO datetime: YYYY-MM-DDTHH:mm:ssZ or YYYY-MM-DD HH:mm:ss), free_delivery?: boolean }\n" +
+    description:
+      "Type-specific metadata (JSON). Required fields vary by coupon type:\n" +
+      "- preorder: { store_reference_id: string, item_reference_id: string, delivery_date: string (ISO 8601, must be future), title?: string, free_delivery?: boolean, delivery_fee_cap?: number }\n" +
       "- nth_order: { nth: number }\n" +
       "- percent: { store_reference_id?: string, item_reference_ids?: string[], free_delivery?: boolean, delivery_fee_cap?: number }\n" +
       "  Rules for percent: store is optional (global coupon). If item_reference_ids is provided, store_reference_id is mandatory.\n" +
@@ -318,7 +394,8 @@ export class GenerateCodesDto {
     (o) =>
       o.type === CouponType.PERCENT ||
       o.type === CouponType.FLAT ||
-      o.type === CouponType.NTH_ORDER,
+      o.type === CouponType.NTH_ORDER ||
+      o.type === CouponType.PREORDER,
   )
   @ValidateNested()
   @Type((typeInfo) => {
@@ -334,12 +411,17 @@ export class GenerateCodesDto {
       return NthOrderCouponTypeMetaDto;
     }
 
+    if (typeInfo?.object?.type === CouponType.PREORDER) {
+      return PreorderCouponTypeMetaDto;
+    }
+
     return Object;
   })
   type_meta?:
     | PercentCouponTypeMetaDto
     | FlatCouponTypeMetaDto
     | NthOrderCouponTypeMetaDto
+    | PreorderCouponTypeMetaDto
     | Record<string, any>;
 }
 

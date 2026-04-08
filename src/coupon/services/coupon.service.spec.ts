@@ -23,6 +23,7 @@ import { Item } from "../../item/entities/item.entity";
 import { Store } from "../../store/entities/store.entity";
 import { Cart } from "../../cart/entities/cart.entity";
 import { CartItem } from "../../cart/entities/cart-item.entity";
+import { Order } from "../../order/entities/order.entity";
 
 describe("CouponService", () => {
   let service: CouponService;
@@ -34,6 +35,7 @@ describe("CouponService", () => {
   let mockStoreRepo: any;
   let mockCartRepo: any;
   let mockCartItemRepo: any;
+  let mockOrderRepo: any;
   let mockRedisService: any;
   let mockDataSource: any;
   let mockConfigService: any;
@@ -54,6 +56,14 @@ describe("CouponService", () => {
       create: jest.fn(),
       save: jest.fn(),
       update: jest.fn(),
+      createQueryBuilder: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        addOrderBy: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+        getMany: jest.fn().mockResolvedValue([]),
+      }),
     };
 
     mockRedemptionRepo = {
@@ -86,6 +96,10 @@ describe("CouponService", () => {
 
     mockCartItemRepo = {
       find: jest.fn(),
+    };
+
+    mockOrderRepo = {
+      findOne: jest.fn(),
     };
 
     mockRedisService = {
@@ -146,6 +160,10 @@ describe("CouponService", () => {
         {
           provide: getRepositoryToken(CartItem),
           useValue: mockCartItemRepo,
+        },
+        {
+          provide: getRepositoryToken(Order),
+          useValue: mockOrderRepo,
         },
         {
           provide: RedisCouponService,
@@ -1287,6 +1305,20 @@ describe("CouponService", () => {
         } as any),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it("should accept free_delivery without value and value_type (defaults to 0 and rupees)", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockCouponRepo.find.mockResolvedValue([]);
+
+      const result = await service.generateCodes(1, {
+        count: 1,
+        preview: true,
+        type: CouponType.FREE_DELIVERY,
+      } as any);
+
+      expect(result.preview).toBe(true);
+      expect(result.codes).toHaveLength(1);
+    });
   });
 
   describe("generateCodes - code format standard", () => {
@@ -1515,6 +1547,34 @@ describe("CouponService", () => {
 
       expect(result.valid).toBe(false);
       expect(result.reason_code).toBe("NOT_FIRST_ORDER");
+    });
+
+    it("should block first_order coupon reapply when COD order has order_id linked redemption (COD double-apply fix)", async () => {
+      const coupon: Partial<Coupon> = {
+        id: 1,
+        code: "FIRST50",
+        type: CouponType.FIRST_ORDER,
+        value: 50,
+        value_type: ValueType.RUPEES,
+        status: CouponStatus.ACTIVE,
+        user_usage_limit: 1,
+        min_cart_value: 0,
+        campaign: { id: 1, status: "active" as any } as any,
+      };
+
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      // redemption count: 1 RESERVED row with order_id set (COD order placed but undelivered)
+      mockRedemptionRepo.count.mockResolvedValue(1);
+
+      const result = await service.validateCoupon({
+        code: "FIRST50",
+        user_id: 123,
+        cart_total: 1000,
+        pincode: "600001",
+      });
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("USER_LIMIT_EXCEEDED");
     });
   });
 
@@ -1760,6 +1820,23 @@ describe("CouponService", () => {
 
       expect(result.valid).toBe(true);
       expect(mockDataSource.query).toHaveBeenCalledTimes(2);
+    });
+
+    it("should throw when fallback order table query also fails", async () => {
+      mockCouponRepo.findOne.mockResolvedValue(nthCoupon);
+      mockRedemptionRepo.count.mockResolvedValue(0);
+      mockDataSource.query
+        .mockRejectedValueOnce(new Error("user_order_metrics unavailable"))
+        .mockRejectedValueOnce(new Error("orders table unavailable"));
+
+      await expect(
+        service.validateCoupon({
+          code: "NTH100",
+          user_id: 123,
+          cart_total: 1000,
+          pincode: "600001",
+        }),
+      ).rejects.toThrow("Failed to determine order eligibility for coupon validation");
     });
 
     it("should block reapply when placed nth-order redemption was rolled back", async () => {
@@ -2037,6 +2114,200 @@ describe("CouponService", () => {
 
       expect(mockRedisService.incrementQuota).not.toHaveBeenCalled();
     });
+
+    it("should auto-revoke coupon via DB fallback path when quota is exhausted", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue({
+        id: 881,
+        coupon_id: 78,
+        status: RedemptionStatus.RESERVED,
+        reserved_token: "expired-token-revoke",
+        amount_applied: null,
+        delivery_waived: false,
+      });
+      mockRedisService.getReservation.mockResolvedValue(null);
+      mockDataSource.query.mockResolvedValue([
+        { id: 703, user_id: 123, discount_amount: 50, delivery_fee: 0 },
+      ]);
+
+      const coupon = {
+        id: 78,
+        code: "MULTI5",
+        type: CouponType.FLAT,
+        type_meta: {},
+        global_usage_limit: 5,
+        status: CouponStatus.ACTIVE,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
+      // After this redemption, count equals the limit
+      mockRedemptionRepo.count.mockResolvedValue(5);
+      mockCouponRepo.update.mockResolvedValue({ affected: 1 });
+
+      await service.redeemCoupon({
+        reservation_token: "expired-token-revoke",
+        order_id: 703,
+        user_id: 123,
+        payment_status: PaymentStatus.PAID,
+      });
+
+      expect(mockCouponRepo.update).toHaveBeenCalledWith(
+        { id: 78, status: CouponStatus.ACTIVE },
+        { status: CouponStatus.REVOKED },
+      );
+    });
+
+    it("should NOT auto-revoke via DB fallback when quota is not exhausted", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue({
+        id: 882,
+        coupon_id: 79,
+        status: RedemptionStatus.RESERVED,
+        reserved_token: "expired-token-no-revoke",
+        amount_applied: null,
+        delivery_waived: false,
+      });
+      mockRedisService.getReservation.mockResolvedValue(null);
+      mockDataSource.query.mockResolvedValue([
+        { id: 704, user_id: 123, discount_amount: 50, delivery_fee: 0 },
+      ]);
+
+      const coupon = {
+        id: 79,
+        code: "MULTI100",
+        type: CouponType.FLAT,
+        type_meta: {},
+        global_usage_limit: 100,
+        status: CouponStatus.ACTIVE,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
+      // Only 1 of 100 redeemed — not exhausted
+      mockRedemptionRepo.count.mockResolvedValue(1);
+
+      await service.redeemCoupon({
+        reservation_token: "expired-token-no-revoke",
+        order_id: 704,
+        user_id: 123,
+        payment_status: PaymentStatus.PAID,
+      });
+
+      expect(mockCouponRepo.update).not.toHaveBeenCalled();
+    });
+
+    it("should NOT auto-revoke via DB fallback when global_usage_limit is null", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue({
+        id: 883,
+        coupon_id: 80,
+        status: RedemptionStatus.RESERVED,
+        reserved_token: "expired-token-unlimited",
+        amount_applied: null,
+        delivery_waived: false,
+      });
+      mockRedisService.getReservation.mockResolvedValue(null);
+      mockDataSource.query.mockResolvedValue([
+        { id: 705, user_id: 123, discount_amount: 50, delivery_fee: 0 },
+      ]);
+
+      const coupon = {
+        id: 80,
+        code: "UNLIMITED",
+        type: CouponType.FLAT,
+        type_meta: {},
+        global_usage_limit: undefined,
+        status: CouponStatus.ACTIVE,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
+
+      await service.redeemCoupon({
+        reservation_token: "expired-token-unlimited",
+        order_id: 705,
+        user_id: 123,
+        payment_status: PaymentStatus.PAID,
+      });
+
+      // count should never be called for unlimited coupons
+      expect(mockRedemptionRepo.count).not.toHaveBeenCalled();
+      expect(mockCouponRepo.update).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("getCouponStatus", () => {
+    it("should return valid=false and correct message for a REVOKED coupon", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        code: "REVOKED1",
+        status: CouponStatus.REVOKED,
+        start_at: undefined,
+        end_at: undefined,
+        campaign: { status: "active" },
+      });
+
+      const result = await service.getCouponStatus("REVOKED1");
+
+      expect(result.valid).toBe(false);
+      expect(result.status).toBe(CouponStatus.REVOKED);
+      expect(result.message).toContain("revoked");
+    });
+
+    it("should return valid=false and correct message for an EXPIRED coupon (status-based)", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        code: "EXPIRED1",
+        status: CouponStatus.EXPIRED,
+        start_at: undefined,
+        end_at: new Date("2025-01-01"), // also past, but status wins
+        campaign: { status: "active" },
+      });
+
+      const result = await service.getCouponStatus("EXPIRED1");
+
+      expect(result.valid).toBe(false);
+      expect(result.status).toBe(CouponStatus.EXPIRED);
+      expect(result.message).toContain("expired");
+    });
+
+    it("should return valid=false for ACTIVE coupon whose end_at passed (cron not yet run)", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        code: "PAST_END",
+        status: CouponStatus.ACTIVE, // cron hasn't run yet
+        start_at: undefined,
+        end_at: new Date("2020-01-01"),
+        campaign: { status: "active" },
+      });
+
+      const result = await service.getCouponStatus("PAST_END");
+
+      expect(result.valid).toBe(false);
+      expect(result.message).toContain("expired");
+    });
+
+    it("should return valid=false for INACTIVE coupon", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        code: "INACTIVE1",
+        status: CouponStatus.INACTIVE,
+        start_at: undefined,
+        end_at: undefined,
+        campaign: { status: "active" },
+      });
+
+      const result = await service.getCouponStatus("INACTIVE1");
+
+      expect(result.valid).toBe(false);
+      expect(result.message).toContain("inactive");
+    });
+
+    it("should return valid=true for a fully active coupon", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        code: "GOOD1",
+        status: CouponStatus.ACTIVE,
+        start_at: undefined,
+        end_at: undefined,
+        campaign: { status: "active" },
+      });
+
+      const result = await service.getCouponStatus("GOOD1");
+
+      expect(result.valid).toBe(true);
+      expect(result.message).toBe("Coupon is valid");
+    });
   });
 
   describe("validateCoupon - free_delivery edge case (negative delivery_fee)", () => {
@@ -2076,7 +2347,7 @@ describe("CouponService", () => {
   });
 
   describe("rollbackCoupon - no restore policy", () => {
-    it("should mark preorder placed reservation as rolled_back without restoring quota", async () => {
+    it("should mark preorder placed reservation as rolled_back without restoring quota when order is paid", async () => {
       mockRedisService.getReservation.mockResolvedValue({
         coupon_id: 300,
       });
@@ -2092,6 +2363,11 @@ describe("CouponService", () => {
       mockCouponRepo.findOne.mockResolvedValue({
         id: 300,
         type: CouponType.PREORDER,
+      });
+
+      mockOrderRepo.findOne.mockResolvedValue({
+        id: 456,
+        payment_status: "paid",
       });
 
       mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
@@ -2116,6 +2392,44 @@ describe("CouponService", () => {
         "placed-token-1",
       );
       expect(mockRedisService.releaseReservation).not.toHaveBeenCalled();
+    });
+
+    it("should restore quota for preorder reservation linked to unpaid order", async () => {
+      mockRedisService.getReservation.mockResolvedValue({
+        coupon_id: 301,
+      });
+
+      mockRedemptionRepo.findOne.mockResolvedValue({
+        id: 998,
+        coupon_id: 301,
+        order_id: 789,
+        status: RedemptionStatus.RESERVED,
+        reserved_token: "unpaid-preorder-token",
+      });
+
+      mockCouponRepo.findOne.mockResolvedValue({
+        id: 301,
+        type: CouponType.PREORDER,
+      });
+
+      mockOrderRepo.findOne.mockResolvedValue({
+        id: 789,
+        payment_status: "pending",
+      });
+
+      mockRedemptionRepo.update.mockResolvedValue({ affected: 1 });
+      mockRedisService.releaseReservation.mockResolvedValue(true);
+
+      const result = await service.rollbackCoupon({
+        reservation_token: "unpaid-preorder-token",
+        reason: "Online payment abandoned",
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockRedisService.releaseReservation).toHaveBeenCalledWith(
+        301,
+        "unpaid-preorder-token",
+      );
     });
 
     it("should not restore quota for already rolled back reservation", async () => {
@@ -2315,6 +2629,613 @@ describe("CouponService", () => {
         },
         expect.any(String),
       );
+    });
+  });
+
+  describe("markExpiredCoupons", () => {
+    it("should bulk-update active coupons whose end_at has passed to EXPIRED", async () => {
+      const qb: any = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 3 }),
+      };
+      mockCouponRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.markExpiredCoupons();
+
+      expect(result.updated).toBe(3);
+      expect(qb.update).toHaveBeenCalledWith(expect.anything());
+      expect(qb.set).toHaveBeenCalledWith({ status: CouponStatus.EXPIRED });
+      expect(qb.where).toHaveBeenCalledWith("status = :active", {
+        active: CouponStatus.ACTIVE,
+      });
+    });
+
+    it("should return 0 when no coupons match", async () => {
+      const qb: any = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockResolvedValue({ affected: 0 }),
+      };
+      mockCouponRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.markExpiredCoupons();
+
+      expect(result.updated).toBe(0);
+    });
+
+    it("should swallow errors and return 0 when DB fails", async () => {
+      const qb: any = {
+        update: jest.fn().mockReturnThis(),
+        set: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        execute: jest.fn().mockRejectedValue(new Error("DB error")),
+      };
+      mockCouponRepo.createQueryBuilder = jest.fn().mockReturnValue(qb);
+
+      const result = await service.markExpiredCoupons();
+
+      expect(result.updated).toBe(0);
+    });
+  });
+
+  describe("updateCouponStatus", () => {
+    it("should set status to INACTIVE for an active coupon", async () => {
+      const coupon: Partial<Coupon> = {
+        id: 1,
+        code: "TEST",
+        status: CouponStatus.ACTIVE,
+        end_at: undefined,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      mockCouponRepo.save.mockImplementation(async (c: any) => c);
+
+      const result = await service.updateCouponStatus(1, CouponStatus.INACTIVE);
+
+      expect(result.status).toBe(CouponStatus.INACTIVE);
+      expect(mockCouponRepo.save).toHaveBeenCalled();
+    });
+
+    it("should set status to ACTIVE for an inactive coupon with no end_at", async () => {
+      const coupon: Partial<Coupon> = {
+        id: 2,
+        code: "TEST2",
+        status: CouponStatus.INACTIVE,
+        end_at: undefined,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+      mockCouponRepo.save.mockImplementation(async (c: any) => c);
+
+      const result = await service.updateCouponStatus(2, CouponStatus.ACTIVE);
+
+      expect(result.status).toBe(CouponStatus.ACTIVE);
+    });
+
+    it("should throw BadRequestException when trying to change a REVOKED coupon", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        id: 3,
+        code: "REVOKED_CODE",
+        status: CouponStatus.REVOKED,
+      });
+
+      await expect(
+        service.updateCouponStatus(3, CouponStatus.INACTIVE),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should throw BadRequestException when trying to change an EXPIRED coupon", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        id: 4,
+        code: "EXPIRED_CODE",
+        status: CouponStatus.EXPIRED,
+      });
+
+      await expect(
+        service.updateCouponStatus(4, CouponStatus.ACTIVE),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should throw BadRequestException when re-activating a coupon past end_at", async () => {
+      mockCouponRepo.findOne.mockResolvedValue({
+        id: 5,
+        code: "PAST_CODE",
+        status: CouponStatus.INACTIVE,
+        end_at: new Date("2020-01-01"),
+      });
+
+      await expect(
+        service.updateCouponStatus(5, CouponStatus.ACTIVE),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should throw NotFoundException when coupon does not exist", async () => {
+      mockCouponRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.updateCouponStatus(999, CouponStatus.INACTIVE),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
+  describe("redeemCoupon - auto-revoke on quota exhaustion", () => {
+    const makeQueryRunner = (
+      redemptionRecord: any,
+      redeemedCountAfterSave: number,
+    ) => ({
+      connect: jest.fn().mockResolvedValue(undefined),
+      startTransaction: jest.fn().mockResolvedValue(undefined),
+      commitTransaction: jest.fn().mockResolvedValue(undefined),
+      rollbackTransaction: jest.fn().mockResolvedValue(undefined),
+      release: jest.fn().mockResolvedValue(undefined),
+      manager: {
+        findOne: jest.fn().mockResolvedValue(redemptionRecord),
+        save: jest.fn().mockResolvedValue(undefined),
+        count: jest.fn().mockResolvedValue(redeemedCountAfterSave),
+      },
+    });
+
+    it("should mark coupon REVOKED when multi-use quota is exhausted on redemption", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue(null);
+      mockRedisService.getReservation.mockResolvedValue({
+        coupon_id: 10,
+        cart_total: 500,
+        eligible_item_subtotal: 500,
+        delivery_fee: 0,
+      });
+
+      const coupon: Partial<Coupon> = {
+        id: 10,
+        code: "MULTI10",
+        type: CouponType.FLAT,
+        value: 50,
+        value_type: ValueType.RUPEES,
+        status: CouponStatus.ACTIVE,
+        global_usage_limit: 5,
+        min_cart_value: 0,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+
+      const reservedRedemption = {
+        id: 201,
+        status: RedemptionStatus.RESERVED,
+        amount_applied: null,
+        delivery_waived: false,
+      };
+
+      // After the save, redeemed count equals the limit (quota exhausted)
+      const qr = makeQueryRunner(reservedRedemption, 5);
+      mockDataSource.createQueryRunner.mockReturnValue(qr);
+
+      await service.redeemCoupon({
+        reservation_token: "tok-multi",
+        order_id: 300,
+        user_id: 1,
+        payment_status: PaymentStatus.PAID,
+        idempotency_key: "key-multi",
+      } as any);
+
+      // The manager.save should have been called twice:
+      // once for the redemption row, once for the coupon (REVOKED)
+      const saveCalls = qr.manager.save.mock.calls;
+      const couponSaveCall = saveCalls.find(
+        (args: any[]) => args[0]?.status === CouponStatus.REVOKED,
+      );
+      expect(couponSaveCall).toBeDefined();
+    });
+
+    it("should NOT mark coupon REVOKED when quota is not yet exhausted", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue(null);
+      mockRedisService.getReservation.mockResolvedValue({
+        coupon_id: 11,
+        cart_total: 500,
+        eligible_item_subtotal: 500,
+        delivery_fee: 0,
+      });
+
+      const coupon: Partial<Coupon> = {
+        id: 11,
+        code: "MULTI100",
+        type: CouponType.FLAT,
+        value: 50,
+        value_type: ValueType.RUPEES,
+        status: CouponStatus.ACTIVE,
+        global_usage_limit: 100,
+        min_cart_value: 0,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+
+      const reservedRedemption = {
+        id: 202,
+        status: RedemptionStatus.RESERVED,
+        amount_applied: null,
+        delivery_waived: false,
+      };
+
+      // Only 1 redemption so far — not exhausted
+      const qr = makeQueryRunner(reservedRedemption, 1);
+      mockDataSource.createQueryRunner.mockReturnValue(qr);
+
+      await service.redeemCoupon({
+        reservation_token: "tok-multi2",
+        order_id: 301,
+        user_id: 2,
+        payment_status: PaymentStatus.PAID,
+        idempotency_key: "key-multi2",
+      } as any);
+
+      const saveCalls = qr.manager.save.mock.calls;
+      const revokedSaveCall = saveCalls.find(
+        (args: any[]) => args[0]?.status === CouponStatus.REVOKED,
+      );
+      expect(revokedSaveCall).toBeUndefined();
+    });
+
+    it("should NOT auto-revoke when global_usage_limit is null (unlimited)", async () => {
+      mockRedemptionRepo.findOne.mockResolvedValue(null);
+      mockRedisService.getReservation.mockResolvedValue({
+        coupon_id: 12,
+        cart_total: 500,
+        eligible_item_subtotal: 500,
+        delivery_fee: 0,
+      });
+
+      const coupon: Partial<Coupon> = {
+        id: 12,
+        code: "UNLIMITED",
+        type: CouponType.FLAT,
+        value: 50,
+        value_type: ValueType.RUPEES,
+        status: CouponStatus.ACTIVE,
+        global_usage_limit: undefined,
+        min_cart_value: 0,
+      };
+      mockCouponRepo.findOne.mockResolvedValue(coupon);
+
+      const reservedRedemption = {
+        id: 203,
+        status: RedemptionStatus.RESERVED,
+        amount_applied: null,
+        delivery_waived: false,
+      };
+
+      const qr = makeQueryRunner(reservedRedemption, 999);
+      // count should never be called for unlimited coupons
+      mockDataSource.createQueryRunner.mockReturnValue(qr);
+
+      await service.redeemCoupon({
+        reservation_token: "tok-unlimited",
+        order_id: 302,
+        user_id: 3,
+        payment_status: PaymentStatus.PAID,
+        idempotency_key: "key-unlimited",
+      } as any);
+
+      expect(qr.manager.count).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("generateCodes - preorder type", () => {
+    it("should reject preorder coupon when type_meta is missing", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when store_reference_id cannot be resolved", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-MISSING",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when item_reference_id cannot be resolved", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-MISSING",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when delivery_date is in the past", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: "2020-01-01T00:00:00Z",
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should resolve references, enrich type_meta, and set applicable_store_ids on generated coupons", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockCouponRepo.find.mockResolvedValue([]);
+      mockCouponRepo.create.mockImplementation((v: any) => v);
+      mockCouponRepo.save.mockResolvedValue([{ id: 200, code: "PREORDER1" }]);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+      mockRedisService.initializeQuota.mockResolvedValue(undefined);
+
+      const futureDate = new Date(Date.now() + 86400000 * 30).toISOString();
+
+      const result = await service.generateCodes(1, {
+        count: 1,
+        type: CouponType.PREORDER,
+        value: 15,
+        value_type: ValueType.PERCENT,
+        max_discount_amount: 300,
+        global_usage_limit: 100,
+        type_meta: {
+          store_reference_id: "STORE-REF-44",
+          item_reference_id: "ITEM-REF-123",
+          delivery_date: futureDate,
+          title: "Special Preorder",
+          free_delivery: true,
+          delivery_fee_cap: 40,
+        },
+      } as any);
+
+      expect(result.preview).toBe(false);
+      expect(result.codes).toHaveLength(1);
+
+      // Verify enriched type_meta was written onto each coupon
+      const savedCoupons = mockCouponRepo.create.mock.calls[0][0];
+      expect(savedCoupons.type_meta.internal_store_id).toBe(44);
+      expect(savedCoupons.type_meta.internal_item_id).toBe(123);
+      expect(savedCoupons.type_meta.store_reference_id).toBe("STORE-REF-44");
+      expect(savedCoupons.type_meta.item_reference_id).toBe("ITEM-REF-123");
+      expect(savedCoupons.applicable_store_ids).toEqual([44]);
+    });
+
+    it("should reject preorder coupon when store_reference_id is empty string", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "   ",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when item_reference_id is empty string", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it("should reject preorder coupon when count > 1", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+
+      await expect(
+        service.generateCodes(1, {
+          count: 2,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          global_usage_limit: 50,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("count must be 1");
+    });
+
+    it("should reject preorder coupon when global_usage_limit is missing", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          // global_usage_limit intentionally omitted
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("global_usage_limit is required");
+    });
+
+    it("should reject preorder coupon when an active campaign already exists for the same item", async () => {
+      jest.spyOn(service, "getCampaign").mockResolvedValue({ id: 1 } as any);
+      mockStoreRepo.findOne.mockResolvedValue({ id: 44, reference_id: "STORE-REF-44" });
+      mockItemRepo.findOne.mockResolvedValue({ id: 123, reference_id: "ITEM-REF-123" });
+
+      // Simulate existing active preorder coupon for the same item
+      mockCouponRepo.createQueryBuilder.mockReturnValueOnce({
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 99, code: "EXISTING-PREORDER" }),
+      });
+
+      await expect(
+        service.generateCodes(1, {
+          count: 1,
+          type: CouponType.PREORDER,
+          value: 15,
+          value_type: ValueType.PERCENT,
+          max_discount_amount: 300,
+          global_usage_limit: 50,
+          type_meta: {
+            store_reference_id: "STORE-REF-44",
+            item_reference_id: "ITEM-REF-123",
+            delivery_date: new Date(Date.now() + 86400000).toISOString(),
+          },
+        } as any),
+      ).rejects.toThrow("active preorder campaign already exists");
+    });
+  });
+
+  describe("validateCouponConfiguration - preorder", () => {
+    it("should return INVALID_COUPON_CONFIG when preorder coupon is missing internal_item_id", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_store_id: 44 }, // missing internal_item_id
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should return INVALID_COUPON_CONFIG when preorder coupon is missing internal_store_id", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_item_id: 123 }, // missing internal_store_id
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should pass config validation when preorder coupon has both internal IDs", async () => {
+      const coupon = {
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        type_meta: { internal_store_id: 44, internal_item_id: 123 },
+      } as any;
+
+      const result = (service as any).validateCouponConfiguration(coupon);
+
+      expect(result.valid).toBe(true);
+    });
+  });
+
+  describe("runValidationChecks - preorder", () => {
+    const makePreorderCoupon = (typeMeta: Record<string, any>) =>
+      ({
+        id: 1,
+        type: CouponType.PREORDER,
+        status: CouponStatus.ACTIVE,
+        value: 15,
+        value_type: ValueType.RUPEES,
+        campaign: { status: "active" },
+        type_meta: typeMeta,
+      }) as any;
+
+    it("should return INVALID_COUPON_CONFIG when stored preorder coupon has no internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44 }); // no internal_item_id
+      const dto = { user_id: 1, cart_total: 500, store_id: 44 } as any;
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_COUPON_CONFIG");
+    });
+
+    it("should return INVALID_ITEM when cart item_id does not match coupon internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44, internal_item_id: 123 });
+      const dto = { user_id: 1, cart_total: 500, store_id: 44, item_id: 999 } as any;
+      mockRedisService.getQuota.mockResolvedValue(10);
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(false);
+      expect(result.reason_code).toBe("INVALID_ITEM");
+    });
+
+    it("should pass validation when item_id matches internal_item_id", async () => {
+      const coupon = makePreorderCoupon({ internal_store_id: 44, internal_item_id: 123 });
+      const dto = { user_id: 1, cart_total: 500, store_id: 44, item_id: 123 } as any;
+      mockRedisService.getQuota.mockResolvedValue(10);
+
+      const result = await (service as any).runValidationChecks(coupon, dto);
+
+      expect(result.valid).toBe(true);
     });
   });
 });

@@ -82,10 +82,8 @@ export class OrderService {
   private readonly DEFAULT_LONGITUDE = 78.1198;
 
   private readonly metricEligibleStatuses = new Set([
-    "paid",
-    "confirmed",
-    "delivered",
-    "completed",
+    "confirmed",  // COD order placed → count immediately at confirmation
+    "delivered",  // Online order delivered (deduped by order_id via order_paid_events_dedupe)
   ]);
 
   constructor(
@@ -171,7 +169,13 @@ export class OrderService {
     correlationId: string,
   ): Promise<void> {
     if (!this.couponMetricsQueueService) {
-      await this.couponService.recordPaidOrderEvent?.(
+      if (!this.couponService?.recordPaidOrderEvent) {
+        this.logger.warn(
+          `[${correlationId}] couponService.recordPaidOrderEvent is unavailable, metrics skipped for order ${orderId}`,
+        );
+        return;
+      }
+      await this.couponService.recordPaidOrderEvent(
         orderId,
         userId,
         correlationId,
@@ -190,7 +194,13 @@ export class OrderService {
         `[${correlationId}] Failed to enqueue paid-order event, using direct fallback: ${queueError instanceof Error ? queueError.message : String(queueError)}`,
       );
 
-      await this.couponService.recordPaidOrderEvent?.(
+      if (!this.couponService?.recordPaidOrderEvent) {
+        this.logger.warn(
+          `[${correlationId}] couponService.recordPaidOrderEvent is unavailable during queue fallback, metrics skipped for order ${orderId}`,
+        );
+        return;
+      }
+      await this.couponService.recordPaidOrderEvent(
         orderId,
         userId,
         correlationId,
@@ -468,11 +478,20 @@ export class OrderService {
           this.logger.error(
             `❌ Failed to save cart item with reservation token: ${saveError.message}. Releasing reservation.`
           );
-          if (cartItem.preorder_campaign_id && reservationToken) {
-            await this.redisCouponService.releaseReservation(
-              cartItem.preorder_campaign_id,
-              reservationToken
-            );
+          if (reservationToken) {
+            try {
+              await this.couponService.rollbackCoupon({
+                reservation_token: reservationToken,
+                reason: "Cart item save failed after preorder reserve",
+              });
+            } catch {
+              if (cartItem.preorder_campaign_id) {
+                await this.redisCouponService.releaseReservation(
+                  cartItem.preorder_campaign_id,
+                  reservationToken,
+                );
+              }
+            }
           }
           throw saveError;
         }
@@ -655,7 +674,7 @@ export class OrderService {
       }
 
       this.logger.log(
-        `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, delivery_fee_tax=${cartToUse.delivery_fee_tax}, platform_fee=${cartToUse.platform_fee}, platform_fee_tax=${cartToUse.platform_fee_tax}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
+        `💰 Cart totals before order creation: subtotal=${cartToUse.total_amount}, delivery_fee=${cartToUse.delivery_fee}, delivery_fee_tax=${cartToUse.delivery_fee_tax}, delivery_waived=${cartToUse.delivery_waived}, original_delivery_fee=${cartToUse.original_delivery_fee}, platform_fee=${cartToUse.platform_fee}, platform_fee_tax=${cartToUse.platform_fee_tax}, tax=${cartToUse.tax_amount}, discount=${cartToUse.discount_amount}, coupon_id=${cartToUse.coupon_id}, coupon_code=${cartToUse.coupon_code}, tip=${cartToUse.tip_amount || 0}, final_amount=${cartToUse.final_amount}`,
       );
 
       let totalTaxAmount = Number(cartToUse.tax_amount || 0) + Number(cartToUse.delivery_fee_tax || 0) + Number(cartToUse.platform_fee_tax || 0);
@@ -682,10 +701,15 @@ export class OrderService {
           delivery_fee: cartToUse.delivery_fee,
           delivery_fee_tax: cartToUse.delivery_fee_tax || 0,
           delivery_percent: cartToUse.delivery_percent || 18.00,
+          // Snapshot from cart: coupon identity + delivery waiver audit (seller-push reads these from Order)
+          delivery_waived: cartToUse.delivery_waived || false,
+          original_delivery_fee: cartToUse.original_delivery_fee,
           platform_fee: cartToUse.platform_fee || 0,
           platform_fee_tax: cartToUse.platform_fee_tax || 0,
           platform_percent: cartToUse.platform_percent || 18.00,
           discount_amount: cartToUse.discount_amount,
+          coupon_id: cartToUse.coupon_id,
+          coupon_code: cartToUse.coupon_code,
           tip_amount: cartToUse.tip_amount || 0,
           total_tax_amount: totalTaxAmount || 0,
           total_amount: cartToUse.final_amount,
@@ -735,7 +759,7 @@ export class OrderService {
       });
 
       this.logger.log(
-        `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
+        `💰 Order saved with totals: subtotal=${savedOrder.subtotal}, delivery_fee=${savedOrder.delivery_fee}, delivery_waived=${savedOrder.delivery_waived}, original_delivery_fee=${savedOrder.original_delivery_fee}, tax=${savedOrder.tax_amount}, discount=${savedOrder.discount_amount}, coupon_id=${savedOrder.coupon_id}, coupon_code=${savedOrder.coupon_code}, tip=${savedOrder.tip_amount}, total_amount=${savedOrder.total_amount}`,
       );
 
       // NEW: If preorder, redeem coupon after order is created
@@ -1037,19 +1061,29 @@ export class OrderService {
           );
 
           for (const cartItem of preorderItems) {
-            if (cartItem.preorder_campaign_id && cartItem.preorder_reservation_token) {
+            if (cartItem.preorder_reservation_token) {
               try {
-                await this.redisCouponService.releaseReservation(
-                  cartItem.preorder_campaign_id,
-                  cartItem.preorder_reservation_token
-                );
+                await this.couponService.rollbackCoupon({
+                  reservation_token: cartItem.preorder_reservation_token,
+                  reason: "Order creation failed after preorder reserve",
+                });
                 this.logger.log(
-                  `✅ Restored quota for preorder coupon ${cartItem.preorder_campaign_id} after order creation failure`
+                  `✅ Rolled back preorder reservation after order creation failure`,
                 );
               } catch (rollbackError) {
                 this.logger.error(
-                  `❌ Failed to restore quota after order creation failure: ${rollbackError.message}`
+                  `❌ Preorder rollback after order failure: ${rollbackError.message}`,
                 );
+                if (cartItem.preorder_campaign_id) {
+                  try {
+                    await this.redisCouponService.releaseReservation(
+                      cartItem.preorder_campaign_id,
+                      cartItem.preorder_reservation_token,
+                    );
+                  } catch {
+                    /* best effort */
+                  }
+                }
               }
             }
           }
@@ -1562,35 +1596,47 @@ export class OrderService {
       // NEW: Restore quota for preorder items
       const orderItems = await this.orderItemRepository.find({
         where: { order: { id: order.id } },
-        relations: ['item'],
       });
 
-      for (const orderItem of orderItems) {
-        if (orderItem.is_preorder) {
-          // Find the coupon redemption for this order
-          const couponRedemption = await this.couponRedemptionRepository.findOne({
-            where: { order_id: order.id },
-            relations: ['coupon'],
-          });
+      // Rollback ALL coupon redemptions for this order (PREORDER, FLAT, PERCENT, NTH_ORDER, etc).
+      // cancelOrder handles REDEEMED coupons directly because rollbackCoupon() treats REDEEMED
+      // as a no-op (it was designed for post-payment flows where quota must not be restored).
+      // On cancellation, quota always needs to be returned regardless of redemption state.
+      const allRedemptions = await this.couponRedemptionRepository.find({
+        where: { order_id: order.id },
+        relations: ['coupon'],
+      });
 
-          if (couponRedemption && couponRedemption.coupon.type === CouponType.PREORDER) {
-            // FIX: Use releaseReservation instead of incrementQuota to properly clean up reservation
-            if (couponRedemption.reserved_token) {
-              await this.redisCouponService.releaseReservation(
-                couponRedemption.coupon.id,
-                couponRedemption.reserved_token
-              );
-              this.logger.log(
-                `✅ Released reservation and restored quota for preorder coupon ${couponRedemption.coupon.id} after order cancellation`
-              );
-            } else {
-              // Fallback: If no reservation token, restore quota directly
-              await this.redisCouponService.incrementQuota(couponRedemption.coupon.id, 1);
-              this.logger.log(
-                `✅ Restored quota directly for preorder coupon ${couponRedemption.coupon.id} after order cancellation (no reservation token found)`
-              );
-            }
+      for (const redemption of allRedemptions) {
+        try {
+          if (redemption.status === RedemptionStatus.REDEEMED) {
+            // COD path: coupon was already fully redeemed at order creation.
+            // Must increment quota directly — releaseReservation only undoes RESERVED state.
+            await this.redisCouponService.incrementQuota(redemption.coupon.id, 1);
+            redemption.status = RedemptionStatus.ROLLED_BACK;
+            await this.couponRedemptionRepository.save(redemption);
+            this.logger.log(
+              `✅ Restored quota for coupon ${redemption.coupon.id} (type: ${redemption.coupon.type}) after order cancellation (was REDEEMED)`,
+            );
+          } else if (
+            redemption.status === RedemptionStatus.RESERVED &&
+            redemption.reserved_token
+          ) {
+            // Online payment path: still RESERVED — release normally via rollbackCoupon.
+            await this.couponService.rollbackCoupon({
+              reservation_token: redemption.reserved_token,
+              reason: 'order_cancelled',
+            });
+            this.logger.log(
+              `✅ Rolled back reservation for coupon ${redemption.coupon.id} (type: ${redemption.coupon.type}) after order cancellation`,
+            );
           }
+          // ROLLED_BACK / FAILED: already handled, skip silently.
+        } catch (rollbackErr) {
+          this.logger.error(
+            `❌ Failed to rollback coupon ${redemption.coupon.id} on order cancellation: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+          );
+          // Do not rethrow — order cancellation must complete even if coupon rollback fails.
         }
       }
 
@@ -1769,8 +1815,11 @@ export class OrderService {
         userId,
       );
       if (redemptionResult?.success === false) {
-        throw new InternalServerErrorException(
-          `Coupon redemption failed for order ${order.id}. Please retry verification.`,
+        // Redemption failure must NOT block order confirmation — payment was already captured.
+        // Throwing here leaves order in 'created' state and misleads the user into retrying payment.
+        // Retry is already enqueued inside redeemPreorderCouponForOrder; proceed to confirm.
+        this.logger.warn(
+          `⚠️ Coupon redemption failed for order ${order.id} but payment was captured. Proceeding to confirm order. Failed tokens: ${redemptionResult.failedTokens.join(", ")}`,
         );
       }
 
@@ -1904,10 +1953,21 @@ export class OrderService {
       // Update payment status to failed
       await this.updatePaymentStatus(order.id, "failed");
 
-      // Policy: do NOT restore coupon quota for placed orders on payment failure.
-      this.logger.log(
-        `ℹ️ Skipping coupon quota restore for order ${orderId} on payment failure (preorder/nth lock policy)`,
-      );
+      // Abandoned online payment: roll back RESERVED redemptions linked to this order so quota and
+      // user can reserve again (rollbackCoupon restores Redis quota when order is not paid).
+      try {
+        await this.couponService.rollbackReservedRedemptionsForOrder(
+          order.id,
+          "Online payment failed or abandoned",
+        );
+        this.logger.log(
+          `✅ Rolled back reserved coupon redemptions for unpaid order ${orderId}`,
+        );
+      } catch (rollbackErr) {
+        this.logger.warn(
+          `⚠️ Coupon rollback after payment failure for order ${orderId}: ${rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)}`,
+        );
+      }
 
       // Reactivate cart to allow user to retry payment or modify cart
       try {
@@ -2190,6 +2250,29 @@ export class OrderService {
         !BUYER_ORDER_NOTIFICATION_STATUSES.includes(paymentStatus as any),
       );
 
+      // Trigger nth-order metrics when payment is confirmed as paid.
+      // This is the correct place for online payments since 'paid' is a payment_status value,
+      // not an order.status value — updateOrderStatus is never called with 'paid'.
+      if (paymentStatus === "paid") {
+        try {
+          const rows = await this.dataSource.query(
+            `SELECT "userId" AS user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            [orderId],
+          );
+          const userId = Number(rows?.[0]?.user_id);
+          if (Number.isInteger(userId) && userId > 0) {
+            const correlationId = this.createCorrelationId("order-payment", orderId);
+            await this.enqueuePaidOrderMetricsUpdate(orderId, userId, correlationId);
+          }
+        } catch (metricsError) {
+          this.logger.warn(
+            `⚠️ Failed to update nth-order metrics for order ${orderId}: ${
+              metricsError instanceof Error ? metricsError.message : String(metricsError)
+            }`,
+          );
+        }
+      }
+
       this.logger.log(`✅ Payment status updated for order ${orderId}`);
     } catch (error) {
       this.logger.error(
@@ -2370,7 +2453,7 @@ export class OrderService {
       if (this.metricEligibleStatuses.has(status)) {
         try {
           const rows = await this.dataSource.query(
-            `SELECT user_id FROM "order" WHERE id = $1 LIMIT 1`,
+            `SELECT "userId" AS user_id FROM "order" WHERE id = $1 LIMIT 1`,
             [orderId],
           );
           const userId = Number(rows?.[0]?.user_id);
@@ -2378,7 +2461,7 @@ export class OrderService {
             await this.enqueuePaidOrderMetricsUpdate(
               orderId,
               userId,
-              `order-status-${orderId}-${status}-${Date.now()}`,
+              this.createCorrelationId(`order-status-${status}`, orderId),
             );
           }
         } catch (metricsError) {

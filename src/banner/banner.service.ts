@@ -53,20 +53,32 @@ export class BannerService {
         if (!promotion_id) {
           throw new BadRequestException("Restaurant not found");
         }
+      } else if (promotion_type === "category_id") {
+        if (!promotion_link) {
+          throw new BadRequestException(
+            "promotion_link is required for category_id type",
+          );
+        }
+      } else if (promotion_type === "url") {
+        if (!promotion_link) {
+          throw new BadRequestException(
+            "promotion_link is required for url type",
+          );
+        }
+        try {
+          new URL(promotion_link);
+        } catch {
+          throw new BadRequestException(
+            "promotion_link must be a valid URL for url type",
+          );
+        }
       }
-      if (promotion_type === "category_id") {
-        // promotion_id = await this.categoryRepository.findOne({ where: { reference_id: promotion_link } });
-        throw new BadRequestException("Category not supported yet");
-      }
-      if (promotion_type === "url") {
-        promotion_id = null;
-        throw new BadRequestException("URL not supported yet");
-      }
+      // organization type: no store lookup required, promotion_link and cta_button are optional
 
       // Generate file name from banner title (remove spaces and special characters)
       // Include timestamp for cache busting
       const timestamp = Date.now();
-      const fileName = createBannerDto.title.replace(/[^a-zA-Z0-9]/g, "");
+      const fileName = (createBannerDto.title ?? "banner").replace(/[^a-zA-Z0-9]/g, "") || "banner";
       const fileExtension = imageFile.originalname.split(".").pop();
       const s3Key = `banners/${fileName}-${timestamp}.${fileExtension}`;
 

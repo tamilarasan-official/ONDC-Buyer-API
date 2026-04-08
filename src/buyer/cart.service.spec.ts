@@ -1208,7 +1208,7 @@ describe("CartService - coupon_validation response fields", () => {
     expect(update).toHaveBeenCalledWith(
       700,
       expect.objectContaining({
-        discount_amount: 21,
+        discount_amount: 20,
       }),
     );
   });

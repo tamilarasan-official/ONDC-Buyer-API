@@ -75,6 +75,17 @@ Admin Frontend → API Endpoints → Coupon Service → Database/Redis
 | `global_usage_limit` | number | Total uses across all users | ❌ | `1000` (null = unlimited) |
 | `priority` | number | Priority for coupon selection when multiple coupons match (higher = selected first) | ❌ | `0` (default: 0) |
 | `status` | enum | Coupon status | Auto | `"active"`, `"inactive"`, `"expired"`, `"revoked"` |
+
+**Coupon Status Lifecycle:**
+
+| Status | Managed by | Reversible | Description |
+|---|---|---|---|
+| `active` | System (on creation) | — | Default. Coupon can be validated and reserved. |
+| `inactive` | Admin (`PATCH /admin/coupons/:id/status`) | ✅ Yes | Manually deactivated. Re-activatable if `end_at` is in the future. |
+| `expired` | Hourly cron (automatic) | ❌ No | `end_at` has passed. Blocked from any use. |
+| `revoked` | Redemption engine (automatic) | ❌ No | `global_usage_limit` reached. Fully consumed. |
+
+> **Note:** `expired` and `revoked` are system-managed terminal states. The admin API only accepts `active` or `inactive` when updating individual coupon status.
 | `type_meta` | JSON | Type-specific metadata | ❌ | `{"nth": 3}` or `{"delivery_fee_cap": 50}` |
 | `exported` | boolean | Whether codes were exported | Auto | `false` |
 | `exported_at` | datetime | Export timestamp | Auto | `null` |
@@ -234,7 +245,7 @@ Response: {
 - `max_discount_amount` is **required** for percent type
 - `type_meta.nth` is required for `nth_order` type
 - `type_meta.delivery_fee_cap` is optional for `free_delivery` type
-- `priority` defaults to `0` if not provided. Higher priority coupons are selected first when multiple coupons match the same item (e.g., multiple preorder coupons for the same item_id)
+- `priority` defaults to `0` if not provided. Higher priority coupons are selected first when multiple coupons match the same item (e.g., multiple preorder coupons for the same `item_reference_id`)
 
 ---
 
@@ -269,6 +280,35 @@ GET /admin/coupons/analytics/campaigns/:id?from=2026-03-01T00:00:00Z&to=2026-03-
 ```
 
 Response includes code distribution, funnel metrics, financials (`orders_with_coupon` included), daily trend, and top coupon codes.
+
+> **Analytics note:** `active` code counts exclude coupons whose `end_at` has passed, even if the expiry cron has not yet run. Counts reflect real-time usability.
+
+---
+
+### 4B. Individual Coupon Status
+
+#### Update Coupon Status
+```
+PATCH /admin/coupons/coupons/:id/status
+Body: {
+  status: "active" | "inactive"   (required)
+}
+Response: {
+  success: true,
+  message: "Coupon status updated to inactive",
+  data: { id, code, status }
+}
+```
+
+**Use cases:**
+- Deactivate a compromised or misused coupon code without affecting other codes in the same campaign.
+- Re-activate a previously deactivated code (only if `end_at` is in the future).
+
+**Validation errors (400):**
+- Missing `status` field in request body
+- Values other than `"active"` or `"inactive"` (e.g. `"expired"`, `"revoked"`)
+- Attempting to modify a `revoked` or `expired` coupon
+- Re-activating a coupon whose `end_at` has already passed
 
 ---
 
@@ -579,6 +619,7 @@ Note: campaign lifecycle values are `draft`, `active`, `paused`, `expired`, `rev
 6. **Status Badges**
    - Campaign: draft (gray), active (green), paused (yellow), expired (orange), revoked (red)
    - Coupon: active (green), inactive (gray), expired (orange), revoked (red)
+   - `expired` and `revoked` badges should be non-interactive (no edit/activate action available)
 
 ---
 
