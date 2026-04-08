@@ -636,6 +636,19 @@ export class BuyerService {
       },
     ];
 
+    const defaultOrganizationBanner = [
+      {
+        title: "50% OFF",
+        subtitle:
+          "Fresh flavours, delivered fast — order now and save big on every bite.",
+        image_url:
+          "https://in-maa-1.linodeobjects.com/sqc-bucket/staging/banners/50OFF-1775645094098.jpg",
+        background_color: "#8b1d2c",
+        promotion_type: "organization",
+        sequence: 1,
+      },
+    ];
+
     try {
       // Get all active banners ordered by sequence
       const banners = await this.bannerRepository.find({
@@ -646,7 +659,7 @@ export class BuyerService {
       // Return default banner if no active banners found
       if (!banners || banners.length === 0) {
         this.logger.warn("No active banners found, returning default banner");
-        return { promotional_banner: defaultBanner, organization_banner: [] };
+        return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
       }
 
       // Map all banners to their response shape
@@ -719,13 +732,19 @@ export class BuyerService {
         (b) => b.promotion_type === "organization",
       );
 
-      return { promotional_banner, organization_banner };
+      return {
+        promotional_banner,
+        organization_banner:
+          organization_banner.length > 0
+            ? organization_banner
+            : defaultOrganizationBanner,
+      };
     } catch (error) {
       this.logger.error(
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      return { promotional_banner: defaultBanner, organization_banner: [] };
+      return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
     }
   }
 

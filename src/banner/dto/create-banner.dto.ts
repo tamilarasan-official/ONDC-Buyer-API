@@ -1,7 +1,6 @@
 import {
   IsBoolean,
   IsIn,
-  IsNotEmpty,
   IsOptional,
   IsString,
   MaxLength,
@@ -14,11 +13,12 @@ export class CreateBannerDto {
     description: "Banner title",
     example: "Craving Something Delicious?",
     maxLength: 255,
+    required: false,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(255)
-  title: string;
+  title?: string;
 
   @ApiProperty({
     description: "Banner subtitle",
