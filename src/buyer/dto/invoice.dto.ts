@@ -145,7 +145,6 @@ export class InvoiceResponseDto {
     subtotal: number;
     delivery_fee: number;
     tax_amount: number;
-    total_tax_amount: number;
     discount_amount: number;
     total_amount: number;
   };

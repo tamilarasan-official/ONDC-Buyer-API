@@ -124,7 +124,7 @@ export class InvoiceService {
 
       // Generate PDF
       try {
-        const pdfBuffer = await this.generatePDF(invoiceData);
+        const pdfBuffer = await this.generatePDF(invoiceData, Number(order.total_tax_amount) || Number(order.tax_amount));
         return pdfBuffer;
       } catch (pdfError) {
         this.logger.error(
@@ -211,7 +211,6 @@ export class InvoiceService {
       subtotal: Number(order.subtotal),
       delivery_fee: Number(order.delivery_fee),
       tax_amount: Number(order.tax_amount),
-      total_tax_amount: Number(order.total_tax_amount) || Number(order.tax_amount),
       discount_amount: Number(order.discount_amount),
       total_amount: Number(order.total_amount),
     };
@@ -356,7 +355,7 @@ export class InvoiceService {
   /**
    * Generate PDF invoice — renders invoice.hbs template via Handlebars then converts to PDF via Puppeteer
    */
-  private async generatePDF(invoiceData: InvoiceResponseDto): Promise<Buffer> {
+  private async generatePDF(invoiceData: InvoiceResponseDto, totalTaxAmount?: number): Promise<Buffer> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { toWords } = require("number-to-words") as { toWords: (n: number) => string };
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -377,7 +376,7 @@ export class InvoiceService {
     const invoiceDate = new Date(invoiceData.invoice_date).toLocaleDateString("en-IN",
       { day: "2-digit", month: "2-digit", year: "numeric" });
 
-    const totalTax    = Number(invoiceData.pricing.total_tax_amount ?? invoiceData.pricing.tax_amount) || 0;
+    const totalTax    = totalTaxAmount ?? Number(invoiceData.pricing.tax_amount) ?? 0;
     const cgst        = +(totalTax / 2).toFixed(2);
     const sgst        = +(totalTax / 2).toFixed(2);
     const subtotal    = Number(invoiceData.pricing.subtotal) || 0;
@@ -545,7 +544,7 @@ export class InvoiceService {
       let pdfBuffer: Buffer;
       try {
         const invoiceData = await this.formatInvoiceData(order, payment, latestTracking, undefined, invoiceRecord.invoice_no);
-        pdfBuffer = await this.generatePDF(invoiceData);
+        pdfBuffer = await this.generatePDF(invoiceData, Number(order.total_tax_amount) || Number(order.tax_amount));
       } finally {
         this.releasePdfSlot();
       }
