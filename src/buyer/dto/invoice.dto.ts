@@ -145,6 +145,7 @@ export class InvoiceResponseDto {
     subtotal: number;
     delivery_fee: number;
     tax_amount: number;
+    total_tax_amount: number;
     discount_amount: number;
     total_amount: number;
   };
@@ -173,4 +174,18 @@ export class InvoiceResponseDto {
     required: false,
   })
   notes?: string;
+}
+
+export class InvoiceUrlResponseDto {
+  @ApiProperty({ description: "Invoice number", example: "T-20261010-10001" })
+  invoice_no: string;
+
+  @ApiProperty({ description: "Order number", example: "ORD-20261010-0001" })
+  order_number: string;
+
+  @ApiProperty({
+    description: "S3 URL of the PDF invoice",
+    example: "https://cdn.example.com/invoices/ORD-20261010-0001.pdf",
+  })
+  invoice_url: string;
 }

@@ -50,7 +50,8 @@ import "dotenv/config";
         transport: {
           host: configService.get<string>("MAILER_HOST"),
           port: configService.get<number>("MAILER_PORT"),
-          secure: true,
+          secure: false,
+          //tls: { ciphers: "SSLv3" },
           auth: {
             user: configService.get<string>("MAILER_USER"),
             pass: configService.get<string>("MAILER_PASS"),
