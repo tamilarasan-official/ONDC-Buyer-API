@@ -56,7 +56,7 @@ export class LocationTransformer extends BaseTransformer {
         );
         location.address_state = this.sanitizeString(
           locationData.address.state,
-          5,
+          100,
         );
       }
 

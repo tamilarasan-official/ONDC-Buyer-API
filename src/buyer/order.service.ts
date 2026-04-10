@@ -54,6 +54,8 @@ import { WebhookEvent } from "src/payment/entities/webhook-event.entity";
 import { SellerSyncQueueService } from "../seller-sync/seller-sync.queue.service";
 import { CouponMetricsQueueService } from "../coupon/services/coupon-metrics.queue.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
+import { MailService } from "../shared/mail.service";
+import { InvoiceService } from "./invoice.service";
 
 /**
  * Statuses for which buyer receives an order notification; all others use skipNotification.
@@ -128,6 +130,8 @@ export class OrderService {
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     private readonly dataSource: DataSource,
+    private readonly mailService: MailService,
+    private readonly invoiceService: InvoiceService,
     @Optional()
     private readonly couponMetricsQueueService?: CouponMetricsQueueService,
   ) {}
@@ -3124,6 +3128,111 @@ export class OrderService {
       this.logger.log(
         `✅ Order ${sellerStatusUpdateDto.order_number} status updated: ${previousStatus} → ${newStatus}`,
       );
+
+      // Fire-and-forget: generate invoice + send delivery email on delivered status
+      if (newStatus === "delivered") {
+        setImmediate(async () => {
+          // 1. Invoice generation — runs always, independently of email
+          let invoiceUrl: string | null = null;
+          try {
+            const result = await this.invoiceService.generateAndUploadForOrder(order.id);
+            invoiceUrl = result.url;
+          } catch (err) {
+            this.logger.error(
+              `Failed to generate invoice for order ${order.order_number}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+
+          // 2. Email — only if user has an email address
+          if (!order.user?.email) {
+            return;
+          }
+
+          try {
+            const orderWithItems = await this.orderRepository
+              .createQueryBuilder("o")
+              .leftJoinAndSelect("o.order_items", "oi")
+              .leftJoinAndSelect("oi.item", "i")
+              .leftJoinAndSelect("o.store", "s")
+              .leftJoinAndSelect("s.locations", "sl", "sl.status = :locStatus", { locStatus: true })
+              .where("o.id = :orderId", { orderId: order.id })
+              .getOne();
+
+            const items = (orderWithItems?.order_items ?? []).map((oi) => ({
+              name: oi.item?.name ?? "Item",
+              quantity: oi.quantity,
+              total_price: oi.total_price,
+            }));
+
+            // Build delivery address from denormalized order fields
+            const o = orderWithItems ?? order;
+            const addressParts = [
+              o.delivery_address_line1,
+              o.delivery_address_line2,
+              o.delivery_address_line3,
+              o.delivery_city,
+              o.delivery_state,
+              o.delivery_pincode ? `${o.delivery_pincode}` : null,
+            ].filter(Boolean);
+            const deliveryAddress = addressParts.join(", ");
+
+            // Build store address from first active location
+            const storeLocation = orderWithItems?.store?.locations?.[0];
+            const storeAddressParts = [
+              storeLocation?.address_street,
+              storeLocation?.address_locality,
+              storeLocation?.address_city,
+              storeLocation?.address_state,
+              storeLocation?.address_area_code,
+            ].filter(Boolean);
+            const storeAddress = storeAddressParts.join(", ");
+
+            // Payment label for the email
+            const paymentLabelMap: Record<string, string> = {
+              cod: "Paid Via Cash",
+              online: "Paid Via Online",
+              wallet: "Paid Via Wallet",
+            };
+            const paymentLabel = paymentLabelMap[o.payment_method] ?? "Paid Via";
+
+            const localeOpts: Intl.DateTimeFormatOptions = {
+              timeZone: "Asia/Kolkata",
+              day: "2-digit",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: true,
+            };
+
+            await this.mailService.orderDelivered(order.user.email, {
+              customer_name: order.user.name ?? "Customer",
+              order_number: order.order_number,
+              store_name: order.store?.name ?? "",
+              store_address: storeAddress || null,
+              delivery_address: deliveryAddress || null,
+              order_items: items,
+              subtotal: Number(o.subtotal ?? 0).toFixed(2),
+              platform_fee: Number(o.platform_fee ?? 0) > 0 ? Number(o.platform_fee).toFixed(2) : null,
+              delivery_fee: Number(o.delivery_fee ?? 0) > 0 ? Number(o.delivery_fee).toFixed(2) : null,
+              tax_amount: Number(o.total_tax_amount ?? o.tax_amount ?? 0) > 0
+                ? Number(o.total_tax_amount ?? o.tax_amount).toFixed(2)
+                : null,
+              total_amount: Number(o.total_amount ?? 0).toFixed(2),
+              payment_method: o.payment_method,
+              payment_label: paymentLabel,
+              placed_at: o.created_at
+                ? new Date(o.created_at).toLocaleString("en-IN", localeOpts)
+                : null,
+              delivered_at: new Date().toLocaleString("en-IN", localeOpts),
+              invoice_url: invoiceUrl ?? null,
+            });
+          } catch (err) {
+            this.logger.error(
+              `Failed to send delivery confirmation email for order ${order.order_number}: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        });
+      }
 
       return {
         success: true,

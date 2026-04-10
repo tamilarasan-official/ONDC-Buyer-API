@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang='en'>
+<head>
+  <meta charset='UTF-8' />
+  <title>Tax Invoice – {{invoice_number}}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    @page { size: A4 landscape; margin: 16px 32px; }
+
+    html, body {
+      width: 100%;
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 10pt;
+      color: #1a1a1a;
+      background: #fff;
+    }
+
+    /* ── Logo ── */
+    .logo-wrap {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .logo-wrap img {
+      height: 44px;
+      width: auto;
+    }
+
+    /* ── TAX INVOICE title ── */
+    .title {
+      text-align: center;
+      font-size: 20pt;
+      font-weight: bold;
+      color: #1a1a1a;
+      margin-bottom: 6px;
+    }
+    .title-line {
+      border-top: 1.5px solid #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    /* ── Invoice To header ── */
+    .invoice-header-bar {
+      margin-bottom: 0;
+    }
+    .invoice-header-bar .label-orange {
+      font-weight: bold;
+      font-size: 11pt;
+      color: #1a1a1a;
+    }
+    .invoice-header-bar .name-bold {
+      font-weight: bold;
+      font-size: 11pt;
+      color: #1a1a1a;
+    }
+
+    /* ── Two-column info grid ── */
+    .info-grid {
+      display: flex;
+      margin-top: 6px;
+      margin-bottom: 6px;
+    }
+    .info-col {
+      flex: 1;
+      padding-right: 12px;
+    }
+    .info-row {
+      display: flex;
+      margin-bottom: 5px;
+      font-size: 9.5pt;
+    }
+    .info-lbl {
+      min-width: 160px;
+      color: #1a1a1a;
+    }
+    .info-val {
+      font-weight: bold;
+      color: #1a1a1a;
+      flex: 1;
+      word-break: break-word;
+    }
+    .section-line {
+      border-top: 0.5px solid #cccccc;
+      margin: 6px 0;
+    }
+
+    /* ── Items + summary table ── */
+    table.items {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 8px;
+    }
+    table.items th {
+      background: #eeeeee;
+      font-size: 10pt;
+      font-weight: bold;
+      color: #1a1a1a;
+      border: 0.5px solid #cccccc;
+      padding: 6px 6px;
+      white-space: nowrap;
+    }
+    table.items td {
+      font-size: 10pt;
+      color: #1a1a1a;
+      border: 0.5px solid #cccccc;
+      padding: 5px 6px;
+    }
+    .col-srno  { width: 4.5%; text-align: center; }
+    .col-desc  { width: 41.7%; text-align: left; }
+    .col-qty   { width: 6.6%; text-align: center; }
+    .col-unit  { width: 10.2%; text-align: right; }
+    .col-amt   { width: 11.5%; text-align: right; }
+    .col-disc  { width: 9%;    text-align: right; }
+    .col-nav   { width: 16.5%; text-align: right; }
+
+    /* Summary rows */
+    tr.summary td {
+      font-size: 10pt;
+    }
+    tr.summary td.sum-label {
+      font-weight: bold;
+      text-align: left;
+    }
+    tr.summary td.sum-value {
+      text-align: right;
+    }
+
+    /* Invoice Total row */
+    tr.invoice-total td {
+      padding: 7px 6px;
+      font-size: 10pt;
+    }
+    tr.invoice-total td.sum-label {
+      font-weight: bold;
+      color: #1a1a1a;
+    }
+    tr.invoice-total td.sum-value {
+      font-weight: normal;
+      color: #1a1a1a;
+      text-align: right;
+    }
+
+    /* Invoice total in words row */
+    tr.words-row td {
+      font-size: 10pt;
+      padding: 5px 6px;
+    }
+    tr.words-row td.words-label {
+      font-weight: normal;
+      white-space: nowrap;
+      width: 200px;
+    }
+    tr.words-row td.words-value {
+      font-weight: bold;
+      text-align: right;
+    }
+
+    /* ── Signature block ── */
+    .sig-block {
+      display: flex;
+      border: 0.5px solid #cccccc;
+      margin-top: 8px;
+      height: 72px;
+    }
+    .sig-left,
+    .sig-right {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10pt;
+      font-weight: bold;
+      color: #1a1a1a;
+      text-align: center;
+    }
+    .sig-left {
+      border-right: 0.5px solid #cccccc;
+    }
+    .sig-right {
+      flex-direction: column;
+      font-weight: normal;
+      gap: 3px;
+    }
+    .sig-right .signed-by   { font-size: 9.5pt; }
+    .sig-right .signed-name { font-weight: bold; font-size: 11pt; }
+    .sig-right .signed-date { font-size: 9.5pt; }
+
+    /* ── ECO footer ── */
+    .eco-footer {
+      border: 0.5px solid #cccccc;
+      margin-top: 6px;
+      padding: 7px 6px;
+      text-align: center;
+    }
+    .eco-footer .eco-title {
+      font-weight: bold;
+      font-size: 10pt;
+      color: #1a1a1a;
+      margin-bottom: 5px;
+    }
+    .eco-footer .eco-details {
+      font-size: 9.5pt;
+      color: #1a1a1a;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Logo -->
+  <div class='logo-wrap'>
+    <img src='https://rider.tazty.in/tazty_logo.png' alt='Tazty' />
+  </div>
+
+  <!-- TAX INVOICE title + line -->
+  <div class='title'>TAX INVOICE</div>
+  <div class='title-line'></div>
+
+  <!-- Invoice To header -->
+  <div class='invoice-header-bar'>
+    <span class='label-orange'>Invoice To: </span>
+    <span class='name-bold'>{{customer_name}}</span>
+  </div>
+
+  <!-- Customer + Store info -->
+  <div class='info-grid'>
+    <div class='info-col'>
+      <div class='info-row'>
+        <span class='info-lbl'>GSTIN: </span>
+        <span class='info-val'>-</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Customer Address: </span>
+        <span class='info-val'>{{customer_address}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Order ID: </span>
+        <span class='info-val'>{{order_number}}</span>
+      </div>
+    </div>
+    <div class='info-col'>
+      <div class='info-row'>
+        <span class='info-lbl'>Restaurant Name:</span>
+        <span class='info-val'>{{store_name}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>GSTIN: </span>
+        <span class='info-val'>{{store_gstin}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>FSSAI License:</span>
+        <span class='info-val'>{{store_fssai}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Address: </span>
+        <span class='info-val'>{{store_address}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>State: </span>
+        <span class='info-val'>{{store_state}}</span>
+      </div>
+    </div>
+  </div>
+
+  {{!-- <div class='section-line'></div> --}}
+
+  <!-- Document details -->
+  <div class='info-grid'>
+    <div class='info-col'>
+      <div class='info-row'>
+        <span class='info-lbl'>Document: </span>
+        <span class='info-val'>INV</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Invoice No: </span>
+        <span class='info-val'>{{invoice_number}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Date of Invoice: </span>
+        <span class='info-val'>{{invoice_date}}</span>
+      </div>
+    </div>
+    <div class='info-col'>
+      <div class='info-row'>
+        <span class='info-lbl'>Place of Supply: </span>
+        <span class='info-val'>{{store_state}}</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Service Description: </span>
+        <span class='info-val'>Restaurant Service</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Category: </span>
+        <span class='info-val'>B2C</span>
+      </div>
+      <div class='info-row'>
+        <span class='info-lbl'>Reverse Charges Applicable: </span>
+        <span class='info-val'>No</span>
+      </div>
+    </div>
+  </div>
+
+  {{!-- <div class='section-line'></div> --}}
+
+  <!-- Items + Summary table -->
+  <table class='items'>
+    <thead>
+      <tr>
+        <th class='col-srno'>Sr No</th>
+        <th class='col-desc'>Description</th>
+        <th class='col-qty'>Quantity</th>
+        <th class='col-unit'>Unit Price</th>
+        <th class='col-amt'>Amount (Rs.)</th>
+        <th class='col-disc'>Discount</th>
+        <th class='col-nav'>Net Assessable Value (Rs.)</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{#each items}}
+      <tr>
+        <td class='col-srno'>{{sr_no}}</td>
+        <td class='col-desc'>{{name}}</td>
+        <td class='col-qty' style='text-align:center;'>{{quantity}}</td>
+        <td class='col-unit' style='text-align:right;'>{{unit_price}}</td>
+        <td class='col-amt' style='text-align:right;'>{{total_price}}</td>
+        <td class='col-disc' style='text-align:right;'>0.00</td>
+        <td class='col-nav' style='text-align:right;'>{{total_price}}</td>
+      </tr>
+      {{/each}}
+
+      <!-- Summary rows -->
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>Subtotal</td>
+        <td class='sum-value'>{{subtotal}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>CGST (2.5%)</td>
+        <td class='sum-value'>{{cgst}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>SGST/UTGST (2.5%)</td>
+        <td class='sum-value'>{{sgst}}</td>
+      </tr>
+      {{#if show_igst}}
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>IGST</td>
+        <td class='sum-value'>{{total_tax}}</td>
+      </tr>
+      {{/if}}
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>Total Taxes</td>
+        <td class='sum-value'>{{total_tax}}</td>
+      </tr>
+      {{#if delivery_fee_row}}
+      <tr class='summary'>
+        <td colspan='6' class='sum-label'>Delivery Fee</td>
+        <td class='sum-value'>{{delivery_fee}}</td>
+      </tr>
+      {{/if}}
+
+      <!-- Invoice Total -->
+      <tr class='invoice-total'>
+        <td colspan='6' class='sum-label'>Invoice Total</td>
+        <td class='sum-value'>{{total}}</td>
+      </tr>
+
+      <!-- Invoice Total in Words -->
+      <tr class='words-row'>
+        <td colspan='2' class='words-label'>Invoice Total in Words:</td>
+        <td colspan='5' class='words-value'>{{amount_in_words}}</td>
+      </tr>
+
+    </tbody>
+  </table>
+
+  <!-- Signature block -->
+  <div class='sig-block'>
+    <div class='sig-left'>Authorized Signatory</div>
+    <div class='sig-right'>
+      <span class='signed-by'>Digitally Signed by</span>
+      <span class='signed-name'>Tazty</span>
+      <span class='signed-date'>{{invoice_date}}</span>
+    </div>
+  </div>
+
+  <!-- ECO footer -->
+  <div class='eco-footer'>
+    <div class='eco-title'>Details of ECO under GST</div>
+    <div class='eco-details'>
+      Name: Tazty, No.58/2, 1st Floor, VP Road Sankalpa (KM Nilayam), Madivala, Bengaluru, Karnataka - 560068, India.&nbsp;&nbsp;|&nbsp;&nbsp;Support: support@tazty.in
+    </div>
+  </div>
+
+</body>
+</html>
