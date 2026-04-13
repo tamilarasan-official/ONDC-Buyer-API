@@ -3,9 +3,11 @@ import {
   CreateDateColumn,
   Entity,
   Index,
+  OneToMany,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from "typeorm";
+import { DishSession } from "./dish-session.entity";
 
 @Entity()
 export class Dish {
@@ -31,6 +33,12 @@ export class Dish {
 
   @Column({ type: "boolean", default: true })
   status: boolean;
+
+  @Column({ type: "boolean", default: false })
+  schedule_enabled: boolean;
+
+  @OneToMany(() => DishSession, (session) => session.dish)
+  sessions?: DishSession[];
 
   @CreateDateColumn({ type: "timestamp", default: () => "CURRENT_TIMESTAMP" })
   created_at: Date;
