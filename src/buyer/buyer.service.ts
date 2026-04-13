@@ -761,10 +761,14 @@ export class BuyerService {
         `🔥 Getting trending items within ${radiusKm}km of ${userLat}, ${userLng}`,
       );
 
-      const distanceSubquery = this.locationService.buildDistanceQuery(
+      const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
         radiusKm,
+      );
+      const distanceKmSql = this.locationService.buildHaversineDistanceKmSql(
+        userLat,
+        userLng,
       );
 
       const queryBuilder = this.itemRepository
@@ -776,11 +780,7 @@ export class BuyerService {
         .leftJoin("i.prices", "p")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, {
-          userLat,
-          userLng,
-          radius: radiusKm,
-        })
+        .andWhere(distanceFilter)
         .select([
           "i.id",
           "i.name",
@@ -794,7 +794,7 @@ export class BuyerService {
           "p.base_price",
           "p.currency",
         ])
-        .addSelect(`(${distanceSubquery})`, "distance")
+        .addSelect(distanceKmSql, "distance")
         .orderBy("distance", "ASC")
         .addOrderBy("i.is_recommended", "DESC")
         .limit(20);
@@ -815,7 +815,7 @@ export class BuyerService {
             id: item.i_id,
             name: item.i_name,
             description: item.i_short_desc,
-            images: item.i_images ? JSON.parse(item.i_images) : [],
+            images: this.parseItemImagesRaw(item.i_images),
             store: {
               name: item.s_name,
               logo_url: item.s_logo_url,
@@ -1332,10 +1332,14 @@ export class BuyerService {
     favoriteItemIds: Set<number> = new Set(),
   ) {
     try {
-      const distanceSubquery = this.locationService.buildDistanceQuery(
+      const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
         radius,
+      );
+      const distanceKmSql = this.locationService.buildHaversineDistanceKmSql(
+        userLat,
+        userLng,
       );
 
       let queryBuilder = this.itemRepository
@@ -1351,11 +1355,7 @@ export class BuyerService {
         .leftJoin("ic.category", "c")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, {
-          userLat,
-          userLng,
-          radius,
-        });
+        .andWhere(distanceFilter);
 
       // Apply search query
       if (query) {
@@ -1419,7 +1419,7 @@ export class BuyerService {
           "q.available_count AS q_available_count",
           "q.maximum_count AS q_maximum_count"
         ])
-        .addSelect(`(${distanceSubquery})`, "distance");
+        .addSelect(distanceKmSql, "distance");
 
       // Apply sorting
       if (sortBy === "distance") {
@@ -1463,7 +1463,7 @@ export class BuyerService {
             id: item.i_id,
             name: item.i_name,
             description: item.i_short_desc,
-            images: item.i_images ? JSON.parse(item.i_images) : [],
+            images: this.parseItemImagesRaw(item.i_images),
             price: {
               amount: parseFloat(item.p_base_price) || 0,
               currency: item.p_currency || "INR",
@@ -3412,6 +3412,44 @@ export class BuyerService {
       );
       return { rating: 0, reviewCount: 0 };
     }
+  }
+
+  /**
+   * `items.images` may be a JSON array string, a JSON-encoded string URL, or a plain URL.
+   */
+  private parseItemImagesRaw(raw: unknown): string[] {
+    if (raw == null) return [];
+    const s =
+      typeof raw === "string" ? raw.trim() : String(raw).trim();
+    if (!s) return [];
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      return [s];
+    }
+    if (s.startsWith("[") || s.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string");
+        }
+        if (typeof parsed === "string" && parsed.trim()) {
+          return [parsed.trim()];
+        }
+      } catch {
+        return [];
+      }
+    }
+    try {
+      const parsed = JSON.parse(s) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === "string");
+      }
+      if (typeof parsed === "string" && parsed.trim()) {
+        return [parsed.trim()];
+      }
+    } catch {
+      /* plain non-JSON text */
+    }
+    return [s];
   }
 
   /**
