@@ -1,12 +1,14 @@
 import { MigrationInterface, QueryRunner } from "typeorm";
 
-export class CreateInvoicesSystem1776500000000 implements MigrationInterface {
-  name = "CreateInvoicesSystem1776500000000";
+export class ResetInvoicesWithNewSeq1776700000000 implements MigrationInterface {
+  name = "ResetInvoicesWithNewSeq1776700000000";
 
   public async up(queryRunner: QueryRunner): Promise<void> {
-    // 1. Atomic helper: returns the next invoice sequence number for a given date
-    //    by counting existing rows in the invoices table for that date.
-    //    Caller must hold LOCK TABLE invoices IN EXCLUSIVE MODE before calling.
+    // 1. Drop existing table + function for a clean slate
+    await queryRunner.query(`DROP TABLE IF EXISTS invoices CASCADE;`);
+    await queryRunner.query(`DROP FUNCTION IF EXISTS next_invoice_seq(DATE);`);
+
+    // 2. Sequence function — starts at 1, produces 00001-based invoice numbers
     await queryRunner.query(`
       CREATE OR REPLACE FUNCTION next_invoice_seq(p_date DATE)
       RETURNS INTEGER
@@ -15,7 +17,7 @@ export class CreateInvoicesSystem1776500000000 implements MigrationInterface {
       DECLARE
         v_seq INTEGER;
       BEGIN
-        SELECT COALESCE(COUNT(*)::INTEGER, 0) + 10001
+        SELECT COALESCE(COUNT(*)::INTEGER, 0) + 1
           INTO v_seq
           FROM invoices
          WHERE invoice_no LIKE 'T-' || TO_CHAR(p_date, 'YYYYMMDD') || '-%';
@@ -24,9 +26,9 @@ export class CreateInvoicesSystem1776500000000 implements MigrationInterface {
       $$;
     `);
 
-    // 2. Invoices table
+    // 3. Recreate invoices table
     await queryRunner.query(`
-      CREATE TABLE IF NOT EXISTS invoices (
+      CREATE TABLE invoices (
         id          SERIAL PRIMARY KEY,
         order_id    INTEGER NOT NULL UNIQUE REFERENCES "order"(id) ON DELETE CASCADE,
         invoice_no  VARCHAR(30) NOT NULL UNIQUE,
@@ -36,7 +38,7 @@ export class CreateInvoicesSystem1776500000000 implements MigrationInterface {
       );
     `);
 
-    // 3. Backfill: assign invoice numbers to all existing delivered orders (ASC id order)
+    // 4. Backfill all existing delivered orders with new 00001-based numbers
     await queryRunner.query(`
       DO $$
       DECLARE
