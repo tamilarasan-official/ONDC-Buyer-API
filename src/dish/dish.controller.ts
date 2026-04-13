@@ -161,6 +161,7 @@ export class DishController {
   async create(
     @Body() createDishDto: CreateDishDto,
     @UploadedFile() iconFile: Express.Multer.File,
+    @Body("sessions") rawSessions?: unknown,
   ) {
     if (!iconFile) {
       throw new BadRequestException("Icon file is required");
@@ -174,7 +175,7 @@ export class DishController {
       );
     }
 
-    return this.dishService.create(createDishDto, iconFile);
+    return this.dishService.create(createDishDto, iconFile, rawSessions);
   }
 
   @Get()
@@ -220,6 +221,14 @@ export class DishController {
     example: "pizza",
     required: false,
     type: "string",
+  })
+  @ApiQuery({
+    name: "include_all",
+    description:
+      "Set true to return all dishes (including inactive or out-of-schedule). Default false.",
+    example: false,
+    required: false,
+    type: "boolean",
   })
   @ApiQuery({
     name: "order_by",
@@ -287,12 +296,14 @@ export class DishController {
     @Query() paginationDto: PaginationDto,
     @Query("order_by") orderBy?: string,
     @Query("food_type") foodType?: string,
+    @Query("include_all") includeAll?: string,
   ) {
     // Add food_type to paginationDto for service processing
     if (foodType) {
       paginationDto.food_type = foodType;
     }
-    return this.dishService.findAll(paginationDto, orderBy);
+    const includeAllFlag = String(includeAll).toLowerCase() === "true";
+    return this.dishService.findAll(paginationDto, orderBy, includeAllFlag);
   }
 
   @Get(":id")
@@ -512,6 +523,7 @@ export class DishController {
   async update(
     @Param("id") id: string,
     @Body() updateDishDto: UpdateDishDto,
+    @Body("sessions") rawSessions?: unknown,
     @UploadedFile() iconFile?: Express.Multer.File,
   ) {
     // Validate file format if file is provided
@@ -529,7 +541,7 @@ export class DishController {
       }
     }
 
-    return this.dishService.update(+id, updateDishDto, iconFile);
+    return this.dishService.update(+id, updateDishDto, iconFile, rawSessions);
   }
 
   @Delete(":id")
