@@ -105,13 +105,12 @@
       border: 0.5px solid #cccccc;
       padding: 5px 6px;
     }
-    .col-srno  { width: 4.5%; text-align: center; }
-    .col-desc  { width: 41.7%; text-align: left; }
-    .col-qty   { width: 6.6%; text-align: center; }
-    .col-unit  { width: 10.2%; text-align: right; }
-    .col-amt   { width: 11.5%; text-align: right; }
-    .col-disc  { width: 9%;    text-align: right; }
-    .col-nav   { width: 16.5%; text-align: right; }
+    .col-srno  { width: 5%;    text-align: center; }
+    .col-desc  { width: 46%;   text-align: left; }
+    .col-qty   { width: 7%;    text-align: center; }
+    .col-unit  { width: 11%;   text-align: right; }
+    .col-amt   { width: 13%;   text-align: right; }
+    .col-nav   { width: 18%;   text-align: right; }
 
     /* Summary rows */
     tr.summary td {
@@ -310,7 +309,6 @@
         <th class='col-qty'>Quantity</th>
         <th class='col-unit'>Unit Price</th>
         <th class='col-amt'>Amount (Rs.)</th>
-        <th class='col-disc'>Discount</th>
         <th class='col-nav'>Net Assessable Value (Rs.)</th>
       </tr>
     </thead>
@@ -322,51 +320,70 @@
         <td class='col-qty' style='text-align:center;'>{{quantity}}</td>
         <td class='col-unit' style='text-align:right;'>{{unit_price}}</td>
         <td class='col-amt' style='text-align:right;'>{{total_price}}</td>
-        <td class='col-disc' style='text-align:right;'>0.00</td>
         <td class='col-nav' style='text-align:right;'>{{total_price}}</td>
       </tr>
       {{/each}}
 
       <!-- Summary rows -->
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>Subtotal</td>
+        <td colspan='5' class='sum-label'>Subtotal</td>
         <td class='sum-value'>{{subtotal}}</td>
       </tr>
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>CGST (2.5%)</td>
+        <td colspan='5' class='sum-label'>Delivery Fee</td>
+        <td class='sum-value'>{{delivery_fee}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='5' class='sum-label'>Platform Fee</td>
+        <td class='sum-value'>{{platform_fee}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='5' class='sum-label'>Delivery Partner Tip Amount</td>
+        <td class='sum-value'>{{tip_amount}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='5' class='sum-label'>Delivery Fee Tax ({{delivery_percent}}%)</td>
+        <td class='sum-value'>{{delivery_fee_tax}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='5' class='sum-label'>Platform Tax Fee ({{platform_percent}}%)</td>
+        <td class='sum-value'>{{platform_fee_tax}}</td>
+      </tr>
+      <tr class='summary'>
+        <td colspan='5' class='sum-label'>CGST (2.5%)</td>
         <td class='sum-value'>{{cgst}}</td>
       </tr>
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>SGST/UTGST (2.5%)</td>
+        <td colspan='5' class='sum-label'>SGST (2.5%)</td>
         <td class='sum-value'>{{sgst}}</td>
       </tr>
       {{#if show_igst}}
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>IGST</td>
+        <td colspan='5' class='sum-label'>IGST</td>
         <td class='sum-value'>{{total_tax}}</td>
       </tr>
       {{/if}}
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>Total Taxes</td>
+        <td colspan='5' class='sum-label'>Total Taxes</td>
         <td class='sum-value'>{{total_tax}}</td>
       </tr>
-      {{#if delivery_fee_row}}
+      {{#if discount_row}}
       <tr class='summary'>
-        <td colspan='6' class='sum-label'>Delivery Fee</td>
-        <td class='sum-value'>{{delivery_fee}}</td>
+        <td colspan='5' class='sum-label'>Discount</td>
+        <td class='sum-value'>- {{discount_amount}}</td>
       </tr>
       {{/if}}
 
       <!-- Invoice Total -->
       <tr class='invoice-total'>
-        <td colspan='6' class='sum-label'>Invoice Total</td>
+        <td colspan='5' class='sum-label'>Invoice Total</td>
         <td class='sum-value'>{{total}}</td>
       </tr>
 
       <!-- Invoice Total in Words -->
       <tr class='words-row'>
         <td colspan='2' class='words-label'>Invoice Total in Words:</td>
-        <td colspan='5' class='words-value'>{{amount_in_words}}</td>
+        <td colspan='4' class='words-value'>{{amount_in_words}}</td>
       </tr>
 
     </tbody>

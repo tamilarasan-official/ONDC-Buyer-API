@@ -3212,8 +3212,10 @@ export class OrderService {
               delivery_address: deliveryAddress || null,
               order_items: items,
               subtotal: Number(o.subtotal ?? 0).toFixed(2),
-              platform_fee: Number(o.platform_fee ?? 0) > 0 ? Number(o.platform_fee).toFixed(2) : null,
+              discount_amount: Number(o.discount_amount ?? 0).toFixed(2),
+              platform_fee: Number(o.platform_fee ?? 0).toFixed(2),
               delivery_fee: Number(o.delivery_fee ?? 0) > 0 ? Number(o.delivery_fee).toFixed(2) : null,
+              tip_amount: Number(o.tip_amount ?? 0).toFixed(2),
               tax_amount: Number(o.total_tax_amount ?? o.tax_amount ?? 0) > 0
                 ? Number(o.total_tax_amount ?? o.tax_amount).toFixed(2)
                 : null,

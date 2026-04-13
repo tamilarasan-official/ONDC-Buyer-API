@@ -124,7 +124,7 @@ export class InvoiceService {
 
       // Generate PDF
       try {
-        const pdfBuffer = await this.generatePDF(invoiceData, Number(order.total_tax_amount) || Number(order.tax_amount));
+        const pdfBuffer = await this.generatePDF(invoiceData, Number(order.tax_amount), order);
         return pdfBuffer;
       } catch (pdfError) {
         this.logger.error(
@@ -355,7 +355,7 @@ export class InvoiceService {
   /**
    * Generate PDF invoice — renders invoice.hbs template via Handlebars then converts to PDF via Puppeteer
    */
-  private async generatePDF(invoiceData: InvoiceResponseDto, totalTaxAmount?: number): Promise<Buffer> {
+  private async generatePDF(invoiceData: InvoiceResponseDto, totalTaxAmount?: number, order?: Order): Promise<Buffer> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { toWords } = require("number-to-words") as { toWords: (n: number) => string };
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -380,8 +380,16 @@ export class InvoiceService {
     const cgst        = +(totalTax / 2).toFixed(2);
     const sgst        = +(totalTax / 2).toFixed(2);
     const subtotal    = Number(invoiceData.pricing.subtotal) || 0;
-    const deliveryFee = Number(invoiceData.pricing.delivery_fee) || 0;
-    const total       = Number(invoiceData.pricing.total_amount) || 0;
+    const deliveryFee    = Number(invoiceData.pricing.delivery_fee) || 0;
+    const platformFee    = Number(order?.platform_fee) || 0;
+    const tipAmount      = Number(order?.tip_amount) || 0;
+    const deliveryFeeTax = Number(order?.delivery_fee_tax) || 0;
+    const platformFeeTax = Number(order?.platform_fee_tax) || 0;
+    const deliveryPercent = Number(order?.delivery_percent) || 0;
+    const platformPercent = Number(order?.platform_percent) || 0;
+    const allTaxes       = Number(order?.total_tax_amount) || (totalTax + deliveryFeeTax + platformFeeTax);
+    const discountAmount = Number(invoiceData.pricing.discount_amount) || 0;
+    const total          = Number(invoiceData.pricing.total_amount) || 0;
 
     // Map truncated ONDC state codes to full state names
     const STATE_MAP: Record<string, string> = {
@@ -440,12 +448,19 @@ export class InvoiceService {
         total_price: fmt(item.total_price),
       })),
       subtotal:          fmt(subtotal),
+      discount_row:      discountAmount > 0,
+      discount_amount:   fmt(discountAmount),
+      delivery_fee:      fmt(deliveryFee),
+      platform_fee:      fmt(platformFee),
+      tip_amount:        fmt(tipAmount),
+      delivery_fee_tax:  fmt(deliveryFeeTax),
+      delivery_percent:  Math.round(deliveryPercent).toString(),
+      platform_fee_tax:  fmt(platformFeeTax),
+      platform_percent:  Math.round(platformPercent).toString(),
       cgst:              fmt(cgst),
       sgst:              fmt(sgst),
       show_igst:         totalTax > 0 && cgst === 0 && sgst === 0,
-      total_tax:         fmt(totalTax),
-      delivery_fee_row:  deliveryFee > 0,
-      delivery_fee:      fmt(deliveryFee),
+      total_tax:         fmt(allTaxes),
       total:             fmt(total),
       amount_in_words:   amountToWords(total),
     };
@@ -544,7 +559,7 @@ export class InvoiceService {
       let pdfBuffer: Buffer;
       try {
         const invoiceData = await this.formatInvoiceData(order, payment, latestTracking, undefined, invoiceRecord.invoice_no);
-        pdfBuffer = await this.generatePDF(invoiceData, Number(order.total_tax_amount) || Number(order.tax_amount));
+        pdfBuffer = await this.generatePDF(invoiceData, Number(order.tax_amount), order);
       } finally {
         this.releasePdfSlot();
       }
