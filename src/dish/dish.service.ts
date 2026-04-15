@@ -16,6 +16,7 @@ import { UploadService } from "src/shared/upload.service";
 import { TimezoneUtil } from "src/shared/utils/timezone.util";
 import { isValidHHMM, normalizeHHMMValue } from "./utils/hhmm.util";
 import { normalizeSessionsPayload } from "./utils/session-input.util";
+import { isDishActiveNow } from "./utils/dish-visibility.util";
 
 @Injectable()
 export class DishService {
@@ -284,6 +285,32 @@ export class DishService {
     return dishes.filter(
       (dish) => Boolean(dish?.status) && Boolean(dish?.is_active_now),
     );
+  }
+
+  async getVisibleDishes(options?: {
+    foodTypes?: string[];
+    limit?: number;
+  }): Promise<any[]> {
+    const queryBuilder = this.dishRepository
+      .createQueryBuilder("dish")
+      .where("dish.status = :status", { status: true })
+      .orderBy("dish.sequence", "ASC")
+      .addOrderBy("dish.id", "ASC");
+
+    if (options?.foodTypes?.length) {
+      queryBuilder.andWhere("dish.food_type IN (:...foodTypes)", {
+        foodTypes: options.foodTypes,
+      });
+    }
+
+    const dishes = await queryBuilder.getMany();
+    const enrichedData = await this.attachSessionMetadata(dishes);
+    const filteredData = this.filterVisibleDishes(enrichedData, false);
+
+    if (options?.limit && options.limit > 0) {
+      return filteredData.slice(0, options.limit);
+    }
+    return filteredData;
   }
 
   async findOne(id: number) {
@@ -766,7 +793,7 @@ export class DishService {
 
     return dishes.map((dish) => {
       const dishSessions = map.get(dish.id) ?? [];
-      const isActiveNow = this.isDishActiveNow(
+      const isActiveNow = isDishActiveNow(
         dish.schedule_enabled,
         dishSessions,
         currentDay,
@@ -780,30 +807,4 @@ export class DishService {
     });
   }
 
-  private isDishActiveNow(
-    scheduleEnabled: boolean,
-    sessions: DishSession[],
-    currentDay: number,
-    currentTime: number,
-  ): boolean {
-    if (!scheduleEnabled || sessions.length === 0) return true;
-
-    return sessions.some((session) => {
-      if (!session.status) return false;
-      const dayMatch =
-        session.day_from <= session.day_to
-          ? currentDay >= session.day_from && currentDay <= session.day_to
-          : currentDay >= session.day_from || currentDay <= session.day_to;
-      if (!dayMatch) return false;
-
-      if (session.end_hhmm < session.start_hhmm) {
-        return (
-          currentTime >= session.start_hhmm || currentTime <= session.end_hhmm
-        );
-      }
-      return (
-        currentTime >= session.start_hhmm && currentTime <= session.end_hhmm
-      );
-    });
-  }
 }
