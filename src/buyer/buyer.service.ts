@@ -34,6 +34,7 @@ import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-rest
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
+import { DishSession } from "../dish/entities/dish-session.entity";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -566,11 +567,15 @@ export class BuyerService {
 
   /**
    * MODIFY: Get "What's On Your Mind?" dishes (was getPopularCategories)
-   * Filters to veg dishes if vegMode is ALL
+   * Keeps Home dish visibility aligned with Dish API defaults:
+   * - status=true
+   * - active now (based on schedule/sessions)
+   * - sequence ordering
    */
   private async getWhatsOnYourMind(vegMode?: VegMode) {
     const queryBuilder = this.dishRepository
       .createQueryBuilder("d")
+      .leftJoinAndSelect("d.sessions", "ds")
       .where("d.status = :status", { status: true });
 
     // Filter to veg dishes if ALL mode is enabled
@@ -587,6 +592,16 @@ export class BuyerService {
       );
     }
 
+    // Filter to pure-veg dishes only in PURE mode
+    if (vegMode === VegMode.PURE) {
+      queryBuilder.andWhere("d.food_type = :pureVeg", {
+        pureVeg: StoreDietaryPreference.PURE_VEG,
+      });
+      this.logger.log(
+        `🥗 Filtering "What's on your mind" dishes to pure-veg only`,
+      );
+    }
+
     const dishes = await queryBuilder
       .select([
         "d.id",
@@ -596,14 +611,34 @@ export class BuyerService {
         "d.food_type",
         "d.sequence",
         "d.status",
+        "d.schedule_enabled",
         "d.created_at",
         "d.updated_at",
+        "ds.id",
+        "ds.day_from",
+        "ds.day_to",
+        "ds.start_hhmm",
+        "ds.end_hhmm",
+        "ds.status",
       ])
-      .orderBy("d.name", "ASC")
-      .limit(10) // Increased from 5 to 10 dishes
+      .orderBy("d.sequence", "ASC")
+      .addOrderBy("d.id", "ASC")
       .getMany();
 
-    return dishes.map((dish) => ({
+    const currentDay = TimezoneUtil.getCurrentISTDay();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+
+    return dishes
+      .filter((dish) =>
+        this.isDishActiveNowForHome(
+          Boolean(dish.schedule_enabled),
+          dish.sessions ?? [],
+          currentDay,
+          currentTime,
+        ),
+      )
+      .slice(0, 10)
+      .map((dish) => ({
       id: dish.id,
       name: dish.name,
       description: dish.description,
@@ -613,7 +648,36 @@ export class BuyerService {
       status: dish.status,
       created_at: dish.created_at,
       updated_at: dish.updated_at,
-    }));
+      }));
+  }
+
+  private isDishActiveNowForHome(
+    scheduleEnabled: boolean,
+    sessions: DishSession[],
+    currentDay: number,
+    currentTime: number,
+  ): boolean {
+    if (!scheduleEnabled || sessions.length === 0) return true;
+
+    return sessions.some((session) => {
+      if (!session.status) return false;
+
+      const dayMatch =
+        session.day_from <= session.day_to
+          ? currentDay >= session.day_from && currentDay <= session.day_to
+          : currentDay >= session.day_from || currentDay <= session.day_to;
+      if (!dayMatch) return false;
+
+      if (session.end_hhmm < session.start_hhmm) {
+        return (
+          currentTime >= session.start_hhmm || currentTime <= session.end_hhmm
+        );
+      }
+
+      return (
+        currentTime >= session.start_hhmm && currentTime <= session.end_hhmm
+      );
+    });
   }
 
   /**
