@@ -96,6 +96,8 @@ import { WebhookEvent } from "../payment/entities/webhook-event.entity";
 import { OrderCancelDto } from "./dto/cancel-order.dto";
 import { AppSettings } from "../shared/entities/app-settings.entity";
 import { UserDeviceToken } from "../user/entities/user-device-token.entity";
+import { CollectionService } from "../collection/collection.service";
+import { PaginationDto } from "../shared/dto/pagination.dto";
 
 @ApiTags("Buyer App APIs")
 @Controller("api/buyer")
@@ -109,6 +111,7 @@ export class BuyerController {
     private readonly reviewService: ReviewService,
     private readonly razorpayService: RazorpayService,
     private readonly storeService: StoreService,
+    private readonly collectionService: CollectionService,
     @InjectRepository(WebhookEvent)
     private readonly webhookEventRepository: Repository<WebhookEvent>,
     @InjectRepository(AppSettings)
@@ -116,6 +119,44 @@ export class BuyerController {
     @InjectRepository(UserDeviceToken)
     private readonly userDeviceTokenRepository: Repository<UserDeviceToken>,
   ) { }
+
+  @Get("collections")
+  @UseGuards(GuestOrUserAuthGuard)
+  @ApiBearerAuth("JWT-auth")
+  @ApiOperation({
+    summary: "Get active collections for buyer",
+    description: "Returns active collections configured in buyer config.",
+  })
+  @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
+  @ApiQuery({ name: "limit", required: false, type: Number, example: 20 })
+  getCollections(@Query() paginationDto: PaginationDto) {
+    return this.collectionService.findActiveCollections(paginationDto);
+  }
+
+  @Get("collections/:id/items")
+  @UseGuards(GuestOrUserAuthGuard)
+  @ApiBearerAuth("JWT-auth")
+  @ApiOperation({
+    summary: "Get items for an active collection",
+    description: "Returns collection items resolved by stored filters.",
+  })
+  @ApiQuery({ name: "lat", required: false, type: Number, example: 9.9252 })
+  @ApiQuery({ name: "lng", required: false, type: Number, example: 78.1198 })
+  @ApiQuery({ name: "limit", required: false, type: Number, example: 20 })
+  @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
+  getCollectionItems(
+    @Param("id") id: string,
+    @Query() paginationDto: PaginationDto,
+    @Query("lat") lat?: string,
+    @Query("lng") lng?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.collectionService.previewActiveItems(+id, paginationDto, {
+      ...(lat !== undefined ? { user_lat: Number(lat) } : {}),
+      ...(lng !== undefined ? { user_lng: Number(lng) } : {}),
+      ...(limit !== undefined ? { limit: Number(limit) } : {}),
+    });
+  }
 
   @Get("home")
   @UseGuards(GuestOrUserAuthGuard)

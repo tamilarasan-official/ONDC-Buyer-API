@@ -25,6 +25,7 @@ import { AppSettingsModule } from "../shared/app-settings.module";
 import { SellerSyncModule } from "../seller-sync/seller-sync.module";
 import { MailService } from "../shared/mail.service";
 import { UploadModule } from "../shared/upload.module";
+import { CollectionModule } from "../collection/collection.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -120,6 +121,7 @@ import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard
     SharedNotificationModule,
     SellerSyncModule,
     UploadModule,
+    CollectionModule,
   ],
   controllers: [BuyerController, InvoiceController],
   providers: [
