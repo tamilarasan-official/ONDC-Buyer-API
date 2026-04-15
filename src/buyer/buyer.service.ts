@@ -34,7 +34,7 @@ import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-rest
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
-import { DishSession } from "../dish/entities/dish-session.entity";
+import { isDishActiveNow } from "../dish/utils/dish-visibility.util";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -578,7 +578,6 @@ export class BuyerService {
       .leftJoinAndSelect("d.sessions", "ds")
       .where("d.status = :status", { status: true });
 
-    // Filter to veg dishes if ALL mode is enabled
     if (vegMode === VegMode.ALL) {
       queryBuilder.andWhere(
         "(d.food_type = :pureVeg OR d.food_type = :veg)",
@@ -630,7 +629,7 @@ export class BuyerService {
 
     return dishes
       .filter((dish) =>
-        this.isDishActiveNowForHome(
+        isDishActiveNow(
           Boolean(dish.schedule_enabled),
           dish.sessions ?? [],
           currentDay,
@@ -649,35 +648,6 @@ export class BuyerService {
       created_at: dish.created_at,
       updated_at: dish.updated_at,
       }));
-  }
-
-  private isDishActiveNowForHome(
-    scheduleEnabled: boolean,
-    sessions: DishSession[],
-    currentDay: number,
-    currentTime: number,
-  ): boolean {
-    if (!scheduleEnabled || sessions.length === 0) return true;
-
-    return sessions.some((session) => {
-      if (!session.status) return false;
-
-      const dayMatch =
-        session.day_from <= session.day_to
-          ? currentDay >= session.day_from && currentDay <= session.day_to
-          : currentDay >= session.day_from || currentDay <= session.day_to;
-      if (!dayMatch) return false;
-
-      if (session.end_hhmm < session.start_hhmm) {
-        return (
-          currentTime >= session.start_hhmm || currentTime <= session.end_hhmm
-        );
-      }
-
-      return (
-        currentTime >= session.start_hhmm && currentTime <= session.end_hhmm
-      );
-    });
   }
 
   /**
