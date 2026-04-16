@@ -424,21 +424,24 @@ export class BuyerService {
 
       this.logger.log(`🔍 Processing all ${allStores.length} restaurants...`);
 
-      // Batch fetch all active close timings for ALL stores at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for ALL stores at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const allStoreIds = allStores.map((store) => store.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(allStoreIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-        relations: ["store"],
-      });
+      
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: allStoreIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of store IDs with active close timings for O(1) lookup
       const storesWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store.id),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
+
+      console.log('storesWithActiveCloseTimings', storesWithActiveCloseTimings);
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
       const storesWithHolidayToday = await this.getStoreIdsWithHolidayToday(
@@ -1247,20 +1250,20 @@ export class BuyerService {
 
       const restaurants = await queryBuilder.getRawMany();
 
-      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(restaurantIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-        relations: ['store'], // Load store relation to access store.id
-      });
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of restaurant IDs with active close timings for O(1) lookup
       const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store?.id).filter(id => id !== undefined),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
@@ -1909,6 +1912,30 @@ export class BuyerService {
       const deliveryFeeRaw = await this.appSettingsService.getNumber("DELIVERY_FEE", 30);
       const deliveryFee = Number(deliveryFeeRaw ?? 30);
 
+      // Compute expanded timings with consistent "active close timing" detection.
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
+      const hasActiveCloseTimingForDetails = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .where("sct.storeId = :storeId", { storeId: restaurant.id })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getExists();
+      const istComponents = TimezoneUtil.getISTComponents();
+      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+      const isHolidayTodayForDetails =
+        (restaurant.locations || []).some(
+          (loc) =>
+            Array.isArray(loc.schedule_holidays) &&
+            loc.schedule_holidays.includes(todayYYYYMMDD),
+        ) || false;
+      const expandedTimingsForDetails = restaurant.timings
+        ? this.expandTimingsToDays(
+            restaurant.timings,
+            hasActiveCloseTimingForDetails,
+            isHolidayTodayForDetails,
+          )
+        : [];
+
       // Format response
       const restaurantDetails: any = {
         id: restaurant.id,
@@ -1935,30 +1962,7 @@ export class BuyerService {
                 location.schedule_holidays
               : [],
           })) || [],
-        timings: restaurant.timings
-          ? (() => {
-            // Check for active close timing for this single restaurant
-            const now = new Date();
-            const hasActiveCloseTiming = restaurant.closeTimings?.some(
-              (ct) =>
-                ct.close_start_datetime <= now && ct.close_end_datetime >= now,
-            ) || false;
-            // Check if today is a holiday (in any location's schedule_holidays)
-            const istComponents = TimezoneUtil.getISTComponents();
-            const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
-            const isHolidayToday =
-              (restaurant.locations || []).some(
-                (loc) =>
-                  Array.isArray(loc.schedule_holidays) &&
-                  loc.schedule_holidays.includes(todayYYYYMMDD),
-              ) || false;
-            return this.expandTimingsToDays(
-              restaurant.timings,
-              hasActiveCloseTiming,
-              isHolidayToday,
-            );
-          })()
-          : [],
+        timings: expandedTimingsForDetails,
         offers:
           restaurant.offers
             ?.filter((offer) => {
@@ -3575,19 +3579,20 @@ export class BuyerService {
         .limit(5)
         .getRawMany();
 
-      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(restaurantIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-      });
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of restaurant IDs with active close timings for O(1) lookup
       const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store.id),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
@@ -3711,46 +3716,65 @@ export class BuyerService {
         `🕐 Checking store ${storeId} open status - IST Day: ${currentDay}, Time: ${currentTime} (${TimezoneUtil.formatTimeHHMM(currentTime)})`,
       );
 
-      // Check regular timings
-      const todayTiming = await this.storeTimingsRepository
+      // Check regular timings (Order timings only), including wrapped day ranges
+      const applicableTimings = await this.storeTimingsRepository
         .createQueryBuilder("st")
         .where("st.storeId = :storeId", { storeId })
-        .andWhere("st.day_from <= :day AND st.day_to >= :day", {
-          day: currentDay,
-        })
-        .getOne();
+        .andWhere(
+          `(
+            (st.day_from <= st.day_to AND st.day_from <= :day AND st.day_to >= :day)
+            OR
+            (st.day_from > st.day_to AND (:day >= st.day_from OR :day <= st.day_to))
+          )`,
+          {
+            day: currentDay,
+          },
+        )
+        .orderBy("st.time_from", "ASC")
+        .addOrderBy("st.id", "ASC")
+        .getMany();
 
-      if (!todayTiming) {
+      if (!applicableTimings.length) {
         return { isOpen: false };
       }
 
-      const openTime = parseInt(todayTiming.time_from);
-      const closeTime = parseInt(todayTiming.time_to);
-
-      // Check if currently within operating hours
+      // Check if current time falls in ANY matching timing window
       let isWithinHours = false;
-      if (closeTime < openTime) {
-        // Handle overnight operations (e.g., 2300 to 0200)
-        isWithinHours = currentTime >= openTime || currentTime <= closeTime;
-      } else {
-        isWithinHours = currentTime >= openTime && currentTime <= closeTime;
+      const nextOpenTime = applicableTimings[0]?.time_from;
+      for (const timing of applicableTimings) {
+        const openTime = parseInt(timing.time_from, 10);
+        const closeTime = parseInt(timing.time_to, 10);
+
+        if (!Number.isFinite(openTime) || !Number.isFinite(closeTime)) {
+          continue;
+        }
+
+        if (closeTime < openTime) {
+          // Handle overnight operations (e.g., 2300 to 0200)
+          if (currentTime >= openTime || currentTime <= closeTime) {
+            isWithinHours = true;
+            break;
+          }
+        } else if (currentTime >= openTime && currentTime <= closeTime) {
+          isWithinHours = true;
+          break;
+        }
       }
 
       if (!isWithinHours) {
-        return { isOpen: false, nextOpenTime: todayTiming.time_from };
+        return nextOpenTime ? { isOpen: false, nextOpenTime } : { isOpen: false };
       }
 
       // Check for special closures (holidays, maintenance, etc.)
-      const now = TimezoneUtil.getCurrentISTTime();
-      const specialClosure = await this.storeRepository
-        .createQueryBuilder("s")
-        .leftJoin("s.closeTimings", "sct")
-        .where("s.id = :storeId", { storeId })
-        .andWhere("sct.close_start_datetime <= :now", { now })
-        .andWhere("sct.close_end_datetime >= :now", { now })
-        .getOne();
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
+      const hasActiveSpecialClosure = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .where("sct.storeId = :storeId", { storeId })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getExists();
 
-      if (specialClosure) {
+      if (hasActiveSpecialClosure) {
         return { isOpen: false };
       }
 

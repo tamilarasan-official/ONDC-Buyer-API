@@ -30,6 +30,7 @@ import { AdminAccessModule } from './super-admin-access/super-admin-access.modul
 import { CancelReasonModule } from './cancel-reason/cancel-reason.module';
 import { SellerSyncModule } from "./seller-sync/seller-sync.module";
 import { RedisModule } from "./redis/redis.module";
+import { CollectionModule } from "./collection/collection.module";
 import "dotenv/config";
 
 @Module({
@@ -109,6 +110,7 @@ import "dotenv/config";
     CancelReasonModule,
     SellerSyncModule,
     RedisModule,
+    CollectionModule,
   ],
   controllers: [AppController],
   providers: [AppService],
