@@ -1,11 +1,21 @@
 import { Injectable, Logger } from "@nestjs/common";
 import { MailerService } from "@nestjs-modules/mailer";
+import { AppSettingsService } from "./services/app-settings.service";
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
+  private readonly defaultLogoUrl = "https://tazty.in/lovable-uploads/tazty.png";
 
-  constructor(private readonly mailerService: MailerService) {}
+  constructor(
+    private readonly mailerService: MailerService,
+    private readonly appSettingsService: AppSettingsService,
+  ) {}
+
+  private async getLogoUrl(): Promise<string> {
+    const logoUrl = await this.appSettingsService.get("LOGO");
+    return logoUrl?.trim() || this.defaultLogoUrl;
+  }
 
   async storeCreation(to: string, storeDetails: any) {
     try {
@@ -44,6 +54,7 @@ export class MailService {
 
   async orderDelivered(to: string, orderDetails: any) {
     try {
+      const logoUrl = await this.getLogoUrl();
       await this.mailerService.sendMail({
         to,
         subject: `Your Tazty order #${orderDetails.order_number} was delivered`,
@@ -68,6 +79,7 @@ export class MailService {
           placed_at: orderDetails.placed_at,
           delivered_at: orderDetails.delivered_at,
           invoice_url: orderDetails.invoice_url ?? null,
+          logo_url: logoUrl,
         },
       });
 

@@ -1,11 +1,13 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
+import { MailerService } from "@nestjs-modules/mailer";
 import { Queue } from "bullmq";
 import type { Redis } from "ioredis";
 import { EntityManager, Repository } from "typeorm";
 import { SellerSyncJobData } from "./seller-sync.types";
 import { SellerSyncQueue } from "./entities/seller-sync-queue.entity";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 const SELLER_SYNC_QUEUE_NAME = "seller-sync";
 const OUTBOX_MAX_ATTEMPTS_DEFAULT = 10;
@@ -18,6 +20,8 @@ export class SellerSyncQueueService {
   constructor(
     @Inject("REDIS_CLIENT") redisClient: Redis,
     private readonly configService: ConfigService,
+    private readonly mailerService: MailerService,
+    private readonly appSettingsService: AppSettingsService,
     @InjectRepository(SellerSyncQueue)
     private readonly outboxRepository: Repository<SellerSyncQueue>,
   ) {
@@ -36,6 +40,77 @@ export class SellerSyncQueueService {
         removeOnFail: false,
       },
     });
+  }
+
+  private async notifySupportOnOutboxFailed(row: SellerSyncQueue): Promise<void> {
+    const defaultLogoUrl = "https://tazty.in/lovable-uploads/tazty.png";
+    const supportEmail =
+      (await this.appSettingsService.get("SUPPORT_EMAIL"))?.trim() || "";
+    const logoUrl =
+      (await this.appSettingsService.get("LOGO"))?.trim() || defaultLogoUrl;
+    const payload = (row.payload ?? {}) as Record<string, any>;
+    const items = Array.isArray(payload.items) ? payload.items : [];
+    const billing = (payload.billing ?? {}) as Record<string, any>;
+
+    const orderContext = {
+      order_number:
+        payload.external_order_no ||
+        payload.external_order_id ||
+        row.reference_id,
+      store_id: payload.store_id || "n/a",
+      item_count: items.length,
+      customer_name: billing.name || payload.customer_name || "n/a",
+      customer_phone:
+        payload.contact_number || billing.phone || payload.customer_phone || "n/a",
+      customer_email:
+        billing.email || payload.customer_email || "n/a",
+      payment_method: payload.payment_method || "n/a",
+      payment_status: payload.payment_status || "n/a",
+      total_amount: payload.total_amount ?? "n/a",
+      delivery_charge: payload.delivery_charge ?? "n/a",
+      discount_amount: payload.discount_amount ?? "n/a",
+      tip_amount: payload.tip_amount ?? "n/a",
+      payload_json: JSON.stringify(payload, null, 2),
+    };
+    const failureStageMap: Record<string, string> = {
+      "order.push": "Send order to seller",
+      "order.cancel": "Send order cancellation to seller",
+      "review.push": "Send review to seller",
+    };
+    const failureStage = failureStageMap[row.type] || "Seller integration sync";
+
+    if (!supportEmail) {
+      this.logger.warn(
+        `SUPPORT_EMAIL not found in app_settings. Skipping failure mail for outbox_id=${row.id}`,
+      );
+      return;
+    }
+
+    try {
+      await this.mailerService.sendMail({
+        to: supportEmail,
+        subject: `[Buyer API] Order Sync Alert - ${orderContext.order_number}`,
+        template: "seller-sync-failure-alert",
+        context: {
+          logo_url: logoUrl,
+          support_email: supportEmail,
+          alert_id: row.id,
+          failure_stage: failureStage,
+          attempts: row.attempts,
+          last_error: row.last_error ?? "n/a",
+          updated_at: row.updated_at?.toISOString?.() ?? new Date().toISOString(),
+          created_at: row.created_at?.toISOString?.() ?? "n/a",
+          order: orderContext,
+        },
+      });
+      this.logger.log(
+        `Seller sync failure alert sent to ${supportEmail} for outbox_id=${row.id}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `Failed to send seller sync failure alert for outbox_id=${row.id}: ${(error as Error).message}`,
+      );
+    }
   }
 
   private getDefaultAttempts(): number {
@@ -220,12 +295,16 @@ export class SellerSyncQueueService {
   ): Promise<void> {
     const row = await this.outboxRepository.findOne({ where: { id } });
     if (!row) return;
+    const wasFailed = row.status === "failed";
     row.attempts += 1;
     row.last_error = lastError;
     if (row.attempts >= this.getOutboxMaxAttempts()) {
       row.status = "failed";
     }
-    await this.outboxRepository.save(row);
+    const savedRow = await this.outboxRepository.save(row);
+    if (!wasFailed && savedRow.status === "failed") {
+      await this.notifySupportOnOutboxFailed(savedRow);
+    }
   }
 
   /**
@@ -320,12 +399,21 @@ export class SellerSyncQueueService {
       );
       return;
     }
+    const wasFailed = row.status === "failed";
     await this.outboxRepository.update(row.id, {
       status: "failed",
       last_error: lastError,
       ...(attempts != null ? { attempts } : {}),
     });
     this.logger.log(`Outbox marked failed: type=${type}, reference_id=${referenceId}`);
+    if (!wasFailed) {
+      const updatedRow = await this.outboxRepository.findOne({
+        where: { id: row.id },
+      });
+      if (updatedRow?.status === "failed") {
+        await this.notifySupportOnOutboxFailed(updatedRow);
+      }
+    }
   }
 
   async enqueueOrderPush(payload: any, options?: { delayMs?: number }): Promise<string | null> {
