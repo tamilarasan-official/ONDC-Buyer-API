@@ -23,9 +23,11 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import { UploadService } from "../shared/upload.service";
+import { AppSettingsService } from "../shared/services/app-settings.service";
 
 /** Max concurrent Puppeteer PDF renders. Prevents OOM when many orders arrive simultaneously. */
 const PDF_CONCURRENCY = 3;
+const DEFAULT_LOGO_URL = "https://tazty.in/lovable-uploads/tazty.png";
 
 @Injectable()
 export class InvoiceService {
@@ -53,6 +55,7 @@ export class InvoiceService {
     @InjectRepository(ItemCustomizationGroups)
     private readonly itemCustomizationGroupsRepository: Repository<ItemCustomizationGroups>,
     private readonly uploadService: UploadService,
+    private readonly appSettingsService: AppSettingsService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -428,8 +431,12 @@ export class InvoiceService {
     const templateSrc  = fs.readFileSync(templatePath, "utf8");
     const template     = Handlebars.compile(templateSrc);
 
+    const logoUrl =
+      (await this.appSettingsService.get("LOGO"))?.trim() || DEFAULT_LOGO_URL;
+
     // Build template context
     const context = {
+      logo_url:         logoUrl,
       invoice_number:   invoiceData.invoice_number,
       invoice_date:     invoiceDate,
       order_number:     invoiceData.order_number,
