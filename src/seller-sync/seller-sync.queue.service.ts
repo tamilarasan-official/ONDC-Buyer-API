@@ -70,7 +70,6 @@ export class SellerSyncQueueService {
       delivery_charge: payload.delivery_charge ?? "n/a",
       discount_amount: payload.discount_amount ?? "n/a",
       tip_amount: payload.tip_amount ?? "n/a",
-      payload_json: JSON.stringify(payload, null, 2),
     };
     const failureStageMap: Record<string, string> = {
       "order.push": "Send order to seller",
