@@ -46,6 +46,7 @@ import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
 import { Order } from "../order/entities/order.entity";
+import { CollectionService } from "../collection/collection.service";
 
 @Injectable()
 export class BuyerService {
@@ -106,6 +107,7 @@ export class BuyerService {
     private readonly locationService: LocationService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly collectionService: CollectionService,
   ) { }
 
   /**
@@ -264,6 +266,13 @@ export class BuyerService {
         cancel_timer: Number.isFinite(cancelTimerSecondsRaw)
           ? (cancelTimerSecondsRaw as number)
           : 0,
+        home_collection: await this.collectionService.findActiveHomeCollection(
+          { page: 1, limit: 20 },
+          {
+            ...(userLocation?.lat !== undefined ? { user_lat: userLocation.lat } : {}),
+            ...(userLocation?.lng !== undefined ? { user_lng: userLocation.lng } : {}),
+          },
+        ),
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);

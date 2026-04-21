@@ -611,6 +611,15 @@ export class HomeDataDto {
     type: "number",
   })
   cancel_timer: number;
+
+  @ApiProperty({
+    description:
+      "Active home collection with resolved entities (null when not configured)",
+    required: false,
+    nullable: true,
+    type: Object,
+  })
+  home_collection?: any;
 }
 
 export class HomeResponseDto {
