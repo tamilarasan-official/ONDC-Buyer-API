@@ -1,7 +1,15 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, MaxLength } from "class-validator";
-import { CollectionFiltersDto } from "./collection-filters.dto";
+import {
+  IsBoolean,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUrl,
+  MaxLength,
+} from "class-validator";
+import { CollectionPage, CollectionType } from "../entities/collection.entity";
 
 export class CreateCollectionDto {
   @ApiProperty({ example: "Dosa Picks" })
@@ -10,10 +18,23 @@ export class CreateCollectionDto {
   @MaxLength(120)
   title: string;
 
-  @ApiPropertyOptional({ type: CollectionFiltersDto })
+  @ApiPropertyOptional({ example: "Featured items for home grid" })
   @IsOptional()
-  @Type(() => CollectionFiltersDto)
-  filters?: CollectionFiltersDto;
+  @IsString()
+  description?: string;
+
+  @ApiPropertyOptional({ example: "https://cdn.example.com/collections/home-grid.jpg" })
+  @IsOptional()
+  @IsUrl()
+  image_url?: string;
+
+  @ApiProperty({ enum: CollectionType, example: CollectionType.ITEM })
+  @IsEnum(CollectionType)
+  type: CollectionType;
+
+  @ApiProperty({ enum: CollectionPage, example: CollectionPage.HOME })
+  @IsEnum(CollectionPage)
+  page: CollectionPage;
 
   @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
