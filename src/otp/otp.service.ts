@@ -4,6 +4,7 @@ import {
   BadRequestException,
   ConflictException,
 } from "@nestjs/common";
+import { Cron } from "@nestjs/schedule";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository, LessThan, In, MoreThan } from "typeorm";
 import { ConfigService } from "@nestjs/config";
@@ -258,6 +259,7 @@ export class OtpService {
   /**
    * Clean up expired OTPs (run as cron job)
    */
+  @Cron("0 */6 * * *", { timeZone: "Asia/Kolkata" })
   async cleanupExpiredOtps(): Promise<void> {
     try {
       const result = await this.otpRepository.delete({

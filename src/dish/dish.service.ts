@@ -8,21 +8,42 @@ import { CreateDishDto } from "./dto/create-dish.dto";
 import { UpdateDishDto } from "./dto/update-dish.dto";
 import { ReorderDishesDto, MoveDishDto } from "./dto/reorder-dishes.dto";
 import { Dish } from "./entities/dish.entity";
+import { DishSession } from "./entities/dish-session.entity";
 import { QueryFailedError, Repository, In } from "typeorm";
 import { InjectRepository } from "@nestjs/typeorm";
 import { PaginationDto } from "src/shared/dto/pagination.dto";
 import { UploadService } from "src/shared/upload.service";
+import { TimezoneUtil } from "src/shared/utils/timezone.util";
+import { isValidHHMM, normalizeHHMMValue } from "./utils/hhmm.util";
+import { normalizeSessionsPayload } from "./utils/session-input.util";
+import { isDishActiveNow } from "./utils/dish-visibility.util";
 
 @Injectable()
 export class DishService {
   constructor(
     @InjectRepository(Dish)
     private readonly dishRepository: Repository<Dish>,
+    @InjectRepository(DishSession)
+    private readonly dishSessionRepository: Repository<DishSession>,
     private readonly uploadService: UploadService,
   ) {}
 
-  async create(createDishDto: CreateDishDto, iconFile: Express.Multer.File) {
+  async create(
+    createDishDto: CreateDishDto,
+    iconFile: Express.Multer.File,
+    rawSessionsInput?: unknown,
+  ) {
     try {
+      const normalizedSessions = this.parseSessionsInput(
+        rawSessionsInput ?? (createDishDto as any).sessions,
+      ) ?? [];
+      if ((createDishDto as any).schedule_enabled === true && normalizedSessions.length === 0) {
+        throw new BadRequestException(
+          "At least one session is required when schedule is enabled.",
+        );
+      }
+      this.validateSessions(normalizedSessions);
+
       // Generate file name from dish name (remove spaces and special characters)
       const fileName = createDishDto.name.replace(/[^a-zA-Z0-9]/g, "");
       const fileExtension = iconFile.originalname.split(".").pop();
@@ -47,24 +68,42 @@ export class DishService {
       const nextSequence = (maxSequence?.max || 0) + 1;
 
       // Create dish with icon URL and sequence
-      const dish = this.dishRepository.create({
-        ...createDishDto,
-        icon: iconUrl,
-        sequence: nextSequence,
+      return await this.dishRepository.manager.transaction(async (manager) => {
+        const { schedule_enabled, sessions: _omitSessions, ...dishFields } =
+          createDishDto as any;
+        const dish = manager.create(Dish, {
+          ...dishFields,
+          icon: iconUrl,
+          sequence: nextSequence,
+          schedule_enabled: schedule_enabled ?? false,
+        });
+        const savedDish = await manager.save(Dish, dish);
+        await this.replaceSessionsInTransaction(
+          manager.getRepository(DishSession),
+          savedDish.id,
+          normalizedSessions,
+        );
+        const [enrichedDish] = await this.attachSessionMetadata([savedDish]);
+        return enrichedDish;
       });
-
-      return await this.dishRepository.save(dish);
     } catch (error) {
       if (error instanceof QueryFailedError) {
         throw new ConflictException("Dish with this name already exists");
       }
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
       throw new BadRequestException(
-        "Failed to create dish. Please check your data and try again.",
+        `Failed to create dish. ${error instanceof Error ? error.message : "Please check your data and try again."}`,
       );
     }
   }
 
-  async findAll(paginationDto: PaginationDto, orderBy?: string) {
+  async findAll(
+    paginationDto: PaginationDto,
+    orderBy?: string,
+    includeAll = false,
+  ) {
     try {
       // Validate order_by parameter
       const allowedOrderFields = [
@@ -140,7 +179,9 @@ export class DishService {
 
         // Apply ordering - sequence always in ASC order
         if (orderField === "sequence") {
-          dataQueryBuilder.orderBy("dish.sequence", "ASC");
+          dataQueryBuilder
+            .orderBy("dish.sequence", "ASC")
+            .addOrderBy("dish.id", "ASC");
         } else {
           dataQueryBuilder.orderBy(
             `dish.${orderField}`,
@@ -157,21 +198,23 @@ export class DishService {
 
         // Get paginated results
         const data = await dataQueryBuilder.getMany();
+        const enrichedData = await this.attachSessionMetadata(data);
+        const filteredData = this.filterVisibleDishes(enrichedData, includeAll);
 
         return {
-          data,
+          data: filteredData,
           meta: {
             page,
             limit,
-            total,
-            totalPages: Math.ceil(total / limit),
-            hasNext: page < Math.ceil(total / limit),
-            hasPrev: page > 1,
+            total: filteredData.length,
+            totalPages: filteredData.length > 0 ? 1 : 0,
+            hasNext: false,
+            hasPrev: false,
           },
         };
       } else {
         // Return all dishes without pagination
-        return this.findAllWithoutPagination(paginationDto, orderField);
+        return this.findAllWithoutPagination(paginationDto, orderField, includeAll);
       }
     } catch (error) {
       throw new BadRequestException(
@@ -183,6 +226,7 @@ export class DishService {
   private async findAllWithoutPagination(
     paginationDto: PaginationDto,
     orderField: string,
+    includeAll = false,
   ) {
     const queryBuilder = this.dishRepository.createQueryBuilder("dish");
 
@@ -210,7 +254,7 @@ export class DishService {
 
     // Apply ordering - sequence always in ASC order
     if (orderField === "sequence") {
-      queryBuilder.orderBy("dish.sequence", "ASC");
+      queryBuilder.orderBy("dish.sequence", "ASC").addOrderBy("dish.id", "ASC");
     } else {
       queryBuilder.orderBy(
         `dish.${orderField}`,
@@ -219,18 +263,54 @@ export class DishService {
     }
 
     const dishes = await queryBuilder.getMany();
+    const enrichedData = await this.attachSessionMetadata(dishes);
+    const filteredData = this.filterVisibleDishes(enrichedData, includeAll);
 
     return {
-      data: dishes,
+      data: filteredData,
       meta: {
         page: 1,
-        limit: dishes.length,
-        total: dishes.length,
-        totalPages: 1,
+        limit: filteredData.length,
+        total: filteredData.length,
+        totalPages: filteredData.length > 0 ? 1 : 0,
         hasNext: false,
         hasPrev: false,
       },
     };
+  }
+
+
+  private filterVisibleDishes(dishes: any[], includeAll: boolean): any[] {
+    if (includeAll) return dishes;
+    return dishes.filter(
+      (dish) => Boolean(dish?.status) && Boolean(dish?.is_active_now),
+    );
+  }
+
+  async getVisibleDishes(options?: {
+    foodTypes?: string[];
+    limit?: number;
+  }): Promise<any[]> {
+    const queryBuilder = this.dishRepository
+      .createQueryBuilder("dish")
+      .where("dish.status = :status", { status: true })
+      .orderBy("dish.sequence", "ASC")
+      .addOrderBy("dish.id", "ASC");
+
+    if (options?.foodTypes?.length) {
+      queryBuilder.andWhere("dish.food_type IN (:...foodTypes)", {
+        foodTypes: options.foodTypes,
+      });
+    }
+
+    const dishes = await queryBuilder.getMany();
+    const enrichedData = await this.attachSessionMetadata(dishes);
+    const filteredData = this.filterVisibleDishes(enrichedData, false);
+
+    if (options?.limit && options.limit > 0) {
+      return filteredData.slice(0, options.limit);
+    }
+    return filteredData;
   }
 
   async findOne(id: number) {
@@ -239,7 +319,8 @@ export class DishService {
       if (!dish) {
         throw new NotFoundException("Dish not found");
       }
-      return dish;
+      const [enriched] = await this.attachSessionMetadata([dish]);
+      return enriched;
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -252,14 +333,32 @@ export class DishService {
     id: number,
     updateDishDto: UpdateDishDto,
     iconFile?: Express.Multer.File,
+    rawSessionsInput?: unknown,
   ) {
     try {
+      const scheduleEnabledFlag =
+        (updateDishDto as any).schedule_enabled === true ||
+        (updateDishDto as any).schedule_enabled === "true";
+      const normalizedSessions =
+        (rawSessionsInput ?? (updateDishDto as any).sessions) !== undefined
+          ? this.parseSessionsInput(
+              rawSessionsInput ?? (updateDishDto as any).sessions,
+            )
+          : undefined;
+      if (scheduleEnabledFlag && normalizedSessions !== undefined && normalizedSessions.length === 0) {
+        throw new BadRequestException(
+          "At least one session is required when schedule is enabled.",
+        );
+      }
+      this.validateSessions(normalizedSessions);
+
       const dish = await this.dishRepository.findOne({ where: { id } });
       if (!dish) {
         throw new NotFoundException("Dish not found");
       }
 
-      const updateData = { ...updateDishDto };
+      const { schedule_enabled, sessions: _omitSessions, ...updateData } =
+        updateDishDto as any;
 
       // Handle file upload if provided
       if (iconFile) {
@@ -290,8 +389,22 @@ export class DishService {
         (updateData as any).icon = iconUrl;
       }
 
-      await this.dishRepository.update(id, updateData);
-      return { message: "Dish updated successfully" };
+      await this.dishRepository.manager.transaction(async (manager) => {
+        await manager.update(Dish, id, {
+          ...updateData,
+          ...(schedule_enabled !== undefined
+            ? { schedule_enabled }
+            : {}),
+        });
+        if (normalizedSessions !== undefined) {
+          await this.replaceSessionsInTransaction(
+            manager.getRepository(DishSession),
+            id,
+            normalizedSessions,
+          );
+        }
+      });
+      return { message: "Dish updated successfully", data: await this.findOne(id) };
     } catch (error) {
       if (error instanceof NotFoundException) {
         throw error;
@@ -299,8 +412,11 @@ export class DishService {
       if (error instanceof QueryFailedError) {
         throw new ConflictException("Dish with this name already exists");
       }
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
       throw new BadRequestException(
-        "Failed to update dish. Please check your data and try again.",
+        `Failed to update dish. ${error instanceof Error ? error.message : "Please check your data and try again."}`,
       );
     }
   }
@@ -427,7 +543,8 @@ export class DishService {
       const queryBuilder = this.dishRepository
         .createQueryBuilder("dish")
         .where("dish.food_type = :foodType", { foodType: dish.food_type })
-        .orderBy("dish.sequence", "ASC");
+        .orderBy("dish.sequence", "ASC")
+        .addOrderBy("dish.id", "ASC");
 
       const allDishes = await queryBuilder.getMany();
 
@@ -475,7 +592,8 @@ export class DishService {
     try {
       const queryBuilder = this.dishRepository
         .createQueryBuilder("dish")
-        .orderBy("dish.sequence", "ASC");
+        .orderBy("dish.sequence", "ASC")
+        .addOrderBy("dish.id", "ASC");
 
       if (food_type) {
         queryBuilder.where("dish.food_type = :foodType", {
@@ -499,4 +617,194 @@ export class DishService {
       );
     }
   }
+
+  private validateSessions(sessions?: CreateDishDto["sessions"]): void {
+    if (!sessions) return;
+    for (const [index, session] of sessions.entries()) {
+      const rawStart =
+        (session as any).start_hhmm ??
+        (session as any).start_time ??
+        (session as any).startTime ??
+        (session as any).from;
+      const rawEnd =
+        (session as any).end_hhmm ??
+        (session as any).end_time ??
+        (session as any).endTime ??
+        (session as any).to;
+      const normalizedStart = normalizeHHMMValue(rawStart);
+      const normalizedEnd = normalizeHHMMValue(rawEnd);
+
+      (session as any).start_hhmm = normalizedStart;
+      (session as any).end_hhmm = normalizedEnd;
+      (session as any).day_from = Number((session as any).day_from);
+      (session as any).day_to = Number((session as any).day_to);
+
+      if (
+        !isValidHHMM((session as any).start_hhmm) ||
+        !isValidHHMM((session as any).end_hhmm)
+      ) {
+        throw new BadRequestException(
+          `Invalid session time at index ${index}. Use HHMM format between 0000 and 2359. Received rawStart=${JSON.stringify(rawStart)}, rawEnd=${JSON.stringify(rawEnd)}, start=${JSON.stringify((session as any).start_hhmm)}, end=${JSON.stringify((session as any).end_hhmm)}.`,
+        );
+      }
+      if ((session as any).start_hhmm === (session as any).end_hhmm) {
+        throw new BadRequestException(
+          `Session start and end cannot be same at index ${index}.`,
+        );
+      }
+      if (Number((session as any).day_from) > Number((session as any).day_to)) {
+        throw new BadRequestException(
+          `At session index ${index}, end day must be on or after start day (Mon=1 … Sun=7).`,
+        );
+      }
+      const inclusiveDaySpan =
+        Number((session as any).day_to) - Number((session as any).day_from) + 1;
+      if (
+        Number((session as any).end_hhmm) < Number((session as any).start_hhmm) &&
+        inclusiveDaySpan >= 6
+      ) {
+        throw new BadRequestException(
+          `At session index ${index}, when the day range covers six or more days, end time must be after start time on the clock (no overnight-style wrap for long ranges).`,
+        );
+      }
+      if (
+        Number((session as any).day_from) === Number((session as any).day_to) &&
+        Number((session as any).end_hhmm) <= Number((session as any).start_hhmm)
+      ) {
+        throw new BadRequestException(
+          `For same-day session at index ${index}, end time must be after start time.`,
+        );
+      }
+    }
+  }
+
+  private parseSessionsInput(input: unknown): CreateDishDto["sessions"] {
+    const normalized = normalizeSessionsPayload(input);
+    if (normalized === undefined) return [];
+    return normalized.map((row) => this.materializeSessionRow(row)) as any;
+  }
+
+  /**
+   * Build plain session rows with explicit HHMM extraction. Does not rely on
+   * nested class-transformer output (avoids missing fields on some multipart/DTO paths).
+   */
+  private materializeSessionRow(row: unknown): {
+    day_from: number;
+    day_to: number;
+    start_hhmm: number;
+    end_hhmm: number;
+    label?: string;
+    status: boolean;
+  } {
+    const src =
+      row !== null && typeof row === "object"
+        ? (row as Record<string, unknown>)
+        : {};
+
+    const pick = (keys: string[]): unknown => {
+      for (const k of keys) {
+        if (Object.prototype.hasOwnProperty.call(src, k)) {
+          return src[k];
+        }
+      }
+      for (const k of keys) {
+        if (k in src) {
+          return (src as Record<string, unknown>)[k];
+        }
+      }
+      return undefined;
+    };
+
+    const rawStart = pick([
+      "start_hhmm",
+      "start_time",
+      "startTime",
+      "from",
+    ]);
+    const rawEnd = pick(["end_hhmm", "end_time", "endTime", "to"]);
+
+    const start = normalizeHHMMValue(rawStart);
+    const end = normalizeHHMMValue(rawEnd);
+
+    const dayFrom = Number(pick(["day_from", "dayFrom"]) ?? 1);
+    const dayTo = Number(pick(["day_to", "dayTo"]) ?? 7);
+
+    const labelRaw = pick(["label"]);
+    const statusRaw = pick(["status"]);
+
+    return {
+      day_from: Number.isFinite(dayFrom) ? dayFrom : 1,
+      day_to: Number.isFinite(dayTo) ? dayTo : 7,
+      start_hhmm: start,
+      end_hhmm: end,
+      label:
+        labelRaw !== undefined && labelRaw !== null
+          ? String(labelRaw)
+          : undefined,
+      status: statusRaw !== false,
+    };
+  }
+
+  private async replaceSessionsInTransaction(
+    sessionRepo: Repository<DishSession>,
+    dishId: number,
+    sessions?: CreateDishDto["sessions"],
+  ): Promise<void> {
+    await sessionRepo
+      .createQueryBuilder()
+      .delete()
+      .from(DishSession)
+      .where(`"dishId" = :dishId`, { dishId })
+      .execute();
+    if (!sessions || sessions.length === 0) return;
+    const rows = sessions.map((session) =>
+      sessionRepo.create({
+        dish: { id: dishId } as Dish,
+        day_from: session.day_from,
+        day_to: session.day_to,
+        start_hhmm: session.start_hhmm,
+        end_hhmm: session.end_hhmm,
+        label: session.label,
+        status: session.status ?? true,
+      }),
+    );
+    await sessionRepo.save(rows);
+  }
+
+  private async attachSessionMetadata(dishes: Dish[]): Promise<any[]> {
+    if (dishes.length === 0) return [];
+    const ids = dishes.map((d) => d.id);
+    const sessions = await this.dishSessionRepository.find({
+      where: { dish: { id: In(ids) } },
+      relations: ["dish"],
+      order: { day_from: "ASC", start_hhmm: "ASC" },
+    });
+    const map = new Map<number, DishSession[]>();
+    for (const session of sessions) {
+      const dishId = session.dish?.id;
+      if (!dishId) continue;
+      const list = map.get(dishId) ?? [];
+      list.push(session);
+      map.set(dishId, list);
+    }
+
+    const currentDay = TimezoneUtil.getCurrentISTDay();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+
+    return dishes.map((dish) => {
+      const dishSessions = map.get(dish.id) ?? [];
+      const isActiveNow = isDishActiveNow(
+        dish.schedule_enabled,
+        dishSessions,
+        currentDay,
+        currentTime,
+      );
+      return {
+        ...dish,
+        sessions: dishSessions,
+        is_active_now: isActiveNow,
+      };
+    });
+  }
+
 }

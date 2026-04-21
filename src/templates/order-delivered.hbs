@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='UTF-8' />
+    <title>Your Tazty order was delivered - #{{order_number}}</title>
+  </head>
+  <body style='margin: 0; padding: 0; background-color: #f5f5f5; font-family: Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f5f5f5;'>
+      <tr>
+        <td align='center' style='padding: 24px 0;'>
+          <table width='600' cellpadding='0' cellspacing='0' style='background-color: #ffffff; border-radius: 4px; overflow: hidden;'>
+
+            <!-- Logo -->
+            <tr>
+              <td align='center' style='padding: 20px 30px 12px;'>
+                <img src='{{logo_url}}' alt='Tazty' style='height: 44px; width: auto; display: block; margin: 0 auto;' />
+              </td>
+            </tr>
+
+            <!-- Divider -->
+            <tr>
+              <td style='padding: 0 30px;'>
+                <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 0 0 14px;' />
+              </td>
+            </tr>
+
+            <!-- Greeting -->
+            <tr>
+              <td style='padding: 0 30px 6px;'>
+                <p style='margin: 0 0 4px; font-size: 15px; font-weight: bold; color: #333;'>Greetings from Tazty!</p>
+                <p style='margin: 0 0 14px; font-size: 13px; color: #555;'>Your order was delivered! Rate your delivery experience in the app.</p>
+              </td>
+            </tr>
+
+            <!-- Order No + Restaurant -->
+            <tr>
+              <td style='padding: 0 30px 10px;'>
+                <table width='100%' cellpadding='0' cellspacing='0'>
+                  <tr>
+                    <td width='50%' style='vertical-align: top;'>
+                      <p style='margin: 0 0 3px; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;'>Order No:</p>
+                      <p style='margin: 0; font-size: 13px; font-weight: bold; color: #333;'>{{order_number}}</p>
+                    </td>
+                    <td width='50%' style='vertical-align: top;'>
+                      <p style='margin: 0 0 3px; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;'>Restaurant</p>
+                      <p style='margin: 0; font-size: 13px; font-weight: bold; color: #333;'>{{store_name}}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Divider -->
+            <tr>
+              <td style='padding: 0 30px;'>
+                <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 0 0 14px;' />
+              </td>
+            </tr>
+
+            <!-- Order Summary Heading -->
+            <tr>
+              <td style='padding: 0 30px 10px;'>
+                <p style='margin: 0; font-size: 14px; font-weight: bold; color: #333;'>Your Order Summary:</p>
+              </td>
+            </tr>
+
+            <!-- Order Meta -->
+            <tr>
+              <td style='padding: 0 30px 14px;'>
+                <p style='margin: 3px 0; font-size: 13px; color: #555;'>Order No: <b style='color: #333;'>{{order_number}}</b></p>
+                <p style='margin: 3px 0; font-size: 13px; color: #555;'>Order Status: <b style='color: #2e7d32;'>Delivered</b></p>
+              </td>
+            </tr>
+
+            <!-- Ordered From + Delivery To -->
+            <tr>
+              <td style='padding: 0 30px 16px;'>
+                <table width='100%' cellpadding='0' cellspacing='0' style='border-top: 1px solid #e0e0e0; padding-top: 12px;'>
+                  <tr>
+                    <td width='50%' style='vertical-align: top; padding: 12px 12px 0 0;'>
+                      <p style='margin: 0 0 4px; font-size: 12px; color: #999;'>Ordered from:</p>
+                      <p style='margin: 0 0 3px; font-size: 13px; font-weight: bold; color: #333;'>{{store_name}}</p>
+                      {{#if store_address}}
+                      <p style='margin: 0; font-size: 12px; color: #555; line-height: 1.5;'>{{store_address}}</p>
+                      {{/if}}
+                    </td>
+                    <td width='50%' style='vertical-align: top; padding: 12px 0 0 0;'>
+                      <p style='margin: 0 0 4px; font-size: 12px; color: #999;'>Delivery To:</p>
+                      <p style='margin: 0 0 3px; font-size: 13px; font-weight: bold; color: #333;'>{{customer_name}}</p>
+                      {{#if delivery_address}}
+                      <p style='margin: 0; font-size: 12px; color: #555; line-height: 1.5;'>{{delivery_address}}</p>
+                      {{/if}}
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Items Table -->
+            <tr>
+              <td style='padding: 0 30px;'>
+                <table width='100%' cellpadding='0' cellspacing='0' style='font-size: 13px; border-collapse: collapse;'>
+                  <thead>
+                    <tr>
+                      <th style='text-align: left; font-size: 12px; color: #777; font-weight: normal; padding: 6px 0; border-bottom: 1px solid #e0e0e0; width: 55%;'>Item Name</th>
+                      <th style='text-align: center; font-size: 12px; color: #777; font-weight: normal; padding: 6px 0; border-bottom: 1px solid #e0e0e0; width: 20%;'>Quantity</th>
+                      <th style='text-align: right; font-size: 12px; color: #777; font-weight: normal; padding: 6px 0; border-bottom: 1px solid #e0e0e0; width: 25%;'>Price</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {{#each order_items}}
+                    <tr>
+                      <td style='padding: 8px 0; border-bottom: 1px solid #f0f0f0; color: #333;'>{{name}}</td>
+                      <td style='padding: 8px 0; text-align: center; border-bottom: 1px solid #f0f0f0; color: #333;'>{{quantity}}</td>
+                      <td style='padding: 8px 0; text-align: right; border-bottom: 1px solid #f0f0f0; color: #333;'>&#8377; {{total_price}}</td>
+                    </tr>
+                    {{/each}}
+                  </tbody>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Price Breakdown -->
+            <tr>
+              <td style='padding: 4px 30px 0;'>
+                <table width='100%' cellpadding='0' cellspacing='0' style='font-size: 13px; border-collapse: collapse;'>
+                  <tbody>
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #555;'>Item Total:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #333; white-space: nowrap;'>&#8377; {{subtotal}}</td>
+                    </tr>
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #555;'>Platform Fee:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #333; white-space: nowrap;'>&#8377; {{platform_fee}}</td>
+                    </tr>
+                    {{#if delivery_fee}}
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #555;'>Delivery Fee:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #333; white-space: nowrap;'>&#8377; {{delivery_fee}}</td>
+                    </tr>
+                    {{/if}}
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #555;'>Delivery Partner Tip:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #333; white-space: nowrap;'>&#8377; {{tip_amount}}</td>
+                    </tr>
+                    {{#if tax_amount}}
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #555;'>Taxes:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #333; white-space: nowrap;'>&#8377; {{tax_amount}}</td>
+                    </tr>
+                    {{/if}}
+                    {{#if discount_amount}}
+                    <tr>
+                      <td style='text-align: right; padding: 3px 0; color: #27ae60;'>Discount:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 3px 0; color: #27ae60; white-space: nowrap;'>- &#8377; {{discount_amount}}</td>
+                    </tr>
+                    {{/if}}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <td style='text-align: right; padding: 10px 0 4px; border-top: 1px solid #e0e0e0; font-size: 14px; font-weight: bold; color: #2e7d32;'>Order Total:&nbsp;&nbsp;</td>
+                      <td style='text-align: right; padding: 10px 0 4px; border-top: 1px solid #e0e0e0; font-size: 14px; font-weight: bold; color: #2e7d32; white-space: nowrap;'>&#8377; {{total_amount}}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </td>
+            </tr>
+
+            <!-- Download Invoice -->
+            {{#if invoice_url}}
+            <tr>
+              <td align='center' style='padding: 14px 30px 0;'>
+                <a href='{{invoice_url}}' target='_blank' style='display: inline-block; background-color: #2e7d32; color: #ffffff; text-decoration: none; font-size: 13px; font-weight: bold; padding: 10px 28px; border-radius: 4px;'>
+                  Download Invoice
+                </a>
+              </td>
+            </tr>
+            {{/if}}
+
+            <!-- Rating note -->
+            <tr>
+              <td style='padding: 14px 30px 0;'>
+                <p style='margin: 0; font-size: 12px; color: #999;'>The link to rate your delivery experience is only valid for mobile devices.</p>
+              </td>
+            </tr>
+
+            <!-- Disclaimer -->
+            <tr>
+              <td style='padding: 14px 30px 20px;'>
+                <div style='font-size: 11px; color: #888; line-height: 1.6; border-top: 1px solid #e0e0e0; padding-top: 10px;'>
+                  <b style='color: #555;'>Disclaimer:</b> Attached is the invoice for the restaurant services provided by the outlet.
+                  For items not covered in the attached invoice, the outlet shall be responsible to issue
+                  an invoice directly to you.
+                </div>
+              </td>
+            </tr>
+
+            <!-- Footer -->
+            <tr>
+              <td align='center' style='border-top: 1px solid #e0e0e0; padding: 16px 30px 20px;'>
+                <p style='margin: 0 0 4px; font-size: 11px; color: #999;'>
+                  Need help? Contact us at
+                  <a href='mailto:support@valardigital.in' style='color: #2e7d32; text-decoration: none;'>support@valardigital.in</a>
+                </p>
+                <p style='margin: 0; font-size: 10px; color: #bbb;'>&copy;2026 Tazty. All rights reserved.</p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

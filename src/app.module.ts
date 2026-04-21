@@ -30,6 +30,7 @@ import { AdminAccessModule } from './super-admin-access/super-admin-access.modul
 import { CancelReasonModule } from './cancel-reason/cancel-reason.module';
 import { SellerSyncModule } from "./seller-sync/seller-sync.module";
 import { RedisModule } from "./redis/redis.module";
+import { CollectionModule } from "./collection/collection.module";
 import "dotenv/config";
 
 @Module({
@@ -50,7 +51,8 @@ import "dotenv/config";
         transport: {
           host: configService.get<string>("MAILER_HOST"),
           port: configService.get<number>("MAILER_PORT"),
-          secure: true,
+          secure: false,
+          //tls: { ciphers: "SSLv3" },
           auth: {
             user: configService.get<string>("MAILER_USER"),
             pass: configService.get<string>("MAILER_PASS"),
@@ -108,6 +110,7 @@ import "dotenv/config";
     CancelReasonModule,
     SellerSyncModule,
     RedisModule,
+    CollectionModule,
   ],
   controllers: [AppController],
   providers: [AppService],

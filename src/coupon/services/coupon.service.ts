@@ -123,7 +123,9 @@ export class CouponService {
 
     const job = new CronJob(
       expr,
-      () => { void this.markExpiredCoupons(); },
+      () => {
+        void this.markExpiredCoupons();
+      },
       null,
       false,
       "Asia/Kolkata",
@@ -232,7 +234,9 @@ export class CouponService {
         throw new BadRequestException("value is required for this coupon type");
       }
       if (dto.value_type === undefined || dto.value_type === null) {
-        throw new BadRequestException("value_type is required for this coupon type");
+        throw new BadRequestException(
+          "value_type is required for this coupon type",
+        );
       }
     }
 
@@ -327,7 +331,9 @@ export class CouponService {
     }
 
     if (dto.type === CouponType.FIRST_ORDER) {
-      const metaValidation = this.validateFirstOrderCouponTypeMeta(dto.type_meta);
+      const metaValidation = this.validateFirstOrderCouponTypeMeta(
+        dto.type_meta,
+      );
       if (!metaValidation.valid) {
         throw new BadRequestException(metaValidation.message);
       }
@@ -660,8 +666,8 @@ export class CouponService {
     }
 
     // Check time window
-    // Use IST time to ensure consistent timezone comparison with database timestamps
-    const now = TimezoneUtil.getCurrentISTTime();
+    // start_at/end_at are TIMESTAMPTZ (instants). Compare against real "now" instant.
+    const now = new Date();
     if (coupon.start_at && now < coupon.start_at) {
       return {
         valid: false,
@@ -822,7 +828,9 @@ export class CouponService {
         };
       }
 
-      const nthValidation = this.validateNthOrderCouponTypeMeta(coupon.type_meta);
+      const nthValidation = this.validateNthOrderCouponTypeMeta(
+        coupon.type_meta,
+      );
       if (!nthValidation.valid) {
         return {
           valid: false,
@@ -831,7 +839,7 @@ export class CouponService {
         };
       }
 
-      const nth = coupon.type_meta!.nth;
+      const nth = coupon.type_meta.nth;
 
       const paidOrdersCount = await this.countPaidOrders(dto.user_id);
       if (paidOrdersCount + 1 !== nth) {
@@ -1487,7 +1495,8 @@ export class CouponService {
       if (typeMeta.free_delivery !== true) {
         return {
           valid: false,
-          message: "delivery_fee_cap can be used only when free_delivery is true",
+          message:
+            "delivery_fee_cap can be used only when free_delivery is true",
         };
       }
     }
@@ -1557,7 +1566,8 @@ export class CouponService {
 
     if (
       typeMeta.source !== undefined &&
-      (typeof typeMeta.source !== "string" || typeMeta.source.trim().length === 0)
+      (typeof typeMeta.source !== "string" ||
+        typeMeta.source.trim().length === 0)
     ) {
       return {
         valid: false,
@@ -1613,7 +1623,8 @@ export class CouponService {
 
     if (
       typeMeta.source !== undefined &&
-      (typeof typeMeta.source !== "string" || typeMeta.source.trim().length === 0)
+      (typeof typeMeta.source !== "string" ||
+        typeMeta.source.trim().length === 0)
     ) {
       return {
         valid: false,
@@ -2272,7 +2283,10 @@ export class CouponService {
     const existingByToken = await this.redemptionRepository.findOne({
       where: { reserved_token: dto.reservation_token },
     });
-    if (existingByToken && existingByToken.status === RedemptionStatus.REDEEMED) {
+    if (
+      existingByToken &&
+      existingByToken.status === RedemptionStatus.REDEEMED
+    ) {
       return {
         success: true,
         discount_amount: existingByToken.amount_applied || 0,
@@ -2286,7 +2300,10 @@ export class CouponService {
     );
 
     if (!reservation) {
-      if (existingByToken && existingByToken.status === RedemptionStatus.RESERVED) {
+      if (
+        existingByToken &&
+        existingByToken.status === RedemptionStatus.RESERVED
+      ) {
         return this.redeemWithoutActiveRedisReservation(
           dto,
           existingByToken,
@@ -2358,9 +2375,12 @@ export class CouponService {
 
       // Auto-revoke when quota is exhausted (covers single-use and multi-use coupons)
       if (coupon.global_usage_limit != null) {
-        const redeemedCount = await queryRunner.manager.count(CouponRedemption, {
-          where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
-        });
+        const redeemedCount = await queryRunner.manager.count(
+          CouponRedemption,
+          {
+            where: { coupon_id: coupon.id, status: RedemptionStatus.REDEEMED },
+          },
+        );
         if (redeemedCount >= Number(coupon.global_usage_limit)) {
           coupon.status = CouponStatus.REVOKED;
           await queryRunner.manager.save(coupon);
@@ -2406,7 +2426,11 @@ export class CouponService {
     redemptionRow: CouponRedemption,
     resolvedIdempotencyKey: string,
     correlationId: string,
-  ): Promise<{ success: boolean; discount_amount?: number; delivery_waived?: boolean }> {
+  ): Promise<{
+    success: boolean;
+    discount_amount?: number;
+    delivery_waived?: boolean;
+  }> {
     if (dto.payment_status !== PaymentStatus.PAID) {
       throw new BadRequestException(
         "Coupon can only be redeemed on successful payment",
@@ -3036,7 +3060,9 @@ export class CouponService {
           this.logger.log(
             `[${correlationId}] Rollback race detected for ${dto.reservation_token}; another worker already rolled it back.`,
           );
-          await this.redisCouponService.deleteReservation(dto.reservation_token);
+          await this.redisCouponService.deleteReservation(
+            dto.reservation_token,
+          );
           return { success: true };
         }
 
@@ -3125,11 +3151,9 @@ export class CouponService {
   async markExpiredCoupons(): Promise<{ updated: number }> {
     const correlationId = this.createCorrelationId("coupon-expiry-cron");
     try {
-      this.logger.log(
-        `[${correlationId}] ⏰ Running markExpiredCoupons cron`,
-      );
+      this.logger.log(`[${correlationId}] ⏰ Running markExpiredCoupons cron`);
 
-      const now = TimezoneUtil.getCurrentISTTime();
+      const now = new Date();
       const result = await this.couponRepository
         .createQueryBuilder()
         .update(Coupon)
@@ -3193,10 +3217,13 @@ export class CouponService {
         }
         attempted += 1;
         try {
-          await this.rollbackCoupon({
-            reservation_token: redemption.reserved_token,
-            reason: "Auto-rollback after TTL expiry",
-          }, correlationId);
+          await this.rollbackCoupon(
+            {
+              reservation_token: redemption.reserved_token,
+              reason: "Auto-rollback after TTL expiry",
+            },
+            correlationId,
+          );
           succeeded += 1;
         } catch (error) {
           failed += 1;
@@ -3240,8 +3267,8 @@ export class CouponService {
       };
     }
 
-    // Use IST time to ensure consistent timezone comparison with database timestamps
-    const now = TimezoneUtil.getCurrentISTTime();
+    // start_at/end_at are TIMESTAMPTZ (instants). Compare against real "now" instant.
+    const now = new Date();
     let valid = coupon.status === CouponStatus.ACTIVE;
     let message = "";
 

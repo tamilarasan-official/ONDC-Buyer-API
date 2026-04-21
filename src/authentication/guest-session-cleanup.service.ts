@@ -14,7 +14,9 @@ export class GuestSessionCleanupService {
   ) {}
 
   // Cleanup runs every 6 hours by default.
-  @Cron("0 */6 * * *")
+  @Cron("0 */6 * * *", {
+    timeZone: "Asia/Kolkata",
+  })
   async cleanupExpiredGuestSessions() {
     const now = new Date();
     const result = await this.guestSessionRepository.delete({

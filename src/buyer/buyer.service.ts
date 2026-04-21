@@ -34,6 +34,7 @@ import { UserFavoriteRestaurant } from "../favorites/entities/user-favorite-rest
 import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entity";
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
+import { isDishActiveNow } from "../dish/utils/dish-visibility.util";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -45,6 +46,7 @@ import { CampaignStatus } from "../coupon/entities/coupon-campaign.entity";
 import { AppOperationHoursService } from "../shared/services/app-operation-hours.service";
 import { AppSettingsService } from "../shared/services/app-settings.service";
 import { Order } from "../order/entities/order.entity";
+import { CollectionService } from "../collection/collection.service";
 
 @Injectable()
 export class BuyerService {
@@ -105,6 +107,7 @@ export class BuyerService {
     private readonly locationService: LocationService,
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appSettingsService: AppSettingsService,
+    private readonly collectionService: CollectionService,
   ) { }
 
   /**
@@ -263,6 +266,13 @@ export class BuyerService {
         cancel_timer: Number.isFinite(cancelTimerSecondsRaw)
           ? (cancelTimerSecondsRaw as number)
           : 0,
+        home_collection: await this.collectionService.findActiveHomeCollection(
+          { page: 1, limit: 20 },
+          {
+            ...(userLocation?.lat !== undefined ? { user_lat: userLocation.lat } : {}),
+            ...(userLocation?.lng !== undefined ? { user_lng: userLocation.lng } : {}),
+          },
+        ),
       };
 
       this.logger.log(`✅ Home page data retrieved successfully`);
@@ -423,21 +433,24 @@ export class BuyerService {
 
       this.logger.log(`🔍 Processing all ${allStores.length} restaurants...`);
 
-      // Batch fetch all active close timings for ALL stores at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for ALL stores at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const allStoreIds = allStores.map((store) => store.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(allStoreIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-        relations: ["store"],
-      });
+      
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: allStoreIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of store IDs with active close timings for O(1) lookup
       const storesWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store.id),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
+
+      console.log('storesWithActiveCloseTimings', storesWithActiveCloseTimings);
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
       const storesWithHolidayToday = await this.getStoreIdsWithHolidayToday(
@@ -566,14 +579,17 @@ export class BuyerService {
 
   /**
    * MODIFY: Get "What's On Your Mind?" dishes (was getPopularCategories)
-   * Filters to veg dishes if vegMode is ALL
+   * Keeps Home dish visibility aligned with Dish API defaults:
+   * - status=true
+   * - active now (based on schedule/sessions)
+   * - sequence ordering
    */
   private async getWhatsOnYourMind(vegMode?: VegMode) {
     const queryBuilder = this.dishRepository
       .createQueryBuilder("d")
+      .leftJoinAndSelect("d.sessions", "ds")
       .where("d.status = :status", { status: true });
 
-    // Filter to veg dishes if ALL mode is enabled
     if (vegMode === VegMode.ALL) {
       queryBuilder.andWhere(
         "(d.food_type = :pureVeg OR d.food_type = :veg)",
@@ -587,6 +603,16 @@ export class BuyerService {
       );
     }
 
+    // Filter to pure-veg dishes only in PURE mode
+    if (vegMode === VegMode.PURE) {
+      queryBuilder.andWhere("d.food_type = :pureVeg", {
+        pureVeg: StoreDietaryPreference.PURE_VEG,
+      });
+      this.logger.log(
+        `🥗 Filtering "What's on your mind" dishes to pure-veg only`,
+      );
+    }
+
     const dishes = await queryBuilder
       .select([
         "d.id",
@@ -596,14 +622,34 @@ export class BuyerService {
         "d.food_type",
         "d.sequence",
         "d.status",
+        "d.schedule_enabled",
         "d.created_at",
         "d.updated_at",
+        "ds.id",
+        "ds.day_from",
+        "ds.day_to",
+        "ds.start_hhmm",
+        "ds.end_hhmm",
+        "ds.status",
       ])
-      .orderBy("d.name", "ASC")
-      .limit(10) // Increased from 5 to 10 dishes
+      .orderBy("d.sequence", "ASC")
+      .addOrderBy("d.id", "ASC")
       .getMany();
 
-    return dishes.map((dish) => ({
+    const currentDay = TimezoneUtil.getCurrentISTDay();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+
+    return dishes
+      .filter((dish) =>
+        isDishActiveNow(
+          Boolean(dish.schedule_enabled),
+          dish.sessions ?? [],
+          currentDay,
+          currentTime,
+        ),
+      )
+      .slice(0, 10)
+      .map((dish) => ({
       id: dish.id,
       name: dish.name,
       description: dish.description,
@@ -613,7 +659,7 @@ export class BuyerService {
       status: dish.status,
       created_at: dish.created_at,
       updated_at: dish.updated_at,
-    }));
+      }));
   }
 
   /**
@@ -761,10 +807,14 @@ export class BuyerService {
         `🔥 Getting trending items within ${radiusKm}km of ${userLat}, ${userLng}`,
       );
 
-      const distanceSubquery = this.locationService.buildDistanceQuery(
+      const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
         radiusKm,
+      );
+      const distanceKmSql = this.locationService.buildHaversineDistanceKmSql(
+        userLat,
+        userLng,
       );
 
       const queryBuilder = this.itemRepository
@@ -776,11 +826,7 @@ export class BuyerService {
         .leftJoin("i.prices", "p")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, {
-          userLat,
-          userLng,
-          radius: radiusKm,
-        })
+        .andWhere(distanceFilter)
         .select([
           "i.id",
           "i.name",
@@ -794,7 +840,7 @@ export class BuyerService {
           "p.base_price",
           "p.currency",
         ])
-        .addSelect(`(${distanceSubquery})`, "distance")
+        .addSelect(distanceKmSql, "distance")
         .orderBy("distance", "ASC")
         .addOrderBy("i.is_recommended", "DESC")
         .limit(20);
@@ -815,7 +861,7 @@ export class BuyerService {
             id: item.i_id,
             name: item.i_name,
             description: item.i_short_desc,
-            images: item.i_images ? JSON.parse(item.i_images) : [],
+            images: this.parseItemImagesRaw(item.i_images),
             store: {
               name: item.s_name,
               logo_url: item.s_logo_url,
@@ -1213,20 +1259,20 @@ export class BuyerService {
 
       const restaurants = await queryBuilder.getRawMany();
 
-      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(restaurantIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-        relations: ['store'], // Load store relation to access store.id
-      });
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of restaurant IDs with active close timings for O(1) lookup
       const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store?.id).filter(id => id !== undefined),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
@@ -1332,10 +1378,14 @@ export class BuyerService {
     favoriteItemIds: Set<number> = new Set(),
   ) {
     try {
-      const distanceSubquery = this.locationService.buildDistanceQuery(
+      const distanceFilter = this.locationService.buildDistanceFilter(
         userLat,
         userLng,
         radius,
+      );
+      const distanceKmSql = this.locationService.buildHaversineDistanceKmSql(
+        userLat,
+        userLng,
       );
 
       let queryBuilder = this.itemRepository
@@ -1351,11 +1401,7 @@ export class BuyerService {
         .leftJoin("ic.category", "c")
         .where("i.status = :status", { status: true })
         .andWhere("s.status = :status", { status: true })
-        .andWhere(`(${distanceSubquery}) <= :radius`, {
-          userLat,
-          userLng,
-          radius,
-        });
+        .andWhere(distanceFilter);
 
       // Apply search query
       if (query) {
@@ -1419,7 +1465,7 @@ export class BuyerService {
           "q.available_count AS q_available_count",
           "q.maximum_count AS q_maximum_count"
         ])
-        .addSelect(`(${distanceSubquery})`, "distance");
+        .addSelect(distanceKmSql, "distance");
 
       // Apply sorting
       if (sortBy === "distance") {
@@ -1463,7 +1509,7 @@ export class BuyerService {
             id: item.i_id,
             name: item.i_name,
             description: item.i_short_desc,
-            images: item.i_images ? JSON.parse(item.i_images) : [],
+            images: this.parseItemImagesRaw(item.i_images),
             price: {
               amount: parseFloat(item.p_base_price) || 0,
               currency: item.p_currency || "INR",
@@ -1875,6 +1921,30 @@ export class BuyerService {
       const deliveryFeeRaw = await this.appSettingsService.getNumber("DELIVERY_FEE", 30);
       const deliveryFee = Number(deliveryFeeRaw ?? 30);
 
+      // Compute expanded timings with consistent "active close timing" detection.
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
+      const hasActiveCloseTimingForDetails = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .where("sct.storeId = :storeId", { storeId: restaurant.id })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getExists();
+      const istComponents = TimezoneUtil.getISTComponents();
+      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
+      const isHolidayTodayForDetails =
+        (restaurant.locations || []).some(
+          (loc) =>
+            Array.isArray(loc.schedule_holidays) &&
+            loc.schedule_holidays.includes(todayYYYYMMDD),
+        ) || false;
+      const expandedTimingsForDetails = restaurant.timings
+        ? this.expandTimingsToDays(
+            restaurant.timings,
+            hasActiveCloseTimingForDetails,
+            isHolidayTodayForDetails,
+          )
+        : [];
+
       // Format response
       const restaurantDetails: any = {
         id: restaurant.id,
@@ -1901,30 +1971,7 @@ export class BuyerService {
                 location.schedule_holidays
               : [],
           })) || [],
-        timings: restaurant.timings
-          ? (() => {
-            // Check for active close timing for this single restaurant
-            const now = new Date();
-            const hasActiveCloseTiming = restaurant.closeTimings?.some(
-              (ct) =>
-                ct.close_start_datetime <= now && ct.close_end_datetime >= now,
-            ) || false;
-            // Check if today is a holiday (in any location's schedule_holidays)
-            const istComponents = TimezoneUtil.getISTComponents();
-            const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
-            const isHolidayToday =
-              (restaurant.locations || []).some(
-                (loc) =>
-                  Array.isArray(loc.schedule_holidays) &&
-                  loc.schedule_holidays.includes(todayYYYYMMDD),
-              ) || false;
-            return this.expandTimingsToDays(
-              restaurant.timings,
-              hasActiveCloseTiming,
-              isHolidayToday,
-            );
-          })()
-          : [],
+        timings: expandedTimingsForDetails,
         offers:
           restaurant.offers
             ?.filter((offer) => {
@@ -3415,6 +3462,44 @@ export class BuyerService {
   }
 
   /**
+   * `items.images` may be a JSON array string, a JSON-encoded string URL, or a plain URL.
+   */
+  private parseItemImagesRaw(raw: unknown): string[] {
+    if (raw == null) return [];
+    const s =
+      typeof raw === "string" ? raw.trim() : String(raw).trim();
+    if (!s) return [];
+    if (s.startsWith("http://") || s.startsWith("https://")) {
+      return [s];
+    }
+    if (s.startsWith("[") || s.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s) as unknown;
+        if (Array.isArray(parsed)) {
+          return parsed.filter((x): x is string => typeof x === "string");
+        }
+        if (typeof parsed === "string" && parsed.trim()) {
+          return [parsed.trim()];
+        }
+      } catch {
+        return [];
+      }
+    }
+    try {
+      const parsed = JSON.parse(s) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.filter((x): x is string => typeof x === "string");
+      }
+      if (typeof parsed === "string" && parsed.trim()) {
+        return [parsed.trim()];
+      }
+    } catch {
+      /* plain non-JSON text */
+    }
+    return [s];
+  }
+
+  /**
    * Calculate item rating from reviews
    */
   private async calculateItemRating(
@@ -3503,19 +3588,20 @@ export class BuyerService {
         .limit(5)
         .getRawMany();
 
-      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries)
+      // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const now = new Date();
-      const activeCloseTimings = await this.storeCloseTimingsRepository.find({
-        where: {
-          store: { id: In(restaurantIds) },
-          close_start_datetime: LessThanOrEqual(now),
-          close_end_datetime: MoreThanOrEqual(now),
-        },
-      });
+      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .innerJoin("sct.store", "store")
+        .select("store.id", "store_id")
+        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getRawMany<{ store_id: number | string }>();
       // Create a Set of restaurant IDs with active close timings for O(1) lookup
       const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimings.map((ct) => ct.store.id),
+        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
       );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
@@ -3639,46 +3725,65 @@ export class BuyerService {
         `🕐 Checking store ${storeId} open status - IST Day: ${currentDay}, Time: ${currentTime} (${TimezoneUtil.formatTimeHHMM(currentTime)})`,
       );
 
-      // Check regular timings
-      const todayTiming = await this.storeTimingsRepository
+      // Check regular timings (Order timings only), including wrapped day ranges
+      const applicableTimings = await this.storeTimingsRepository
         .createQueryBuilder("st")
         .where("st.storeId = :storeId", { storeId })
-        .andWhere("st.day_from <= :day AND st.day_to >= :day", {
-          day: currentDay,
-        })
-        .getOne();
+        .andWhere(
+          `(
+            (st.day_from <= st.day_to AND st.day_from <= :day AND st.day_to >= :day)
+            OR
+            (st.day_from > st.day_to AND (:day >= st.day_from OR :day <= st.day_to))
+          )`,
+          {
+            day: currentDay,
+          },
+        )
+        .orderBy("st.time_from", "ASC")
+        .addOrderBy("st.id", "ASC")
+        .getMany();
 
-      if (!todayTiming) {
+      if (!applicableTimings.length) {
         return { isOpen: false };
       }
 
-      const openTime = parseInt(todayTiming.time_from);
-      const closeTime = parseInt(todayTiming.time_to);
-
-      // Check if currently within operating hours
+      // Check if current time falls in ANY matching timing window
       let isWithinHours = false;
-      if (closeTime < openTime) {
-        // Handle overnight operations (e.g., 2300 to 0200)
-        isWithinHours = currentTime >= openTime || currentTime <= closeTime;
-      } else {
-        isWithinHours = currentTime >= openTime && currentTime <= closeTime;
+      const nextOpenTime = applicableTimings[0]?.time_from;
+      for (const timing of applicableTimings) {
+        const openTime = parseInt(timing.time_from, 10);
+        const closeTime = parseInt(timing.time_to, 10);
+
+        if (!Number.isFinite(openTime) || !Number.isFinite(closeTime)) {
+          continue;
+        }
+
+        if (closeTime < openTime) {
+          // Handle overnight operations (e.g., 2300 to 0200)
+          if (currentTime >= openTime || currentTime <= closeTime) {
+            isWithinHours = true;
+            break;
+          }
+        } else if (currentTime >= openTime && currentTime <= closeTime) {
+          isWithinHours = true;
+          break;
+        }
       }
 
       if (!isWithinHours) {
-        return { isOpen: false, nextOpenTime: todayTiming.time_from };
+        return nextOpenTime ? { isOpen: false, nextOpenTime } : { isOpen: false };
       }
 
       // Check for special closures (holidays, maintenance, etc.)
-      const now = TimezoneUtil.getCurrentISTTime();
-      const specialClosure = await this.storeRepository
-        .createQueryBuilder("s")
-        .leftJoin("s.closeTimings", "sct")
-        .where("s.id = :storeId", { storeId })
-        .andWhere("sct.close_start_datetime <= :now", { now })
-        .andWhere("sct.close_end_datetime >= :now", { now })
-        .getOne();
+      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
+      const hasActiveSpecialClosure = await this.storeCloseTimingsRepository
+        .createQueryBuilder("sct")
+        .where("sct.storeId = :storeId", { storeId })
+        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
+        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
+        .getExists();
 
-      if (specialClosure) {
+      if (hasActiveSpecialClosure) {
         return { isOpen: false };
       }
 

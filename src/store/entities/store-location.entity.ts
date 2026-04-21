@@ -44,7 +44,7 @@ export class StoreLocation {
   @Column({ type: "varchar", length: 10, nullable: false })
   address_area_code: string;
 
-  @Column({ type: "varchar", length: 5, nullable: false })
+  @Column({ type: "varchar", length: 100, nullable: false })
   address_state: string;
 
   @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })

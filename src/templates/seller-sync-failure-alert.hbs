@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset='UTF-8' />
+    <title>Order Sync Alert - {{order.order_number}}</title>
+  </head>
+  <body style='margin: 0; padding: 0; background-color: #f5f5f5; font-family: Arial, sans-serif;'>
+    <table width='100%' cellpadding='0' cellspacing='0' style='background-color: #f5f5f5;'>
+      <tr>
+        <td align='center' style='padding: 24px 0;'>
+          <table width='600' cellpadding='0' cellspacing='0' style='background-color: #ffffff; border-radius: 4px; overflow: hidden;'>
+
+            <tr>
+              <td align='center' style='padding: 20px 30px 12px;'>
+                <img src='{{logo_url}}' alt='Tazty' style='height: 44px; width: auto; display: block; margin: 0 auto;' />
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px;'>
+                <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 0 0 14px;' />
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 6px;'>
+                <p style='margin: 0 0 4px; font-size: 15px; font-weight: bold; color: #333;'>Greetings from Tazty!</p>
+                <p style='margin: 0 0 14px; font-size: 13px; color: #555;'>
+                  We could not complete an order update on the seller side. Please review the details below and take action.
+                </p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 10px;'>
+                <table width='100%' cellpadding='0' cellspacing='0'>
+                  <tr>
+                    <td width='50%' style='vertical-align: top;'>
+                      <p style='margin: 0 0 3px; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;'>Alert ID</p>
+                      <p style='margin: 0; font-size: 13px; font-weight: bold; color: #333;'>{{alert_id}}</p>
+                    </td>
+                    <td width='50%' style='vertical-align: top;'>
+                      <p style='margin: 0 0 3px; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 0.5px;'>Failed Step</p>
+                      <p style='margin: 0; font-size: 13px; font-weight: bold; color: #333;'>{{failure_stage}}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px;'>
+                <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 0 0 14px;' />
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 10px;'>
+                <p style='margin: 0; font-size: 14px; font-weight: bold; color: #333;'>Issue Summary:</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 14px;'>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Failed Attempts: <b style='color: #333;'>{{attempts}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Last Attempt Time: <b style='color: #333;'>{{updated_at}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>First Reported Time: <b style='color: #333;'>{{created_at}}</b></p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 10px;'>
+                <p style='margin: 0; font-size: 14px; font-weight: bold; color: #333;'>Order Details:</p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 14px;'>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Order Number: <b style='color: #333;'>{{order.order_number}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Store ID: <b style='color: #333;'>{{order.store_id}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Items: <b style='color: #333;'>{{order.item_count}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Customer: <b style='color: #333;'>{{order.customer_name}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Customer Phone: <b style='color: #333;'>{{order.customer_phone}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Customer Email: <b style='color: #333;'>{{order.customer_email}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Payment: <b style='color: #333;'>{{order.payment_method}} ({{order.payment_status}})</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Total Amount: <b style='color: #333;'>{{order.total_amount}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Delivery Charge: <b style='color: #333;'>{{order.delivery_charge}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Discount: <b style='color: #333;'>{{order.discount_amount}}</b></p>
+                <p style='margin: 4px 0; font-size: 13px; color: #555;'>Tip: <b style='color: #333;'>{{order.tip_amount}}</b></p>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 0 30px 16px;'>
+                <table width='100%' cellpadding='0' cellspacing='0' style='border-top: 1px solid #e0e0e0; padding-top: 12px;'>
+                  <tr>
+                    <td style='vertical-align: top; padding: 12px 0 0 0;'>
+                      <p style='margin: 0 0 4px; font-size: 12px; color: #999;'>System Error:</p>
+                      <p style='margin: 0; font-size: 12px; color: #b71c1c; line-height: 1.6; white-space: pre-wrap;'>{{last_error}}</p>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+
+            <tr>
+              <td style='padding: 14px 30px 20px;'>
+                <div style='font-size: 11px; color: #888; line-height: 1.6; border-top: 1px solid #e0e0e0; padding-top: 10px;'>
+                  <b style='color: #555;'>Action Required:</b> Please verify this order in Buyer Admin and Seller Admin.
+                  If needed, retry seller sync for this order after validating store availability and payment status.
+                </div>
+              </td>
+            </tr>
+
+            <tr>
+              <td align='center' style='border-top: 1px solid #e0e0e0; padding: 16px 30px 20px;'>
+                <p style='margin: 0 0 4px; font-size: 11px; color: #999;'>
+                  Need help? Contact us at
+                  <a href='mailto:{{support_email}}' style='color: #2e7d32; text-decoration: none;'>{{support_email}}</a>
+                </p>
+                <p style='margin: 0; font-size: 10px; color: #bbb;'>&copy;2026 Tazty. All rights reserved.</p>
+              </td>
+            </tr>
+
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

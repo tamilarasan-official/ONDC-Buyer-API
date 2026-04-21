@@ -177,6 +177,11 @@ export class SellerPushService {
    * Public so OrderService can build payload inside the same transaction as order creation.
    */
   async transformOrderToSellerPayload(order: Order) {
+    const normalizeAddressLine = (value?: string | null): string => {
+      const trimmed = String(value ?? "").trim();
+      return trimmed.length > 0 ? trimmed : "NA";
+    };
+
     const address = {
       address1: order.delivery_address_line1,
       address2: order.delivery_address_line2,
@@ -260,8 +265,8 @@ export class SellerPushService {
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
-          address2: address.address2 || "",
-          address3: address.address3 || "",
+          address2: normalizeAddressLine(address.address2),
+          address3: normalizeAddressLine(address.address3),
           city: address.city,
           state: address.state,
           country: "IND", // Default to India
@@ -275,8 +280,8 @@ export class SellerPushService {
         phone: order.user.phone_number.toString(),
         address: {
           address1: address.address1,
-          address2: address.address2 || "",
-          address3: address.address3 || "",
+          address2: normalizeAddressLine(address.address2),
+          address3: normalizeAddressLine(address.address3),
           city: address.city,
           state: address.state,
           country: "IND", // Default to India

@@ -23,6 +23,9 @@ import { StoreModule } from "../store/store.module";
 import { CouponModule } from "../coupon/coupon.module";
 import { AppSettingsModule } from "../shared/app-settings.module";
 import { SellerSyncModule } from "../seller-sync/seller-sync.module";
+import { MailService } from "../shared/mail.service";
+import { UploadModule } from "../shared/upload.module";
+import { CollectionModule } from "../collection/collection.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -48,6 +51,7 @@ import { CartItem } from "../cart/entities/cart-item.entity";
 import { Order } from "../order/entities/order.entity";
 import { OrderItem } from "../order/entities/order-item.entity";
 import { OrderTracking } from "../order/entities/order-tracking.entity";
+import { Invoice } from "../order/entities/invoice.entity";
 import { Payment } from "../payment/entities/payment.entity";
 import { Notification } from "../notification/entities/notification.entity";
 import { RestaurantReview } from "../review/entities/restaurant-review.entity";
@@ -94,6 +98,7 @@ import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard
       Order,
       OrderItem,
       OrderTracking,
+      Invoice,
       Payment,
       Notification,
       RestaurantReview,
@@ -115,6 +120,8 @@ import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard
     }),
     SharedNotificationModule,
     SellerSyncModule,
+    UploadModule,
+    CollectionModule,
   ],
   controllers: [BuyerController, InvoiceController],
   providers: [
@@ -133,6 +140,7 @@ import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard
     FCMService,
     InvoiceService,
     GuestOrUserAuthGuard,
+    MailService,
   ],
   exports: [
     BuyerService,
