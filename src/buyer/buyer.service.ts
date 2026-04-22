@@ -35,6 +35,7 @@ import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entit
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 import { isDishActiveNow } from "../dish/utils/dish-visibility.util";
+import { isBannerActiveNow } from "../banner/utils/banner-visibility.util";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -664,7 +665,9 @@ export class BuyerService {
 
   /**
    * Get promotional banner data from database
-   * Returns banners split into promotional_banner (restaurant_id, category_id, url) and organization_banner (organization)
+   * Returns banners split into:
+   * - promotional_banner: restaurant_id, category_id, url
+   * - organization_banner: organization, collection_id
    */
   private async getPromotionalBanner(): Promise<{
     promotional_banner: any[];
@@ -701,16 +704,26 @@ export class BuyerService {
         where: { status: true },
         order: { sequence: "ASC" },
       });
+      const currentDay = TimezoneUtil.getCurrentISTDay();
+      const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+      const visibleBanners = banners.filter((banner: any) =>
+        isBannerActiveNow(
+          Boolean(banner.schedule_enabled),
+          Array.isArray(banner.sessions) ? banner.sessions : [],
+          currentDay,
+          currentTime,
+        ),
+      );
 
-      // Return default banner if no active banners found
-      if (!banners || banners.length === 0) {
-        this.logger.warn("No active banners found, returning default banner");
-        return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
+      // Keep a single fallback banner when no active banners are visible.
+      if (!visibleBanners || visibleBanners.length === 0) {
+        this.logger.warn("No active banners found, returning fallback banner");
+        return { promotional_banner: defaultBanner, organization_banner: [] };
       }
 
       // Map all banners to their response shape
       const mapped = await Promise.all(
-        banners.map(async (banner) => {
+        visibleBanners.map(async (banner) => {
           if (banner.promotion_type === "restaurant_id") {
             const restaurant = await this.storeRepository.findOne({
               where: { reference_id: banner.promotion_link },
@@ -769,13 +782,18 @@ export class BuyerService {
         }),
       );
 
-      // Split into promotional (non-organization) and organization banners
+      // Split into promotional and organization-banner buckets.
+      // organization_banner also includes collection_id banners for home organization carousel.
       const validBanners = mapped.filter((b) => b !== null);
       const promotional_banner = validBanners.filter(
-        (b) => b.promotion_type !== "organization",
+        (b) =>
+          b.promotion_type !== "organization" &&
+          b.promotion_type !== "collection_id",
       );
       const organization_banner = validBanners.filter(
-        (b) => b.promotion_type === "organization",
+        (b) =>
+          b.promotion_type === "organization" ||
+          b.promotion_type === "collection_id",
       );
 
       return {
@@ -790,7 +808,7 @@ export class BuyerService {
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
+      return { promotional_banner: defaultBanner, organization_banner: [] };
     }
   }
 

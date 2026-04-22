@@ -31,12 +31,25 @@ export class Banner {
     type: "varchar",
     length: 50,
     nullable: true,
-    enum: ["restaurant_id", "category_id", "url", "organization"],
+    enum: ["restaurant_id", "category_id", "collection_id", "url", "organization"],
   })
   promotion_type?: string;
 
   @Column({ type: "text", nullable: true })
   promotion_link?: string;
+
+  @Column({ type: "boolean", default: false })
+  schedule_enabled: boolean;
+
+  @Column({ type: "jsonb", nullable: true })
+  sessions?: Array<{
+    day_from: number;
+    day_to: number;
+    start_hhmm: number;
+    end_hhmm: number;
+    label?: string;
+    status?: boolean;
+  }>;
 
   @Column({ type: "integer", default: 0 })
   @Index()
