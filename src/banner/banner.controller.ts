@@ -54,10 +54,10 @@ export class BannerController {
         background_color: { type: "string", example: "#14b8a6" },
         promotion_type: {
           type: "string",
-          enum: ["restaurant_id", "category_id", "url"],
+          enum: ["restaurant_id", "category_id", "collection_id", "url", "organization"],
           example: "restaurant_id",
           description:
-            "Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), url (external link)",
+            "Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), collection_id (link to curated collection), url (external link), organization",
         },
         promotion_link: {
           type: "string",
@@ -114,11 +114,12 @@ export class BannerController {
   async create(
     @Body() createBannerDto: CreateBannerDto,
     @UploadedFile() imageFile: Express.Multer.File,
+    @Body("sessions") rawSessions?: unknown,
   ) {
     if (!imageFile) {
       throw new BadRequestException("Image file is required");
     }
-    return this.bannerService.create(createBannerDto, imageFile);
+    return this.bannerService.create(createBannerDto, imageFile, rawSessions);
   }
 
   @Get()
@@ -313,10 +314,10 @@ export class BannerController {
         background_color: { type: "string", example: "#14b8a6" },
         promotion_type: {
           type: "string",
-          enum: ["restaurant_id", "category_id", "url"],
+          enum: ["restaurant_id", "category_id", "collection_id", "url", "organization"],
           example: "restaurant_id",
           description:
-            "Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), url (external link)",
+            "Type of promotion: restaurant_id (link to specific restaurant), category_id (link to category), collection_id (link to curated collection), url (external link), organization",
         },
         promotion_link: {
           type: "string",
@@ -353,8 +354,9 @@ export class BannerController {
     @Param("id") id: string,
     @Body() updateBannerDto: UpdateBannerDto,
     @UploadedFile() imageFile?: Express.Multer.File,
+    @Body("sessions") rawSessions?: unknown,
   ) {
-    return this.bannerService.update(+id, updateBannerDto, imageFile);
+    return this.bannerService.update(+id, updateBannerDto, imageFile, rawSessions);
   }
 
   @Delete(":id")

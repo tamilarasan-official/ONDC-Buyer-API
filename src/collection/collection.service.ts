@@ -17,6 +17,7 @@ import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
 import { CollectionEntry } from "./entities/collection-entry.entity";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
+import { UploadService } from "../shared/upload.service";
 
 @Injectable()
 export class CollectionService {
@@ -31,9 +32,10 @@ export class CollectionService {
     private readonly itemRepository: Repository<Item>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    private readonly uploadService: UploadService,
   ) {}
 
-  async create(dto: CreateCollectionDto) {
+  async create(dto: CreateCollectionDto, imageFile?: Express.Multer.File) {
     await this.validateUniqueActivePageType(
       dto.page,
       dto.type,
@@ -45,10 +47,25 @@ export class CollectionService {
       .select("COALESCE(MAX(collection.sequence), 0)", "max")
       .getRawOne();
 
+    let imageUrl = dto.image_url;
+    if (imageFile) {
+      const timestamp = Date.now();
+      const fileName =
+        (dto.title ?? "collection").replace(/[^a-zA-Z0-9]/g, "") ||
+        "collection";
+      const fileExtension = imageFile.originalname.split(".").pop();
+      const s3Key = `collections/${fileName}-${timestamp}.${fileExtension}`;
+      imageUrl = await this.uploadService.uploadFile(
+        imageFile.buffer,
+        imageFile.mimetype,
+        s3Key,
+      );
+    }
+
     const entity = this.collectionRepository.create({
       title: dto.title,
       description: dto.description,
-      image_url: dto.image_url,
+      image_url: imageUrl,
       type: dto.type,
       page: dto.page,
       status: dto.status ?? true,
@@ -116,7 +133,13 @@ export class CollectionService {
     const limit = paginationDto.limit || 50;
     const query = this.storeRepository
       .createQueryBuilder("store")
+      .innerJoin("store.items", "item")
+      .innerJoin("item.quantities", "quantity")
       .where("store.status = :status", { status: true })
+      .andWhere("item.status = :itemStatus", { itemStatus: true })
+      .andWhere("item.type = :itemType", { itemType: "item" })
+      .andWhere("COALESCE(quantity.available_count, 0) > 0")
+      .distinct(true)
       .orderBy("store.name", "ASC");
 
     if (paginationDto.search) {
@@ -151,11 +174,12 @@ export class CollectionService {
     const limit = paginationDto.limit || 50;
     const query = this.itemRepository
       .createQueryBuilder("item")
-      .leftJoinAndSelect("item.store", "store")
+      .leftJoin("item.store", "store")
+      .innerJoin("item.quantities", "quantity")
       .where("item.status = :status", { status: true })
       .andWhere("item.type = :type", { type: "item" })
       .andWhere("store.status = :storeStatus", { storeStatus: true })
-      .orderBy("item.name", "ASC");
+      .andWhere("COALESCE(quantity.available_count, 0) > 0");
 
     if (storeId > 0) {
       query.andWhere("store.id = :storeId", { storeId });
@@ -166,17 +190,36 @@ export class CollectionService {
       });
     }
 
-    const [rows, total] = await query
+    const totalRow = await query
+      .clone()
+      .select("COUNT(DISTINCT item.id)", "total")
+      .getRawOne<{ total?: string }>();
+
+    const rows = await query
+      .clone()
+      .select("item.id", "id")
+      .addSelect("item.name", "name")
+      .addSelect("store.id", "store_id")
+      .addSelect("store.name", "store_name")
+      .distinct(true)
+      .orderBy("item.name", "ASC")
       .skip((page - 1) * limit)
       .take(limit)
-      .getManyAndCount();
+      .getRawMany<{
+        id: string;
+        name: string;
+        store_id: string | null;
+        store_name: string | null;
+      }>();
+
+    const total = Number(totalRow?.total || 0);
 
     return {
       data: rows.map((item) => ({
-        id: item.id,
+        id: Number(item.id),
         name: item.name,
-        store_id: item.store?.id ?? null,
-        store_name: item.store?.name ?? null,
+        store_id: item.store_id ? Number(item.store_id) : null,
+        store_name: item.store_name ?? null,
       })),
       meta: {
         page,
@@ -195,8 +238,13 @@ export class CollectionService {
     return collection;
   }
 
-  async update(id: number, dto: UpdateCollectionDto) {
+  async update(id: number, dto: UpdateCollectionDto, imageFile?: Express.Multer.File) {
     const existing = await this.findOne(id);
+    if (dto.type !== undefined && dto.type !== existing.type) {
+      throw new BadRequestException(
+        "Collection type cannot be changed after creation",
+      );
+    }
 
     await this.validateUniqueActivePageType(
       dto.page ?? existing.page,
@@ -205,7 +253,25 @@ export class CollectionService {
       existing.id,
     );
 
-    const updated = this.collectionRepository.merge(existing, dto);
+    let imageUrl = dto.image_url ?? existing.image_url;
+    if (imageFile) {
+      const timestamp = Date.now();
+      const fileName =
+        (dto.title ?? existing.title ?? "collection").replace(/[^a-zA-Z0-9]/g, "") ||
+        "collection";
+      const fileExtension = imageFile.originalname.split(".").pop();
+      const s3Key = `collections/${fileName}-${timestamp}.${fileExtension}`;
+      imageUrl = await this.uploadService.uploadFile(
+        imageFile.buffer,
+        imageFile.mimetype,
+        s3Key,
+      );
+    }
+
+    const updated = this.collectionRepository.merge(existing, {
+      ...dto,
+      image_url: imageUrl,
+    });
     return this.collectionRepository.save(updated);
   }
 
@@ -924,15 +990,13 @@ export class CollectionService {
     ignoreId?: number,
   ) {
     if (!status) return;
-
-    const rows =
-      page === CollectionPage.HOME
-        ? await this.collectionRepository.find({
-            where: { page, status: true },
-          })
-        : await this.collectionRepository.find({
-            where: { page, type, status: true },
-          });
+    if (page !== CollectionPage.HOME) {
+      // Multiple active banner collections are allowed.
+      return;
+    }
+    const rows = await this.collectionRepository.find({
+      where: { page, status: true },
+    });
 
     const conflict = rows.find((row) => row.id !== ignoreId);
     if (conflict) {

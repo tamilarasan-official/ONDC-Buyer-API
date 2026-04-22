@@ -5,9 +5,10 @@ import { BannerController } from "./banner.controller";
 import { Banner } from "./entities/banner.entity";
 import { UploadService } from "src/shared/upload.service";
 import { Store } from "../store/entities/store.entity";
+import { Collection } from "../collection/entities/collection.entity";
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Banner, Store])],
+  imports: [TypeOrmModule.forFeature([Banner, Store, Collection])],
   controllers: [BannerController],
   providers: [BannerService, UploadService],
   exports: [BannerService],

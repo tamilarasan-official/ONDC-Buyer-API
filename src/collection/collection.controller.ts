@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -7,7 +8,10 @@ import {
   Patch,
   Post,
   Query,
+  UploadedFile,
+  UseInterceptors,
 } from "@nestjs/common";
+import { FileInterceptor } from "@nestjs/platform-express";
 import { ApiBody, ApiOperation, ApiParam, ApiQuery, ApiTags } from "@nestjs/swagger";
 import { CollectionService } from "./collection.service";
 import { CreateCollectionDto } from "./dto/create-collection.dto";
@@ -23,9 +27,16 @@ export class CollectionController {
   constructor(private readonly collectionService: CollectionService) {}
 
   @Post()
+  @UseInterceptors(FileInterceptor("image"))
   @ApiOperation({ summary: "Create collection" })
-  create(@Body() dto: CreateCollectionDto) {
-    return this.collectionService.create(dto);
+  create(
+    @Body() dto: CreateCollectionDto,
+    @UploadedFile() imageFile?: Express.Multer.File,
+  ) {
+    if (imageFile && !["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(imageFile.mimetype)) {
+      throw new BadRequestException("Invalid image type. Only JPG, PNG, and WebP are allowed.");
+    }
+    return this.collectionService.create(dto, imageFile);
   }
 
   @Get()
@@ -62,8 +73,16 @@ export class CollectionController {
 
   @Patch(":id")
   @ApiOperation({ summary: "Update collection" })
-  update(@Param("id") id: string, @Body() dto: UpdateCollectionDto) {
-    return this.collectionService.update(+id, dto);
+  @UseInterceptors(FileInterceptor("image"))
+  update(
+    @Param("id") id: string,
+    @Body() dto: UpdateCollectionDto,
+    @UploadedFile() imageFile?: Express.Multer.File,
+  ) {
+    if (imageFile && !["image/jpeg", "image/jpg", "image/png", "image/webp"].includes(imageFile.mimetype)) {
+      throw new BadRequestException("Invalid image type. Only JPG, PNG, and WebP are allowed.");
+    }
+    return this.collectionService.update(+id, dto, imageFile);
   }
 
   @Patch(":id/move")
