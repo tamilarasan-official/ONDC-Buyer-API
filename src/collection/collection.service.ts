@@ -22,6 +22,10 @@ import {
   expandStoreTimingsToDisplayDays,
   type StoreTimingLike,
 } from "../shared/store-timing/store-timing-display.util";
+import { VegMode } from "../shared/enums/veg-mode.enum";
+import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
+import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
+import { TimezoneUtil } from "../shared/utils/timezone.util";
 
 @Injectable()
 export class CollectionService {
@@ -325,6 +329,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const collection = await this.findOne(id);
@@ -337,6 +342,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const collection = await this.collectionRepository.findOne({
@@ -395,6 +401,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const rows = await this.collectionRepository.find({
@@ -517,6 +524,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const page = paginationDto.page || 1;
@@ -531,6 +539,7 @@ export class CollectionService {
         : undefined;
     const userLat = Number.isFinite(userLatRaw) ? userLatRaw : undefined;
     const userLng = Number.isFinite(userLngRaw) ? userLngRaw : undefined;
+    const vegMode = runtimeOverrides?.veg_mode;
 
     const entryRows = await this.collectionEntryRepository.find({
       where: { collection_id: collection.id },
@@ -539,8 +548,8 @@ export class CollectionService {
     const entityIds = entryRows.map((row) => row.entity_id);
     const mapped =
       collection.type === CollectionType.STORE
-        ? await this.resolveStoreEntries(entityIds, userLat, userLng)
-        : await this.resolveItemEntries(entityIds, userLat, userLng);
+        ? await this.resolveStoreEntries(entityIds, userLat, userLng, vegMode)
+        : await this.resolveItemEntries(entityIds, userLat, userLng, vegMode);
 
     const total = mapped.length;
     const start = (page - 1) * effectiveLimit;
@@ -563,19 +572,28 @@ export class CollectionService {
     entityIds: number[],
     userLat?: number,
     userLng?: number,
+    vegMode?: VegMode,
   ) {
     if (entityIds.length === 0) return [];
     const items = await this.itemRepository.find({
       where: { id: In(entityIds), status: true, type: "item" },
-      relations: ["store", "store.locations", "prices", "quantities", "attributes"],
+      relations: [
+        "store",
+        "store.locations",
+        "prices",
+        "quantities",
+        "attributes",
+        "timings",
+      ],
     });
     const mapById = new Map(items.map((item) => [item.id, item]));
     const orderedItems = entityIds
       .map((id) => mapById.get(id))
       .filter((item): item is Item => Boolean(item));
+    const vegFilteredItems = this.filterItemsByVegMode(orderedItems, vegMode);
 
     return Promise.all(
-      orderedItems.map(async (item) => {
+      vegFilteredItems.map(async (item) => {
         const ratingData = await this.getItemRatingData(item.id);
         const storeDistance = this.getStoreDistanceKm(
           item.store as unknown as Store,
@@ -641,6 +659,7 @@ export class CollectionService {
           store_id: item.store?.id ?? null,
           store_name: item.store?.name ?? null,
           base_price: Number(firstPrice?.base_price || 0),
+          timings: this.buildItemTimings(item),
         };
       }),
     );
@@ -650,6 +669,7 @@ export class CollectionService {
     entityIds: number[],
     userLat?: number,
     userLng?: number,
+    vegMode?: VegMode,
   ) {
     if (entityIds.length === 0) return [];
     const stores = await this.storeRepository.find({
@@ -660,15 +680,16 @@ export class CollectionService {
     const orderedStores = entityIds
       .map((id) => mapById.get(id))
       .filter((store): store is Store => Boolean(store));
+    const vegFilteredStores = this.filterStoresByVegMode(orderedStores, vegMode);
 
-    const storeIds = orderedStores.map((s) => s.id);
+    const storeIds = vegFilteredStores.map((s) => s.id);
     const storesWithActiveCloseTimings =
       await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(storeIds);
     const storesWithHolidayToday =
       await this.storeAvailability.getStoreIdsWithHolidayToday(storeIds);
 
     return Promise.all(
-      orderedStores.map(async (store) => {
+      vegFilteredStores.map(async (store) => {
         const ratingData = await this.getStoreRatingData(store.id);
         const distance = this.getStoreDistanceKm(store, userLat, userLng);
         const deliveryTime = this.calculateDeliveryTime(
@@ -874,6 +895,102 @@ export class CollectionService {
     const hours = Number(match[1] || 0);
     const minutes = Number(match[2] || 0);
     return hours * 60 + minutes;
+  }
+
+  private filterStoresByVegMode(stores: Store[], vegMode?: VegMode): Store[] {
+    if (!vegMode) return stores;
+    if (vegMode === VegMode.PURE) {
+      return stores.filter(
+        (store) => store.food_type === StoreDietaryPreference.PURE_VEG,
+      );
+    }
+    // Align with Home API nearby_restaurants behavior:
+    // VegMode.ALL does not restrict store list by food_type.
+    return stores;
+  }
+
+  private filterItemsByVegMode(items: Item[], vegMode?: VegMode): Item[] {
+    if (!vegMode) return items;
+    if (vegMode === VegMode.PURE) {
+      return items.filter(
+        (item) => item.store?.food_type === StoreDietaryPreference.PURE_VEG,
+      );
+    }
+    if (vegMode === VegMode.ALL) {
+      return items.filter(
+        (item) =>
+          this.getItemDietaryPreference(item) === DietaryPreference.VEG,
+      );
+    }
+    return items;
+  }
+
+  private getItemDietaryPreference(item: Item): DietaryPreference | null {
+    const dietaryAttr = (item.attributes || []).find(
+      (attr: any) => attr?.attribute_code === "veg_nonveg",
+    );
+    const value = String(dietaryAttr?.attribute_value || "").toLowerCase();
+    if (value === DietaryPreference.VEG) return DietaryPreference.VEG;
+    if (value === DietaryPreference.NON_VEG) return DietaryPreference.NON_VEG;
+    if (value === DietaryPreference.EGG) return DietaryPreference.EGG;
+    return null;
+  }
+
+  private buildItemTimings(item: Item): Array<{
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+    is_available_now: boolean;
+  }> {
+    const timings = Array.isArray(item.timings) ? item.timings : [];
+    return timings
+      .map((timing: any) => ({
+        day_from: Number(timing.day_from),
+        day_to: Number(timing.day_to),
+        time_from: String(timing.time_from || "0000"),
+        time_to: String(timing.time_to || "0000"),
+        is_available_now: this.isItemAvailableNow(
+          Number(timing.day_from),
+          Number(timing.day_to),
+          String(timing.time_from || "0000"),
+          String(timing.time_to || "0000"),
+        ),
+      }))
+      .sort((a, b) => {
+        if (a.day_from !== b.day_from) return a.day_from - b.day_from;
+        const fromDiff = Number(a.time_from) - Number(b.time_from);
+        if (fromDiff !== 0) return fromDiff;
+        return Number(a.time_to) - Number(b.time_to);
+      });
+  }
+
+  private isItemAvailableNow(
+    dayFrom: number,
+    dayTo: number,
+    timeFrom: string,
+    timeTo: string,
+  ): boolean {
+    const currentDay = TimezoneUtil.getCurrentISTDay(); // DB format: 1=Mon ... 7=Sun
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+
+    let isDayInRange = false;
+    if (dayFrom <= dayTo) {
+      isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
+    } else {
+      isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
+    }
+    if (!isDayInRange) return false;
+
+    const open = parseInt(timeFrom, 10);
+    const close = parseInt(timeTo, 10);
+    if (!Number.isFinite(open) || !Number.isFinite(close)) {
+      return false;
+    }
+    if (close < open) {
+      return currentTime >= open || currentTime <= close;
+    }
+    return currentTime >= open && currentTime <= close;
   }
 
   private async validateEntityIds(type: CollectionType, ids: number[]) {
