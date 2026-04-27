@@ -4,6 +4,7 @@ import {
   Controller,
   Delete,
   Get,
+  ParseEnumPipe,
   Param,
   Patch,
   Post,
@@ -20,6 +21,7 @@ import { PaginationDto } from "../shared/dto/pagination.dto";
 import { MoveCollectionDto } from "./dto/reorder-collections.dto";
 import { AddCollectionEntriesDto } from "./dto/add-collection-entries.dto";
 import { ReorderCollectionEntriesDto } from "./dto/reorder-collection-entries.dto";
+import { VegMode } from "../shared/enums/veg-mode.enum";
 
 @ApiTags("Collection Management")
 @Controller("collection")
@@ -101,16 +103,20 @@ export class CollectionController {
   @ApiOperation({ summary: "Get resolved collection entities for table" })
   @ApiQuery({ name: "lat", required: false, type: Number, example: 9.9252 })
   @ApiQuery({ name: "lng", required: false, type: Number, example: 78.1198 })
+  @ApiQuery({ name: "veg_mode", required: false, enum: VegMode, enumName: "VegMode" })
   @ApiQuery({ name: "limit", required: false, type: Number, example: 20 })
   previewItems(
     @Param("id") id: string,
     @Query() paginationDto: PaginationDto,
     @Query("lat") lat?: string,
     @Query("lng") lng?: string,
+    @Query("veg_mode", new ParseEnumPipe(VegMode, { optional: true }))
+    vegMode?: VegMode,
   ) {
     return this.collectionService.previewItems(+id, paginationDto, {
       ...(lat !== undefined ? { user_lat: Number(lat) } : {}),
       ...(lng !== undefined ? { user_lng: Number(lng) } : {}),
+      ...(vegMode !== undefined ? { veg_mode: vegMode } : {}),
     });
   }
 

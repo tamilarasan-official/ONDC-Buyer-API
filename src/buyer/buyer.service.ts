@@ -280,6 +280,7 @@ export class BuyerService {
           {
             ...(userLocation?.lat !== undefined ? { user_lat: userLocation.lat } : {}),
             ...(userLocation?.lng !== undefined ? { user_lng: userLocation.lng } : {}),
+            ...(vegMode !== undefined ? { veg_mode: vegMode } : {}),
           },
         ),
       };

@@ -13,6 +13,7 @@ import {
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  ParseEnumPipe,
   Logger,
   Res,
   HttpException,
@@ -142,16 +143,20 @@ export class BuyerController {
   })
   @ApiQuery({ name: "lat", required: false, type: Number, example: 9.9252 })
   @ApiQuery({ name: "lng", required: false, type: Number, example: 78.1198 })
+  @ApiQuery({ name: "veg_mode", required: false, enum: VegMode, enumName: "VegMode" })
   @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
   getCollectionItems(
     @Param("id") id: string,
     @Query() paginationDto: PaginationDto,
     @Query("lat") lat?: string,
     @Query("lng") lng?: string,
+    @Query("veg_mode", new ParseEnumPipe(VegMode, { optional: true }))
+    vegMode?: VegMode,
   ) {
     return this.collectionService.previewActiveItems(+id, paginationDto, {
       ...(lat !== undefined ? { user_lat: Number(lat) } : {}),
       ...(lng !== undefined ? { user_lng: Number(lng) } : {}),
+      ...(vegMode !== undefined ? { veg_mode: vegMode } : {}),
     });
   }
 
