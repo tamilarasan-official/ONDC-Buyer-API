@@ -26,6 +26,7 @@ import { SellerSyncModule } from "../seller-sync/seller-sync.module";
 import { MailService } from "../shared/mail.service";
 import { UploadModule } from "../shared/upload.module";
 import { CollectionModule } from "../collection/collection.module";
+import { StoreTimingModule } from "../shared/store-timing/store-timing.module";
 
 // Import entities
 import { Store } from "../store/entities/store.entity";
@@ -122,6 +123,7 @@ import { GuestOrUserAuthGuard } from "../authentication/guest-or-user-auth.guard
     SellerSyncModule,
     UploadModule,
     CollectionModule,
+    StoreTimingModule,
   ],
   controllers: [BuyerController, InvoiceController],
   providers: [
