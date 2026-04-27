@@ -901,9 +901,7 @@ export class CollectionService {
     if (!vegMode) return stores;
     if (vegMode === VegMode.PURE) {
       return stores.filter(
-        (store) =>
-          store.food_type === StoreDietaryPreference.PURE_VEG ||
-          store.food_type === StoreDietaryPreference.VEG,
+        (store) => store.food_type === StoreDietaryPreference.PURE_VEG,
       );
     }
     // Align with Home API nearby_restaurants behavior:
@@ -915,9 +913,7 @@ export class CollectionService {
     if (!vegMode) return items;
     if (vegMode === VegMode.PURE) {
       return items.filter(
-        (item) =>
-          item.store?.food_type === StoreDietaryPreference.PURE_VEG ||
-          item.store?.food_type === StoreDietaryPreference.VEG,
+        (item) => item.store?.food_type === StoreDietaryPreference.PURE_VEG,
       );
     }
     if (vegMode === VegMode.ALL) {
