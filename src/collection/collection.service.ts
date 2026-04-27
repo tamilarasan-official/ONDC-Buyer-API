@@ -16,8 +16,12 @@ import { PaginationDto } from "../shared/dto/pagination.dto";
 import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
 import { CollectionEntry } from "./entities/collection-entry.entity";
-import { TimezoneUtil } from "../shared/utils/timezone.util";
 import { UploadService } from "../shared/upload.service";
+import { StoreAvailabilityService } from "../shared/store-timing/store-availability.service";
+import {
+  expandStoreTimingsToDisplayDays,
+  type StoreTimingLike,
+} from "../shared/store-timing/store-timing-display.util";
 
 @Injectable()
 export class CollectionService {
@@ -33,6 +37,7 @@ export class CollectionService {
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     private readonly uploadService: UploadService,
+    private readonly storeAvailability: StoreAvailabilityService,
   ) {}
 
   async create(dto: CreateCollectionDto, imageFile?: Express.Multer.File) {
@@ -656,6 +661,12 @@ export class CollectionService {
       .map((id) => mapById.get(id))
       .filter((store): store is Store => Boolean(store));
 
+    const storeIds = orderedStores.map((s) => s.id);
+    const storesWithActiveCloseTimings =
+      await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(storeIds);
+    const storesWithHolidayToday =
+      await this.storeAvailability.getStoreIdsWithHolidayToday(storeIds);
+
     return Promise.all(
       orderedStores.map(async (store) => {
         const ratingData = await this.getStoreRatingData(store.id);
@@ -689,8 +700,12 @@ export class CollectionService {
         delivery_time: deliveryTime,
         offers_count: await this.getStoreOffersCount(store.id),
         is_favorite: false,
-        timings: this.buildStoreTimings(store),
-        is_open: this.isStoreOpenNow(store),
+        timings: expandStoreTimingsToDisplayDays(
+          (Array.isArray(store.timings) ? store.timings : []) as StoreTimingLike[],
+          storesWithActiveCloseTimings.has(store.id),
+          storesWithHolidayToday.has(store.id),
+        ),
+        is_open: (await this.storeAvailability.isStoreOpen(store.id)).isOpen,
         phone_number:
           store.fulfillments?.find((f: any) => f.type === "Delivery")
             ?.contact_phone || null,
@@ -859,105 +874,6 @@ export class CollectionService {
     const hours = Number(match[1] || 0);
     const minutes = Number(match[2] || 0);
     return hours * 60 + minutes;
-  }
-
-  private buildStoreTimings(store: Store): Array<{
-    day: number;
-    open_time: string;
-    close_time: string;
-    is_open: boolean;
-  }> {
-    const timings = Array.isArray((store as any).timings)
-      ? ((store as any).timings as any[])
-      : [];
-    if (timings.length === 0) {
-      return [];
-    }
-
-    const expanded: Array<{
-      day: number;
-      open_time: string;
-      close_time: string;
-      is_open: boolean;
-    }> = [];
-
-    const currentDayDb = TimezoneUtil.getCurrentISTDay();
-    const currentTime = String(TimezoneUtil.getCurrentISTTimeHHMM());
-
-    for (const timing of timings) {
-      const dayFromDb = Number(timing.day_from);
-      const dayToDb = Number(timing.day_to);
-      const daysDb: number[] = [];
-
-      if (dayFromDb <= dayToDb) {
-        for (let day = dayFromDb; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      } else {
-        for (let day = dayFromDb; day <= 7; day++) {
-          daysDb.push(day);
-        }
-        for (let day = 1; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      }
-
-      for (const dayDb of daysDb) {
-        const openTime = String(timing.time_from || "0000");
-        const closeTime = String(timing.time_to || "0000");
-        expanded.push({
-          day: this.convertDbDayToDisplayDay(dayDb),
-          open_time: openTime,
-          close_time: closeTime,
-          is_open:
-            dayDb === currentDayDb &&
-            this.isTimeInRange(currentTime, openTime, closeTime),
-        });
-      }
-    }
-
-    return expanded.sort((a, b) => a.day - b.day);
-  }
-
-  private isStoreOpenNow(store: Store): boolean {
-    const currentDay = TimezoneUtil.getCurrentISTDay();
-    const currentTime = String(TimezoneUtil.getCurrentISTTimeHHMM());
-    const timings = Array.isArray((store as any).timings)
-      ? ((store as any).timings as any[])
-      : [];
-    const matched = timings.find(
-      (t) =>
-        Number(t.day_from) <= currentDay &&
-        Number(t.day_to) >= currentDay,
-    );
-    if (!matched) return false;
-    return this.isTimeInRange(
-      currentTime,
-      String(matched.time_from || "0000"),
-      String(matched.time_to || "0000"),
-    );
-  }
-
-  private convertDbDayToDisplayDay(dbDay: number): number {
-    return dbDay === 7 ? 1 : dbDay + 1;
-  }
-
-  private isTimeInRange(
-    currentHHMM: string,
-    openHHMM: string,
-    closeHHMM: string,
-  ): boolean {
-    const current = Number(currentHHMM);
-    const open = Number(openHHMM);
-    const close = Number(closeHHMM);
-    if (!Number.isFinite(current) || !Number.isFinite(open) || !Number.isFinite(close)) {
-      return false;
-    }
-    if (open <= close) {
-      return current >= open && current <= close;
-    }
-    // Overnight timing window (e.g., 2200 -> 0200).
-    return current >= open || current <= close;
   }
 
   private async validateEntityIds(type: CollectionType, ids: number[]) {
