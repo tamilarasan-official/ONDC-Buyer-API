@@ -149,6 +149,9 @@ export class BuyerService {
     deviceLat?: number,
     deviceLng?: number,
     vegMode?: VegMode,
+    sortBy: "distance" | "rating" = "distance",
+    cuisines: string[] = [],
+    availability?: "open" | "closed",
     page: number = 1,
     limit: number = 10,
   ) {
@@ -213,6 +216,9 @@ export class BuyerService {
           userLocation.lng,
           radiusKm,
           vegMode,
+          sortBy,
+          cuisines,
+          availability,
           userId,
           page,
           limit,
@@ -311,6 +317,9 @@ export class BuyerService {
     userLng: number,
     radiusKm: number,
     vegMode?: VegMode,
+    sortBy: "distance" | "rating" = "distance",
+    cuisines: string[] = [],
+    availability?: "open" | "closed",
     userId?: number,
     page: number = 1,
     limit: number = 10,
@@ -326,6 +335,9 @@ export class BuyerService {
       } else {
         this.logger.log(`🥬 Veg mode: disabled (showing all restaurants)`);
       }
+      this.logger.log(
+        `🔀 Home nearby params - sort_by: ${sortBy}, cuisines: ${cuisines.join(",") || "none"}, availability: ${availability || "all"}`,
+      );
 
       // First, let's check total stores in database
       const totalStores = await this.storeRepository.count();
@@ -532,33 +544,63 @@ export class BuyerService {
         }),
       );
 
-      // Sort ALL restaurants: open first, then closed; within each group by distance, then rating, then name
-      allStoresWithRatings.sort((a, b) => {
+      const cuisinesNormalized = cuisines.map((c) =>
+        c.toLowerCase().replace(/[\s-]+/g, "_"),
+      );
+      const filteredByCuisines =
+        cuisinesNormalized.length === 0
+          ? allStoresWithRatings
+          : allStoresWithRatings.filter((store) => {
+              const rawTags = store.cuisine_tags || "";
+              const tags = String(rawTags)
+                .split(",")
+                .map((t) => t.trim().toLowerCase().replace(/[\s-]+/g, "_"))
+                .filter(Boolean);
+              return cuisinesNormalized.some((filterTag) => tags.includes(filterTag));
+            });
+
+      const filteredByAvailability =
+        availability === "open"
+          ? filteredByCuisines.filter((store) => store.is_open)
+          : availability === "closed"
+            ? filteredByCuisines.filter((store) => !store.is_open)
+            : filteredByCuisines;
+
+      // Sort restaurants: open first (when availability not explicitly requested), then selected sort mode.
+      filteredByAvailability.sort((a, b) => {
         // First priority: Sort by open status (open restaurants first)
-        if (a.is_open !== b.is_open) {
+        if (!availability && a.is_open !== b.is_open) {
           return a.is_open ? -1 : 1; // Open restaurants come first
         }
-        // Second priority: Sort by distance
-        if (a.distance !== b.distance) {
-          return a.distance - b.distance;
+        // Second priority: Sort by selected mode
+        if (sortBy === "rating") {
+          if (a.rating !== b.rating) {
+            return b.rating - a.rating;
+          }
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance;
+          }
+        } else {
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance;
+          }
+          if (a.rating !== b.rating) {
+            return b.rating - a.rating;
+          }
         }
-        // Third priority: Sort by rating (highest first)
-        if (a.rating !== b.rating) {
-          return b.rating - a.rating;
-        }
-        // Finally: Sort by name
+        // Final tie-breaker: name
         return a.name.localeCompare(b.name);
       });
 
       this.logger.log(
-        `✅ Successfully processed and sorted all ${allStoresWithRatings.length} restaurants`,
+        `✅ Successfully processed and filtered nearby restaurants: ${filteredByAvailability.length} records`,
       );
 
       // Apply pagination AFTER sorting all restaurants
       const skip = (page - 1) * limit;
-      const paginatedRestaurants = allStoresWithRatings.slice(skip, skip + limit);
+      const paginatedRestaurants = filteredByAvailability.slice(skip, skip + limit);
       this.logger.log(
-        `📄 Returning page ${page}: ${paginatedRestaurants.length} restaurants (${skip + 1}-${skip + paginatedRestaurants.length} of ${totalCount})`,
+        `📄 Returning page ${page}: ${paginatedRestaurants.length} restaurants (${skip + 1}-${skip + paginatedRestaurants.length} of ${filteredByAvailability.length})`,
       );
 
       // Debug: Log paginated restaurants
@@ -568,7 +610,7 @@ export class BuyerService {
         );
       });
 
-      return { restaurants: paginatedRestaurants, total: totalCount };
+      return { restaurants: paginatedRestaurants, total: filteredByAvailability.length };
     } catch (error) {
       this.logger.error(
         `❌ Error getting nearby restaurants: ${error.message}`,

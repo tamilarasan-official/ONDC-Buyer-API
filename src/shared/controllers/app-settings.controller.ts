@@ -15,7 +15,7 @@ import {
   ApiResponse,
   ApiParam,
   ApiBody,
-  ApiSecurity
+  ApiSecurity,
 } from "@nestjs/swagger";
 import { AppSettingsService } from "../services/app-settings.service";
 import {
@@ -29,6 +29,19 @@ import { ApiKeyGuard, CurrentRole } from "src/super-admin-access/api-key-auth-ga
 @Controller("app-settings")
 export class AppSettingsController {
   constructor(private readonly appSettingsService: AppSettingsService) { }
+
+  private parseSettingValue(key: string, value: string | null) {
+    if (key !== "CUISINE_TAG_OPTIONS") {
+      return value;
+    }
+
+    try {
+      const parsed = JSON.parse(value ?? "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
 
   @Get()
   @ApiOperation({
@@ -103,10 +116,15 @@ export class AppSettingsController {
   })
   async getAll() {
     const settings = await this.appSettingsService.getAll();
+    const parsedSettings = settings.map((setting) => ({
+      ...setting,
+      value: this.parseSettingValue(setting.key, setting.value),
+    }));
+
     return {
       success: true,
       message: "App settings retrieved successfully",
-      data: settings,
+      data: parsedSettings,
     };
   }
 
@@ -149,10 +167,17 @@ export class AppSettingsController {
   })
   async getByCategory(@Param("category") category: string) {
     const settings = await this.appSettingsService.getByCategory(category);
+    const parsedSettings = Object.fromEntries(
+      Object.entries(settings).map(([key, value]) => [
+        key,
+        this.parseSettingValue(key, value),
+      ]),
+    );
+
     return {
       success: true,
       message: "Settings retrieved successfully",
-      data: settings,
+      data: parsedSettings,
     };
   }
 
@@ -213,7 +238,7 @@ export class AppSettingsController {
     return {
       success: true,
       message: "Setting retrieved successfully",
-      data: { key, value },
+      data: { key, value: this.parseSettingValue(key, value) },
     };
   }
 
