@@ -60,6 +60,31 @@ import {
 export class BuyerService {
   private readonly logger = new Logger(BuyerService.name);
 
+  private parseCuisineTagOptions(
+    raw: string | null,
+  ): Array<{ id: string; label: string }> {
+    try {
+      const parsed = JSON.parse(raw ?? "[]");
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .filter(
+          (entry) =>
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as any).id === "string" &&
+            typeof (entry as any).label === "string",
+        )
+        .map((entry) => ({
+          id: (entry as any).id,
+          label: (entry as any).label,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
@@ -202,6 +227,7 @@ export class BuyerService {
         restaurantsResult,
         whatsOnYourMind,
         { promotional_banner: promotionalBanner, organization_banner: organizationBanner },
+        cuisineTagOptionsRaw,
         appOperationStatus,
         homeScreenCardStyle,
         codEnabled,
@@ -225,6 +251,7 @@ export class BuyerService {
         ),
         this.getWhatsOnYourMind(vegMode),
         this.getPromotionalBanner(),
+        this.appSettingsService.get("CUISINE_TAG_OPTIONS", "[]"),
         this.appOperationHoursService.checkAppOperationStatus(),
         this.appSettingsService.getRestaurantCardConfig(),
         this.appSettingsService.getBoolean("COD_ENABLED", false),
@@ -243,6 +270,7 @@ export class BuyerService {
       );
 
       let codEnabledForUser = codEnabled;
+      const cuisine_tags = this.parseCuisineTagOptions(cuisineTagOptionsRaw);
       if (codEnabled && userId && Number(codDailyThreshold ?? 0) > 0) {
         const todayCodOrderCount = await this.getTodayCodOrderCountForUser(userId);
         console.log('codDailyThreshold', codDailyThreshold);
@@ -262,6 +290,7 @@ export class BuyerService {
           has_more: page * limit < restaurantsResult.total,
         },
         whats_on_your_mind: whatsOnYourMind,
+        cuisine_tags,
         promotional_banner: promotionalBanner,
         organization_banner: organizationBanner,
         app_operation_status: {
