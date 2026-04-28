@@ -403,6 +403,20 @@ export class WhatsOnYourMindDto {
   updated_at: Date;
 }
 
+export class CuisineTagDto {
+  @ApiProperty({
+    description: "Stable cuisine identifier",
+    example: "south_indian",
+  })
+  id: string;
+
+  @ApiProperty({
+    description: "Cuisine display label",
+    example: "South Indian",
+  })
+  label: string;
+}
+
 export class PromotionalBannerDto {
   @ApiProperty({
     description: "Banner title",
@@ -550,6 +564,12 @@ export class HomeDataDto {
     type: [WhatsOnYourMindDto],
   })
   whats_on_your_mind: WhatsOnYourMindDto[];
+
+  @ApiProperty({
+    description: "Cuisine tags configured in app settings",
+    type: [CuisineTagDto],
+  })
+  cuisine_tags: CuisineTagDto[];
 
   @ApiProperty({
     description:
