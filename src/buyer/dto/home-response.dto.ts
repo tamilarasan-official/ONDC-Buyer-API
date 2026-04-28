@@ -403,18 +403,45 @@ export class WhatsOnYourMindDto {
   updated_at: Date;
 }
 
-export class CuisineTagDto {
+export class FilterOptionDto {
   @ApiProperty({
-    description: "Stable cuisine identifier",
-    example: "south_indian",
-  })
-  id: string;
-
-  @ApiProperty({
-    description: "Cuisine display label",
-    example: "South Indian",
+    description: "Display label for filter option",
+    example: "Distance",
   })
   label: string;
+
+  @ApiProperty({
+    description: "Filter option value sent in request",
+    example: "distance",
+  })
+  value: string;
+}
+
+export class HomeFilterDto {
+  @ApiProperty({
+    description: "Filter key expected by API",
+    example: "sort_by",
+  })
+  key: string;
+
+  @ApiProperty({
+    description: "Filter display label",
+    example: "Sort By",
+  })
+  label: string;
+
+  @ApiProperty({
+    description: "Selection behavior for this filter",
+    enum: ["single", "multiple"],
+    example: "single",
+  })
+  selection_type: "single" | "multiple";
+
+  @ApiProperty({
+    description: "Available options for this filter",
+    type: [FilterOptionDto],
+  })
+  options: FilterOptionDto[];
 }
 
 export class PromotionalBannerDto {
@@ -566,10 +593,11 @@ export class HomeDataDto {
   whats_on_your_mind: WhatsOnYourMindDto[];
 
   @ApiProperty({
-    description: "Cuisine tags configured in app settings",
-    type: [CuisineTagDto],
+    description:
+      "Dynamic filter configuration for home screen (sort, veg_mode, cuisines, availability)",
+    type: [HomeFilterDto],
   })
-  cuisine_tags: CuisineTagDto[];
+  filters: HomeFilterDto[];
 
   @ApiProperty({
     description:

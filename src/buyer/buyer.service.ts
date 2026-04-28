@@ -85,6 +85,47 @@ export class BuyerService {
     }
   }
 
+  private buildHomeFilters(cuisineOptions: Array<{ id: string; label: string }>) {
+    return [
+      {
+        key: "sort_by",
+        label: "Sort By",
+        selection_type: "single",
+        options: [
+          { label: "Distance", value: "distance" },
+          { label: "Rating", value: "rating" },
+        ],
+      },
+      {
+        key: "veg_mode",
+        label: "Food Type",
+        selection_type: "single",
+        options: [
+          { label: "All", value: VegMode.ALL },
+          { label: "Pure Veg", value: VegMode.PURE },
+        ],
+      },
+      {
+        key: "cuisines",
+        label: "Cuisine",
+        selection_type: "multiple",
+        options: cuisineOptions.map((cuisine) => ({
+          label: cuisine.label,
+          value: cuisine.id,
+        })),
+      },
+      {
+        key: "availability",
+        label: "Availability",
+        selection_type: "single",
+        options: [
+          { label: "Open", value: "open" },
+          { label: "Closed", value: "closed" },
+        ],
+      },
+    ];
+  }
+
   constructor(
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
@@ -270,7 +311,8 @@ export class BuyerService {
       );
 
       let codEnabledForUser = codEnabled;
-      const cuisine_tags = this.parseCuisineTagOptions(cuisineTagOptionsRaw);
+      const cuisineTagOptions = this.parseCuisineTagOptions(cuisineTagOptionsRaw);
+      const filters = this.buildHomeFilters(cuisineTagOptions);
       if (codEnabled && userId && Number(codDailyThreshold ?? 0) > 0) {
         const todayCodOrderCount = await this.getTodayCodOrderCountForUser(userId);
         console.log('codDailyThreshold', codDailyThreshold);
@@ -290,7 +332,7 @@ export class BuyerService {
           has_more: page * limit < restaurantsResult.total,
         },
         whats_on_your_mind: whatsOnYourMind,
-        cuisine_tags,
+        filters,
         promotional_banner: promotionalBanner,
         organization_banner: organizationBanner,
         app_operation_status: {
