@@ -26,6 +26,7 @@ import { VegMode } from "../shared/enums/veg-mode.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
+import { Banner } from "../banner/entities/banner.entity";
 
 @Injectable()
 export class CollectionService {
@@ -38,6 +39,8 @@ export class CollectionService {
     private readonly collectionEntryRepository: Repository<CollectionEntry>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(Banner)
+    private readonly bannerRepository: Repository<Banner>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
     private readonly uploadService: UploadService,
@@ -255,6 +258,18 @@ export class CollectionService {
       );
     }
 
+    // If deactivating, prevent if mapped banners exist (active or inactive)
+    if (dto.status === false && existing.status === true) {
+      const mappedBanners = await this.bannerRepository.count({
+        where: { promotion_type: 'collection_id', promotion_link: String(id) }
+      });
+      if (mappedBanners > 0) {
+        throw new BadRequestException(
+          "Cannot deactivate: linked to banners. Unlink first."
+        );
+      }
+    }
+
     await this.validateUniqueActivePageType(
       dto.page ?? existing.page,
       dto.type ?? existing.type,
@@ -286,6 +301,15 @@ export class CollectionService {
 
   async remove(id: number) {
     const existing = await this.findOne(id);
+    // Prevent deletion if mapped banners exist (active or inactive)
+    const mappedBanners = await this.bannerRepository.count({
+      where: { promotion_type: 'collection_id', promotion_link: String(id) }
+    });
+    if (mappedBanners > 0) {
+      throw new BadRequestException(
+        "Cannot delete: linked to banners. Unlink first."
+      );
+    }
     await this.collectionRepository.delete(existing.id);
     return { message: "Collection deleted successfully" };
   }
@@ -608,7 +632,23 @@ export class CollectionService {
         const firstPrice = item.prices?.[0];
         const firstQuantity = item.quantities?.[0];
         const availableCount = Number(firstQuantity?.available_count ?? 0);
-        const isAvailable = availableCount > 0;
+        // --- FIX: Check both stock and timing for is_available ---
+        let isAvailableNow = false;
+        if (Array.isArray(item.timings) && item.timings.length > 0) {
+          isAvailableNow = item.timings.some((timing: any) =>
+            this.isItemAvailableNow(
+              Number(timing.day_from),
+              Number(timing.day_to),
+              String(timing.time_from || "0000"),
+              String(timing.time_to || "0000"),
+            )
+          );
+        } else {
+          // If no timings, treat as always available
+          isAvailableNow = true;
+        }
+        const isAvailable = availableCount > 0 && isAvailableNow;
+        // --- END FIX ---
         const dietaryAttr = (item.attributes || []).find(
           (attr: any) => attr?.attribute_code === "veg_nonveg",
         );
@@ -1038,7 +1078,7 @@ export class CollectionService {
     if (conflict) {
       if (page === CollectionPage.HOME) {
         throw new BadRequestException(
-          "An active collection already exists for page=home. Only one active home collection is allowed.",
+          "Only one active home collection is allowed.",
         );
       }
       throw new BadRequestException(

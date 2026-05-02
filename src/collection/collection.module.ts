@@ -8,10 +8,10 @@ import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
 import { UploadService } from "../shared/upload.service";
 import { StoreTimingModule } from "../shared/store-timing/store-timing.module";
-
+import { Banner } from "src/banner/entities/banner.entity";
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Collection, CollectionEntry, Item, Store]),
+    TypeOrmModule.forFeature([Collection, CollectionEntry, Item, Store,Banner]),
     StoreTimingModule,
   ],
   controllers: [CollectionController],
