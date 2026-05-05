@@ -13,6 +13,7 @@ import {
   BadRequestException,
   NotFoundException,
   InternalServerErrorException,
+  ParseEnumPipe,
   Logger,
   Res,
   HttpException,
@@ -142,16 +143,20 @@ export class BuyerController {
   })
   @ApiQuery({ name: "lat", required: false, type: Number, example: 9.9252 })
   @ApiQuery({ name: "lng", required: false, type: Number, example: 78.1198 })
+  @ApiQuery({ name: "veg_mode", required: false, enum: VegMode, enumName: "VegMode" })
   @ApiQuery({ name: "page", required: false, type: Number, example: 1 })
   getCollectionItems(
     @Param("id") id: string,
     @Query() paginationDto: PaginationDto,
     @Query("lat") lat?: string,
     @Query("lng") lng?: string,
+    @Query("veg_mode", new ParseEnumPipe(VegMode, { optional: true }))
+    vegMode?: VegMode,
   ) {
     return this.collectionService.previewActiveItems(+id, paginationDto, {
       ...(lat !== undefined ? { user_lat: Number(lat) } : {}),
       ...(lng !== undefined ? { user_lng: Number(lng) } : {}),
+      ...(vegMode !== undefined ? { veg_mode: vegMode } : {}),
     });
   }
 
@@ -186,6 +191,30 @@ export class BuyerController {
     enum: VegMode,
     enumName: "VegMode",
     example: "all",
+  })
+  @ApiQuery({
+    name: "sort_by",
+    required: false,
+    type: String,
+    description: "Sort nearby restaurants by distance or rating",
+    enum: ["distance", "rating"],
+    example: "distance",
+  })
+  @ApiQuery({
+    name: "cuisines",
+    required: false,
+    type: String,
+    description:
+      "Comma-separated cuisine tags filter (e.g. south_indian,chinese). Matches store cuisine tags",
+    example: "south_indian,chinese",
+  })
+  @ApiQuery({
+    name: "availability",
+    required: false,
+    type: String,
+    description: "Filter nearby restaurants by availability",
+    enum: ["open", "closed"],
+    example: "open",
   })
   @ApiQuery({
     name: "page",
@@ -269,6 +298,9 @@ export class BuyerController {
     @Query("lat") deviceLat?: string,
     @Query("lng") deviceLng?: string,
     @Query("veg_mode") vegMode?: string,
+    @Query("sort_by") sortBy?: string,
+    @Query("cuisines") cuisines?: string,
+    @Query("availability") availability?: string,
     @Query("page") page?: string,
     @Query("limit") limit?: string,
     @Req() req?: any,
@@ -311,6 +343,18 @@ export class BuyerController {
     // Parse veg_mode: accept enum values or "false" for disabled
     const vegModeValue =
       vegMode && vegMode !== "false" ? (vegMode as VegMode) : undefined;
+    const sortByValue = sortBy === "rating" ? "rating" : "distance";
+    const cuisinesValue =
+      cuisines && cuisines.trim().length > 0
+        ? cuisines
+            .split(",")
+            .map((c) => c.trim())
+            .filter((c) => c.length > 0)
+        : [];
+    const availabilityValue =
+      availability === "open" || availability === "closed"
+        ? availability
+        : undefined;
     const pageNum = page ? parseInt(page) : 1;
     const limitNum = limit ? parseInt(limit) : 10;
 
@@ -319,6 +363,9 @@ export class BuyerController {
       lat,
       lng,
       vegModeValue,
+      sortByValue,
+      cuisinesValue,
+      availabilityValue,
       pageNum,
       limitNum,
     );

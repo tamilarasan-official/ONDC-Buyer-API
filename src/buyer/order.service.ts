@@ -2942,7 +2942,7 @@ export class OrderService {
   ) {
     try {
       this.logger.log(
-        `🔄 Received seller status update for order ${sellerStatusUpdateDto.order_number}: ${sellerStatusUpdateDto.status}`,
+        `Received seller status update for order ${sellerStatusUpdateDto.order_number}: ${sellerStatusUpdateDto.status}`,
       );
 
       // Find order by order_number
@@ -2961,20 +2961,63 @@ export class OrderService {
         );
       }
 
-      // Reassignment when order is already past agent-assigned (picked, out_for_delivery, delivered):
-      // seller may send agent-assigned again with new rider. Do not move status backward or create duplicate tracking/notification.
-      const statusAlreadyPastAgentAssigned = [
-        "picked",
-        "out_for_delivery",
-        "out-for-delivery",
+      // Reassignment blocked only when order is delivered or cancelled — cannot reassign rider then.
+      const statusBlocksAgentReassignment = [
         "delivered",
+        "cancelled",
       ].includes(order.status);
       if (
         sellerStatusUpdateDto.status === "agent-assigned" &&
-        statusAlreadyPastAgentAssigned
+        statusBlocksAgentReassignment
       ) {
         this.logger.log(
-          `⏭️ Order ${sellerStatusUpdateDto.order_number} already ${order.status} (past agent-assigned); ignoring agent-assigned (reassign) update`,
+          `⏭️ Order ${sellerStatusUpdateDto.order_number} already ${order.status}; ignoring agent-assigned (reassign) update`,
+        );
+        return {
+          success: true,
+          message: "Order status updated successfully",
+          order_number: sellerStatusUpdateDto.order_number,
+          previous_status: order.status,
+          new_status: order.status,
+        };
+      }
+
+      // Reassignment while order is picked/out_for_delivery: record tracking only, do not move status backward.
+      const statusAllowsReassignTrackingOnly = [
+        "picked",
+        "out_for_delivery",
+        "out-for-delivery",
+        "agent-arrived-restaurant",
+      ].includes(order.status);
+      if (
+        sellerStatusUpdateDto.status === "agent-assigned" &&
+        statusAllowsReassignTrackingOnly
+      ) {
+        this.logger.log(
+          ` Order ${sellerStatusUpdateDto.order_number} rider reassigned during ${order.status}; recording tracking only`,
+        );
+        const reassignAgentDetails = sellerStatusUpdateDto.agent_details
+          ? {
+              name: sellerStatusUpdateDto.agent_details.name,
+              phone: sellerStatusUpdateDto.agent_details.phone,
+              vehicle_number: sellerStatusUpdateDto.agent_details.vehicle_number,
+              eta: sellerStatusUpdateDto.agent_details.eta,
+              photo_url: sellerStatusUpdateDto.agent_details.photo_url,
+            }
+          : undefined;
+        const reassignMessage = this.sellerStatusService.getStatusMessage("agent-assigned");
+        const reassignFullMessage = sellerStatusUpdateDto.message
+          ? `${reassignMessage}. ${sellerStatusUpdateDto.message}`
+          : reassignMessage;
+        await this.createOrderTracking(
+          order.id,
+          "agent-assigned",
+          reassignFullMessage,
+          reassignAgentDetails,
+          sellerStatusUpdateDto.tracking_url,
+          sellerStatusUpdateDto.delivery_code,
+          undefined,
+          true,
         );
         return {
           success: true,
@@ -3061,19 +3104,26 @@ export class OrderService {
       const previousStatus = order.status;
       const newStatus = sellerStatusUpdateDto.status;
 
-      // Idempotency: when status unchanged (e.g. agent-assigned → agent-assigned on reassign),
-      // skip tracking and notification to avoid duplicates from multiple webhook deliveries.
+      // Idempotency: when status unchanged, skip tracking and notification to avoid duplicates.
+      // Exception: agent-assigned → agent-assigned means rider was reassigned; fall through to record tracking.
       if (previousStatus === newStatus) {
-        this.logger.log(
-          `⏭️ Order ${sellerStatusUpdateDto.order_number} status unchanged (${previousStatus}), skipping tracking and notification`,
-        );
-        return {
-          success: true,
-          message: "Order status updated successfully",
-          order_number: sellerStatusUpdateDto.order_number,
-          previous_status: previousStatus,
-          new_status: newStatus,
-        };
+        if (newStatus === "agent-assigned") {
+          this.logger.log(
+            `Order ${sellerStatusUpdateDto.order_number} rider reassigned (agent-assigned → agent-assigned), recording tracking entry`,
+          );
+          // fall through to tracking below
+        } else {
+          this.logger.log(
+            `⏭️ Order ${sellerStatusUpdateDto.order_number} status unchanged (${previousStatus}), skipping tracking and notification`,
+          );
+          return {
+            success: true,
+            message: "Order status updated successfully",
+            order_number: sellerStatusUpdateDto.order_number,
+            previous_status: previousStatus,
+            new_status: newStatus,
+          };
+        }
       }
 
       // Create tracking entry

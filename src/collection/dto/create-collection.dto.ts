@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from "@nestjs/swagger";
-import { Type } from "class-transformer";
+import { Transform } from "class-transformer";
 import {
   IsBoolean,
   IsEnum,
@@ -38,7 +38,12 @@ export class CreateCollectionDto {
 
   @ApiPropertyOptional({ example: true, default: true })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => {
+    if (typeof value === "string") {
+      return value.toLowerCase() === "true";
+    }
+    return value;
+  })
   @IsBoolean()
   status?: boolean;
 }

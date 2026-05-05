@@ -6,11 +6,16 @@ import { Collection } from "./entities/collection.entity";
 import { CollectionEntry } from "./entities/collection-entry.entity";
 import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
-
+import { UploadService } from "../shared/upload.service";
+import { StoreTimingModule } from "../shared/store-timing/store-timing.module";
+import { Banner } from "src/banner/entities/banner.entity";
 @Module({
-  imports: [TypeOrmModule.forFeature([Collection, CollectionEntry, Item, Store])],
+  imports: [
+    TypeOrmModule.forFeature([Collection, CollectionEntry, Item, Store,Banner]),
+    StoreTimingModule,
+  ],
   controllers: [CollectionController],
-  providers: [CollectionService],
+  providers: [CollectionService, UploadService],
   exports: [CollectionService],
 })
 export class CollectionModule {}

@@ -16,7 +16,17 @@ import { PaginationDto } from "../shared/dto/pagination.dto";
 import { Item } from "../item/entities/item.entity";
 import { Store } from "../store/entities/store.entity";
 import { CollectionEntry } from "./entities/collection-entry.entity";
+import { UploadService } from "../shared/upload.service";
+import { StoreAvailabilityService } from "../shared/store-timing/store-availability.service";
+import {
+  expandStoreTimingsToDisplayDays,
+  type StoreTimingLike,
+} from "../shared/store-timing/store-timing-display.util";
+import { VegMode } from "../shared/enums/veg-mode.enum";
+import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
+import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { TimezoneUtil } from "../shared/utils/timezone.util";
+import { Banner } from "../banner/entities/banner.entity";
 
 @Injectable()
 export class CollectionService {
@@ -29,11 +39,15 @@ export class CollectionService {
     private readonly collectionEntryRepository: Repository<CollectionEntry>,
     @InjectRepository(Item)
     private readonly itemRepository: Repository<Item>,
+    @InjectRepository(Banner)
+    private readonly bannerRepository: Repository<Banner>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    private readonly uploadService: UploadService,
+    private readonly storeAvailability: StoreAvailabilityService,
   ) {}
 
-  async create(dto: CreateCollectionDto) {
+  async create(dto: CreateCollectionDto, imageFile?: Express.Multer.File) {
     await this.validateUniqueActivePageType(
       dto.page,
       dto.type,
@@ -45,10 +59,25 @@ export class CollectionService {
       .select("COALESCE(MAX(collection.sequence), 0)", "max")
       .getRawOne();
 
+    let imageUrl = dto.image_url;
+    if (imageFile) {
+      const timestamp = Date.now();
+      const fileName =
+        (dto.title ?? "collection").replace(/[^a-zA-Z0-9]/g, "") ||
+        "collection";
+      const fileExtension = imageFile.originalname.split(".").pop();
+      const s3Key = `collections/${fileName}-${timestamp}.${fileExtension}`;
+      imageUrl = await this.uploadService.uploadFile(
+        imageFile.buffer,
+        imageFile.mimetype,
+        s3Key,
+      );
+    }
+
     const entity = this.collectionRepository.create({
       title: dto.title,
       description: dto.description,
-      image_url: dto.image_url,
+      image_url: imageUrl,
       type: dto.type,
       page: dto.page,
       status: dto.status ?? true,
@@ -116,7 +145,13 @@ export class CollectionService {
     const limit = paginationDto.limit || 50;
     const query = this.storeRepository
       .createQueryBuilder("store")
+      .innerJoin("store.items", "item")
+      .innerJoin("item.quantities", "quantity")
       .where("store.status = :status", { status: true })
+      .andWhere("item.status = :itemStatus", { itemStatus: true })
+      .andWhere("item.type = :itemType", { itemType: "item" })
+      .andWhere("COALESCE(quantity.available_count, 0) > 0")
+      .distinct(true)
       .orderBy("store.name", "ASC");
 
     if (paginationDto.search) {
@@ -151,11 +186,12 @@ export class CollectionService {
     const limit = paginationDto.limit || 50;
     const query = this.itemRepository
       .createQueryBuilder("item")
-      .leftJoinAndSelect("item.store", "store")
+      .leftJoin("item.store", "store")
+      .innerJoin("item.quantities", "quantity")
       .where("item.status = :status", { status: true })
       .andWhere("item.type = :type", { type: "item" })
       .andWhere("store.status = :storeStatus", { storeStatus: true })
-      .orderBy("item.name", "ASC");
+      .andWhere("COALESCE(quantity.available_count, 0) > 0");
 
     if (storeId > 0) {
       query.andWhere("store.id = :storeId", { storeId });
@@ -166,17 +202,36 @@ export class CollectionService {
       });
     }
 
-    const [rows, total] = await query
+    const totalRow = await query
+      .clone()
+      .select("COUNT(DISTINCT item.id)", "total")
+      .getRawOne<{ total?: string }>();
+
+    const rows = await query
+      .clone()
+      .select("item.id", "id")
+      .addSelect("item.name", "name")
+      .addSelect("store.id", "store_id")
+      .addSelect("store.name", "store_name")
+      .distinct(true)
+      .orderBy("item.name", "ASC")
       .skip((page - 1) * limit)
       .take(limit)
-      .getManyAndCount();
+      .getRawMany<{
+        id: string;
+        name: string;
+        store_id: string | null;
+        store_name: string | null;
+      }>();
+
+    const total = Number(totalRow?.total || 0);
 
     return {
       data: rows.map((item) => ({
-        id: item.id,
+        id: Number(item.id),
         name: item.name,
-        store_id: item.store?.id ?? null,
-        store_name: item.store?.name ?? null,
+        store_id: item.store_id ? Number(item.store_id) : null,
+        store_name: item.store_name ?? null,
       })),
       meta: {
         page,
@@ -195,8 +250,25 @@ export class CollectionService {
     return collection;
   }
 
-  async update(id: number, dto: UpdateCollectionDto) {
+  async update(id: number, dto: UpdateCollectionDto, imageFile?: Express.Multer.File) {
     const existing = await this.findOne(id);
+    if (dto.type !== undefined && dto.type !== existing.type) {
+      throw new BadRequestException(
+        "Collection type cannot be changed after creation",
+      );
+    }
+
+    // If deactivating, prevent if mapped banners exist (active or inactive)
+    if (dto.status === false && existing.status === true) {
+      const mappedBanners = await this.bannerRepository.count({
+        where: { promotion_type: 'collection_id', promotion_link: String(id) }
+      });
+      if (mappedBanners > 0) {
+        throw new BadRequestException(
+          "Cannot deactivate: linked to banners. Unlink first."
+        );
+      }
+    }
 
     await this.validateUniqueActivePageType(
       dto.page ?? existing.page,
@@ -205,12 +277,39 @@ export class CollectionService {
       existing.id,
     );
 
-    const updated = this.collectionRepository.merge(existing, dto);
+    let imageUrl = dto.image_url ?? existing.image_url;
+    if (imageFile) {
+      const timestamp = Date.now();
+      const fileName =
+        (dto.title ?? existing.title ?? "collection").replace(/[^a-zA-Z0-9]/g, "") ||
+        "collection";
+      const fileExtension = imageFile.originalname.split(".").pop();
+      const s3Key = `collections/${fileName}-${timestamp}.${fileExtension}`;
+      imageUrl = await this.uploadService.uploadFile(
+        imageFile.buffer,
+        imageFile.mimetype,
+        s3Key,
+      );
+    }
+
+    const updated = this.collectionRepository.merge(existing, {
+      ...dto,
+      image_url: imageUrl,
+    });
     return this.collectionRepository.save(updated);
   }
 
   async remove(id: number) {
     const existing = await this.findOne(id);
+    // Prevent deletion if mapped banners exist (active or inactive)
+    const mappedBanners = await this.bannerRepository.count({
+      where: { promotion_type: 'collection_id', promotion_link: String(id) }
+    });
+    if (mappedBanners > 0) {
+      throw new BadRequestException(
+        "Cannot delete: linked to banners. Unlink first."
+      );
+    }
     await this.collectionRepository.delete(existing.id);
     return { message: "Collection deleted successfully" };
   }
@@ -254,6 +353,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const collection = await this.findOne(id);
@@ -266,6 +366,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const collection = await this.collectionRepository.findOne({
@@ -324,6 +425,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const rows = await this.collectionRepository.find({
@@ -446,6 +548,7 @@ export class CollectionService {
     runtimeOverrides?: {
       user_lat?: number;
       user_lng?: number;
+      veg_mode?: VegMode;
     },
   ) {
     const page = paginationDto.page || 1;
@@ -460,6 +563,7 @@ export class CollectionService {
         : undefined;
     const userLat = Number.isFinite(userLatRaw) ? userLatRaw : undefined;
     const userLng = Number.isFinite(userLngRaw) ? userLngRaw : undefined;
+    const vegMode = runtimeOverrides?.veg_mode;
 
     const entryRows = await this.collectionEntryRepository.find({
       where: { collection_id: collection.id },
@@ -468,8 +572,8 @@ export class CollectionService {
     const entityIds = entryRows.map((row) => row.entity_id);
     const mapped =
       collection.type === CollectionType.STORE
-        ? await this.resolveStoreEntries(entityIds, userLat, userLng)
-        : await this.resolveItemEntries(entityIds, userLat, userLng);
+        ? await this.resolveStoreEntries(entityIds, userLat, userLng, vegMode)
+        : await this.resolveItemEntries(entityIds, userLat, userLng, vegMode);
 
     const total = mapped.length;
     const start = (page - 1) * effectiveLimit;
@@ -492,19 +596,28 @@ export class CollectionService {
     entityIds: number[],
     userLat?: number,
     userLng?: number,
+    vegMode?: VegMode,
   ) {
     if (entityIds.length === 0) return [];
     const items = await this.itemRepository.find({
       where: { id: In(entityIds), status: true, type: "item" },
-      relations: ["store", "store.locations", "prices", "quantities", "attributes"],
+      relations: [
+        "store",
+        "store.locations",
+        "prices",
+        "quantities",
+        "attributes",
+        "timings",
+      ],
     });
     const mapById = new Map(items.map((item) => [item.id, item]));
     const orderedItems = entityIds
       .map((id) => mapById.get(id))
       .filter((item): item is Item => Boolean(item));
+    const vegFilteredItems = this.filterItemsByVegMode(orderedItems, vegMode);
 
     return Promise.all(
-      orderedItems.map(async (item) => {
+      vegFilteredItems.map(async (item) => {
         const ratingData = await this.getItemRatingData(item.id);
         const storeDistance = this.getStoreDistanceKm(
           item.store as unknown as Store,
@@ -519,7 +632,23 @@ export class CollectionService {
         const firstPrice = item.prices?.[0];
         const firstQuantity = item.quantities?.[0];
         const availableCount = Number(firstQuantity?.available_count ?? 0);
-        const isAvailable = availableCount > 0;
+        // --- FIX: Check both stock and timing for is_available ---
+        let isAvailableNow = false;
+        if (Array.isArray(item.timings) && item.timings.length > 0) {
+          isAvailableNow = item.timings.some((timing: any) =>
+            this.isItemAvailableNow(
+              Number(timing.day_from),
+              Number(timing.day_to),
+              String(timing.time_from || "0000"),
+              String(timing.time_to || "0000"),
+            )
+          );
+        } else {
+          // If no timings, treat as always available
+          isAvailableNow = true;
+        }
+        const isAvailable = availableCount > 0 && isAvailableNow;
+        // --- END FIX ---
         const dietaryAttr = (item.attributes || []).find(
           (attr: any) => attr?.attribute_code === "veg_nonveg",
         );
@@ -570,6 +699,7 @@ export class CollectionService {
           store_id: item.store?.id ?? null,
           store_name: item.store?.name ?? null,
           base_price: Number(firstPrice?.base_price || 0),
+          timings: this.buildItemTimings(item),
         };
       }),
     );
@@ -579,6 +709,7 @@ export class CollectionService {
     entityIds: number[],
     userLat?: number,
     userLng?: number,
+    vegMode?: VegMode,
   ) {
     if (entityIds.length === 0) return [];
     const stores = await this.storeRepository.find({
@@ -589,9 +720,16 @@ export class CollectionService {
     const orderedStores = entityIds
       .map((id) => mapById.get(id))
       .filter((store): store is Store => Boolean(store));
+    const vegFilteredStores = this.filterStoresByVegMode(orderedStores, vegMode);
+
+    const storeIds = vegFilteredStores.map((s) => s.id);
+    const storesWithActiveCloseTimings =
+      await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(storeIds);
+    const storesWithHolidayToday =
+      await this.storeAvailability.getStoreIdsWithHolidayToday(storeIds);
 
     return Promise.all(
-      orderedStores.map(async (store) => {
+      vegFilteredStores.map(async (store) => {
         const ratingData = await this.getStoreRatingData(store.id);
         const distance = this.getStoreDistanceKm(store, userLat, userLng);
         const deliveryTime = this.calculateDeliveryTime(
@@ -623,8 +761,12 @@ export class CollectionService {
         delivery_time: deliveryTime,
         offers_count: await this.getStoreOffersCount(store.id),
         is_favorite: false,
-        timings: this.buildStoreTimings(store),
-        is_open: this.isStoreOpenNow(store),
+        timings: expandStoreTimingsToDisplayDays(
+          (Array.isArray(store.timings) ? store.timings : []) as StoreTimingLike[],
+          storesWithActiveCloseTimings.has(store.id),
+          storesWithHolidayToday.has(store.id),
+        ),
+        is_open: (await this.storeAvailability.isStoreOpen(store.id)).isOpen,
         phone_number:
           store.fulfillments?.find((f: any) => f.type === "Delivery")
             ?.contact_phone || null,
@@ -795,103 +937,103 @@ export class CollectionService {
     return hours * 60 + minutes;
   }
 
-  private buildStoreTimings(store: Store): Array<{
-    day: number;
-    open_time: string;
-    close_time: string;
-    is_open: boolean;
+  private filterStoresByVegMode(stores: Store[], vegMode?: VegMode): Store[] {
+    if (!vegMode) return stores;
+    if (vegMode === VegMode.PURE) {
+      return stores.filter(
+        (store) =>
+          store.food_type === StoreDietaryPreference.PURE_VEG
+      );
+    }
+    // Align with Home API nearby_restaurants behavior:
+    // VegMode.ALL does not restrict store list by food_type.
+    return stores;
+  }
+
+  private filterItemsByVegMode(items: Item[], vegMode?: VegMode): Item[] {
+    if (!vegMode) return items;
+    if (vegMode === VegMode.PURE) {
+      return items.filter(
+        (item) =>
+          item.store?.food_type === StoreDietaryPreference.PURE_VEG ||
+          item.store?.food_type === StoreDietaryPreference.VEG,
+      );
+    }
+    if (vegMode === VegMode.ALL) {
+      return items.filter(
+        (item) =>
+          this.getItemDietaryPreference(item) === DietaryPreference.VEG,
+      );
+    }
+    return items;
+  }
+
+  private getItemDietaryPreference(item: Item): DietaryPreference | null {
+    const dietaryAttr = (item.attributes || []).find(
+      (attr: any) => attr?.attribute_code === "veg_nonveg",
+    );
+    const value = String(dietaryAttr?.attribute_value || "").toLowerCase();
+    if (value === DietaryPreference.VEG) return DietaryPreference.VEG;
+    if (value === DietaryPreference.NON_VEG) return DietaryPreference.NON_VEG;
+    if (value === DietaryPreference.EGG) return DietaryPreference.EGG;
+    return null;
+  }
+
+  private buildItemTimings(item: Item): Array<{
+    day_from: number;
+    day_to: number;
+    time_from: string;
+    time_to: string;
+    is_available_now: boolean;
   }> {
-    const timings = Array.isArray((store as any).timings)
-      ? ((store as any).timings as any[])
-      : [];
-    if (timings.length === 0) {
-      return [];
-    }
-
-    const expanded: Array<{
-      day: number;
-      open_time: string;
-      close_time: string;
-      is_open: boolean;
-    }> = [];
-
-    const currentDayDb = TimezoneUtil.getCurrentISTDay();
-    const currentTime = String(TimezoneUtil.getCurrentISTTimeHHMM());
-
-    for (const timing of timings) {
-      const dayFromDb = Number(timing.day_from);
-      const dayToDb = Number(timing.day_to);
-      const daysDb: number[] = [];
-
-      if (dayFromDb <= dayToDb) {
-        for (let day = dayFromDb; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      } else {
-        for (let day = dayFromDb; day <= 7; day++) {
-          daysDb.push(day);
-        }
-        for (let day = 1; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      }
-
-      for (const dayDb of daysDb) {
-        const openTime = String(timing.time_from || "0000");
-        const closeTime = String(timing.time_to || "0000");
-        expanded.push({
-          day: this.convertDbDayToDisplayDay(dayDb),
-          open_time: openTime,
-          close_time: closeTime,
-          is_open:
-            dayDb === currentDayDb &&
-            this.isTimeInRange(currentTime, openTime, closeTime),
-        });
-      }
-    }
-
-    return expanded.sort((a, b) => a.day - b.day);
+    const timings = Array.isArray(item.timings) ? item.timings : [];
+    return timings
+      .map((timing: any) => ({
+        day_from: Number(timing.day_from),
+        day_to: Number(timing.day_to),
+        time_from: String(timing.time_from || "0000"),
+        time_to: String(timing.time_to || "0000"),
+        is_available_now: this.isItemAvailableNow(
+          Number(timing.day_from),
+          Number(timing.day_to),
+          String(timing.time_from || "0000"),
+          String(timing.time_to || "0000"),
+        ),
+      }))
+      .sort((a, b) => {
+        if (a.day_from !== b.day_from) return a.day_from - b.day_from;
+        const fromDiff = Number(a.time_from) - Number(b.time_from);
+        if (fromDiff !== 0) return fromDiff;
+        return Number(a.time_to) - Number(b.time_to);
+      });
   }
 
-  private isStoreOpenNow(store: Store): boolean {
-    const currentDay = TimezoneUtil.getCurrentISTDay();
-    const currentTime = String(TimezoneUtil.getCurrentISTTimeHHMM());
-    const timings = Array.isArray((store as any).timings)
-      ? ((store as any).timings as any[])
-      : [];
-    const matched = timings.find(
-      (t) =>
-        Number(t.day_from) <= currentDay &&
-        Number(t.day_to) >= currentDay,
-    );
-    if (!matched) return false;
-    return this.isTimeInRange(
-      currentTime,
-      String(matched.time_from || "0000"),
-      String(matched.time_to || "0000"),
-    );
-  }
-
-  private convertDbDayToDisplayDay(dbDay: number): number {
-    return dbDay === 7 ? 1 : dbDay + 1;
-  }
-
-  private isTimeInRange(
-    currentHHMM: string,
-    openHHMM: string,
-    closeHHMM: string,
+  private isItemAvailableNow(
+    dayFrom: number,
+    dayTo: number,
+    timeFrom: string,
+    timeTo: string,
   ): boolean {
-    const current = Number(currentHHMM);
-    const open = Number(openHHMM);
-    const close = Number(closeHHMM);
-    if (!Number.isFinite(current) || !Number.isFinite(open) || !Number.isFinite(close)) {
+    const currentDay = TimezoneUtil.getCurrentISTDay(); // DB format: 1=Mon ... 7=Sun
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+
+    let isDayInRange = false;
+    if (dayFrom <= dayTo) {
+      isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
+    } else {
+      isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
+    }
+    if (!isDayInRange) return false;
+
+    const open = parseInt(timeFrom, 10);
+    const close = parseInt(timeTo, 10);
+    if (!Number.isFinite(open) || !Number.isFinite(close)) {
       return false;
     }
-    if (open <= close) {
-      return current >= open && current <= close;
+    if (close < open) {
+      return currentTime >= open || currentTime <= close;
     }
-    // Overnight timing window (e.g., 2200 -> 0200).
-    return current >= open || current <= close;
+    return currentTime >= open && currentTime <= close;
   }
 
   private async validateEntityIds(type: CollectionType, ids: number[]) {
@@ -924,21 +1066,19 @@ export class CollectionService {
     ignoreId?: number,
   ) {
     if (!status) return;
-
-    const rows =
-      page === CollectionPage.HOME
-        ? await this.collectionRepository.find({
-            where: { page, status: true },
-          })
-        : await this.collectionRepository.find({
-            where: { page, type, status: true },
-          });
+    if (page !== CollectionPage.HOME) {
+      // Multiple active banner collections are allowed.
+      return;
+    }
+    const rows = await this.collectionRepository.find({
+      where: { page, status: true },
+    });
 
     const conflict = rows.find((row) => row.id !== ignoreId);
     if (conflict) {
       if (page === CollectionPage.HOME) {
         throw new BadRequestException(
-          "An active collection already exists for page=home. Only one active home collection is allowed.",
+          "Only one active home collection is allowed.",
         );
       }
       throw new BadRequestException(

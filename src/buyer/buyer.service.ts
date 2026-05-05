@@ -35,6 +35,7 @@ import { UserFavoriteItem } from "../favorites/entities/user-favorite-item.entit
 import { Banner } from "../banner/entities/banner.entity";
 import { StoreCloseTimings } from "../store/entities/store-close-timings.entity";
 import { isDishActiveNow } from "../dish/utils/dish-visibility.util";
+import { isBannerActiveNow } from "../banner/utils/banner-visibility.util";
 import { DietaryPreference } from "../shared/enums/dietary-preference.enum";
 import { StoreDietaryPreference } from "../shared/enums/store-dietary-preference.enum";
 import { VegMode } from "../shared/enums/veg-mode.enum";
@@ -47,10 +48,83 @@ import { AppOperationHoursService } from "../shared/services/app-operation-hours
 import { AppSettingsService } from "../shared/services/app-settings.service";
 import { Order } from "../order/entities/order.entity";
 import { CollectionService } from "../collection/collection.service";
+import { StoreAvailabilityService } from "../shared/store-timing/store-availability.service";
+import {
+  expandStoreTimingsToDisplayDays,
+  convertDbDayToDisplayDay,
+  convertJsDayToDisplayDay,
+  checkTimingAvailabilityDisplay,
+} from "../shared/store-timing/store-timing-display.util";
 
 @Injectable()
 export class BuyerService {
   private readonly logger = new Logger(BuyerService.name);
+
+  private parseCuisineTagOptions(
+    raw: string | null,
+  ): Array<{ id: string; label: string }> {
+    try {
+      const parsed = JSON.parse(raw ?? "[]");
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+      return parsed
+        .filter(
+          (entry) =>
+            entry &&
+            typeof entry === "object" &&
+            typeof (entry as any).id === "string" &&
+            typeof (entry as any).label === "string",
+        )
+        .map((entry) => ({
+          id: (entry as any).id,
+          label: (entry as any).label,
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  private buildHomeFilters(cuisineOptions: Array<{ id: string; label: string }>) {
+    return [
+      {
+        key: "sort_by",
+        label: "Sort By",
+        selection_type: "single",
+        options: [
+          { label: "Distance", value: "distance" },
+          { label: "Rating", value: "rating" },
+        ],
+      },
+      {
+        key: "veg_mode",
+        label: "Food Type",
+        selection_type: "single",
+        options: [
+          { label: "All", value: VegMode.ALL },
+          { label: "Pure Veg", value: VegMode.PURE },
+        ],
+      },
+      {
+        key: "cuisines",
+        label: "Cuisine",
+        selection_type: "multiple",
+        options: cuisineOptions.map((cuisine) => ({
+          label: cuisine.label,
+          value: cuisine.id,
+        })),
+      },
+      {
+        key: "availability",
+        label: "Availability",
+        selection_type: "single",
+        options: [
+          { label: "Open", value: "open" },
+          { label: "Closed", value: "closed" },
+        ],
+      },
+    ];
+  }
 
   constructor(
     @InjectRepository(Store)
@@ -108,6 +182,7 @@ export class BuyerService {
     private readonly appOperationHoursService: AppOperationHoursService,
     private readonly appSettingsService: AppSettingsService,
     private readonly collectionService: CollectionService,
+    private readonly storeAvailability: StoreAvailabilityService,
   ) { }
 
   /**
@@ -140,6 +215,9 @@ export class BuyerService {
     deviceLat?: number,
     deviceLng?: number,
     vegMode?: VegMode,
+    sortBy: "distance" | "rating" = "distance",
+    cuisines: string[] = [],
+    availability?: "open" | "closed",
     page: number = 1,
     limit: number = 10,
   ) {
@@ -190,6 +268,7 @@ export class BuyerService {
         restaurantsResult,
         whatsOnYourMind,
         { promotional_banner: promotionalBanner, organization_banner: organizationBanner },
+        cuisineTagOptionsRaw,
         appOperationStatus,
         homeScreenCardStyle,
         codEnabled,
@@ -204,12 +283,16 @@ export class BuyerService {
           userLocation.lng,
           radiusKm,
           vegMode,
+          sortBy,
+          cuisines,
+          availability,
           userId,
           page,
           limit,
         ),
         this.getWhatsOnYourMind(vegMode),
         this.getPromotionalBanner(),
+        this.appSettingsService.get("CUISINE_TAG_OPTIONS", "[]"),
         this.appOperationHoursService.checkAppOperationStatus(),
         this.appSettingsService.getRestaurantCardConfig(),
         this.appSettingsService.getBoolean("COD_ENABLED", false),
@@ -228,6 +311,8 @@ export class BuyerService {
       );
 
       let codEnabledForUser = codEnabled;
+      const cuisineTagOptions = this.parseCuisineTagOptions(cuisineTagOptionsRaw);
+      const filters = this.buildHomeFilters(cuisineTagOptions);
       if (codEnabled && userId && Number(codDailyThreshold ?? 0) > 0) {
         const todayCodOrderCount = await this.getTodayCodOrderCountForUser(userId);
         console.log('codDailyThreshold', codDailyThreshold);
@@ -247,6 +332,7 @@ export class BuyerService {
           has_more: page * limit < restaurantsResult.total,
         },
         whats_on_your_mind: whatsOnYourMind,
+        filters,
         promotional_banner: promotionalBanner,
         organization_banner: organizationBanner,
         app_operation_status: {
@@ -271,6 +357,7 @@ export class BuyerService {
           {
             ...(userLocation?.lat !== undefined ? { user_lat: userLocation.lat } : {}),
             ...(userLocation?.lng !== undefined ? { user_lng: userLocation.lng } : {}),
+            ...(vegMode !== undefined ? { veg_mode: vegMode } : {}),
           },
         ),
       };
@@ -301,6 +388,9 @@ export class BuyerService {
     userLng: number,
     radiusKm: number,
     vegMode?: VegMode,
+    sortBy: "distance" | "rating" = "distance",
+    cuisines: string[] = [],
+    availability?: "open" | "closed",
     userId?: number,
     page: number = 1,
     limit: number = 10,
@@ -316,6 +406,9 @@ export class BuyerService {
       } else {
         this.logger.log(`🥬 Veg mode: disabled (showing all restaurants)`);
       }
+      this.logger.log(
+        `🔀 Home nearby params - sort_by: ${sortBy}, cuisines: ${cuisines.join(",") || "none"}, availability: ${availability || "all"}`,
+      );
 
       // First, let's check total stores in database
       const totalStores = await this.storeRepository.count();
@@ -437,25 +530,14 @@ export class BuyerService {
       // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const allStoreIds = allStores.map((store) => store.s_id);
       
-      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
-        .createQueryBuilder("sct")
-        .innerJoin("sct.store", "store")
-        .select("store.id", "store_id")
-        .where("store.id IN (:...storeIds)", { storeIds: allStoreIds })
-        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
-        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
-        .getRawMany<{ store_id: number | string }>();
-      // Create a Set of store IDs with active close timings for O(1) lookup
-      const storesWithActiveCloseTimings = new Set(
-        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
-      );
-
-      console.log('storesWithActiveCloseTimings', storesWithActiveCloseTimings);
+      const storesWithActiveCloseTimings =
+        await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(
+          allStoreIds,
+        );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
-      const storesWithHolidayToday = await this.getStoreIdsWithHolidayToday(
-        allStoreIds,
-      );
+      const storesWithHolidayToday =
+        await this.storeAvailability.getStoreIdsWithHolidayToday(allStoreIds);
 
       // Calculate ratings, open status, and delivery times for ALL restaurants
       const allStoresWithRatings = await Promise.all(
@@ -474,7 +556,9 @@ export class BuyerService {
           );
 
           // Check if store is open
-          const storeOpenData = await this.isStoreOpen(store.s_id);
+          const storeOpenData = await this.storeAvailability.isStoreOpen(
+            store.s_id,
+          );
           this.logger.log(`🕐 Store open: ${storeOpenData.isOpen}`);
 
           // Calculate delivery time with hyperlocal improvements
@@ -497,7 +581,7 @@ export class BuyerService {
 
           const hasActiveCloseTiming = storesWithActiveCloseTimings.has(store.s_id);
           const isHolidayToday = storesWithHolidayToday.has(store.s_id);
-          const timings = this.expandTimingsToDays(
+          const timings = expandStoreTimingsToDisplayDays(
             store_timings,
             hasActiveCloseTiming,
             isHolidayToday,
@@ -531,33 +615,63 @@ export class BuyerService {
         }),
       );
 
-      // Sort ALL restaurants: open first, then closed; within each group by distance, then rating, then name
-      allStoresWithRatings.sort((a, b) => {
+      const cuisinesNormalized = cuisines.map((c) =>
+        c.toLowerCase().replace(/[\s-]+/g, "_"),
+      );
+      const filteredByCuisines =
+        cuisinesNormalized.length === 0
+          ? allStoresWithRatings
+          : allStoresWithRatings.filter((store) => {
+              const rawTags = store.cuisine_tags || "";
+              const tags = String(rawTags)
+                .split(",")
+                .map((t) => t.trim().toLowerCase().replace(/[\s-]+/g, "_"))
+                .filter(Boolean);
+              return cuisinesNormalized.some((filterTag) => tags.includes(filterTag));
+            });
+
+      const filteredByAvailability =
+        availability === "open"
+          ? filteredByCuisines.filter((store) => store.is_open)
+          : availability === "closed"
+            ? filteredByCuisines.filter((store) => !store.is_open)
+            : filteredByCuisines;
+
+      // Sort restaurants: open first (when availability not explicitly requested), then selected sort mode.
+      filteredByAvailability.sort((a, b) => {
         // First priority: Sort by open status (open restaurants first)
-        if (a.is_open !== b.is_open) {
+        if (!availability && a.is_open !== b.is_open) {
           return a.is_open ? -1 : 1; // Open restaurants come first
         }
-        // Second priority: Sort by distance
-        if (a.distance !== b.distance) {
-          return a.distance - b.distance;
+        // Second priority: Sort by selected mode
+        if (sortBy === "rating") {
+          if (a.rating !== b.rating) {
+            return b.rating - a.rating;
+          }
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance;
+          }
+        } else {
+          if (a.distance !== b.distance) {
+            return a.distance - b.distance;
+          }
+          if (a.rating !== b.rating) {
+            return b.rating - a.rating;
+          }
         }
-        // Third priority: Sort by rating (highest first)
-        if (a.rating !== b.rating) {
-          return b.rating - a.rating;
-        }
-        // Finally: Sort by name
+        // Final tie-breaker: name
         return a.name.localeCompare(b.name);
       });
 
       this.logger.log(
-        `✅ Successfully processed and sorted all ${allStoresWithRatings.length} restaurants`,
+        `✅ Successfully processed and filtered nearby restaurants: ${filteredByAvailability.length} records`,
       );
 
       // Apply pagination AFTER sorting all restaurants
       const skip = (page - 1) * limit;
-      const paginatedRestaurants = allStoresWithRatings.slice(skip, skip + limit);
+      const paginatedRestaurants = filteredByAvailability.slice(skip, skip + limit);
       this.logger.log(
-        `📄 Returning page ${page}: ${paginatedRestaurants.length} restaurants (${skip + 1}-${skip + paginatedRestaurants.length} of ${totalCount})`,
+        `📄 Returning page ${page}: ${paginatedRestaurants.length} restaurants (${skip + 1}-${skip + paginatedRestaurants.length} of ${filteredByAvailability.length})`,
       );
 
       // Debug: Log paginated restaurants
@@ -567,7 +681,7 @@ export class BuyerService {
         );
       });
 
-      return { restaurants: paginatedRestaurants, total: totalCount };
+      return { restaurants: paginatedRestaurants, total: filteredByAvailability.length };
     } catch (error) {
       this.logger.error(
         `❌ Error getting nearby restaurants: ${error.message}`,
@@ -664,7 +778,9 @@ export class BuyerService {
 
   /**
    * Get promotional banner data from database
-   * Returns banners split into promotional_banner (restaurant_id, category_id, url) and organization_banner (organization)
+   * Returns banners split into:
+   * - promotional_banner: restaurant_id, category_id, url
+   * - organization_banner: organization, collection_id
    */
   private async getPromotionalBanner(): Promise<{
     promotional_banner: any[];
@@ -701,16 +817,26 @@ export class BuyerService {
         where: { status: true },
         order: { sequence: "ASC" },
       });
+      const currentDay = TimezoneUtil.getCurrentISTDay();
+      const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+      const visibleBanners = banners.filter((banner: any) =>
+        isBannerActiveNow(
+          Boolean(banner.schedule_enabled),
+          Array.isArray(banner.sessions) ? banner.sessions : [],
+          currentDay,
+          currentTime,
+        ),
+      );
 
-      // Return default banner if no active banners found
-      if (!banners || banners.length === 0) {
-        this.logger.warn("No active banners found, returning default banner");
-        return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
+      // Keep a single fallback banner when no active banners are visible.
+      if (!visibleBanners || visibleBanners.length === 0) {
+        this.logger.warn("No active banners found, returning fallback banner");
+        return { promotional_banner: defaultBanner, organization_banner: [] };
       }
 
       // Map all banners to their response shape
       const mapped = await Promise.all(
-        banners.map(async (banner) => {
+        visibleBanners.map(async (banner) => {
           if (banner.promotion_type === "restaurant_id") {
             const restaurant = await this.storeRepository.findOne({
               where: { reference_id: banner.promotion_link },
@@ -769,13 +895,18 @@ export class BuyerService {
         }),
       );
 
-      // Split into promotional (non-organization) and organization banners
+      // Split into promotional and organization-banner buckets.
+      // organization_banner also includes collection_id banners for home organization carousel.
       const validBanners = mapped.filter((b) => b !== null);
       const promotional_banner = validBanners.filter(
-        (b) => b.promotion_type !== "organization",
+        (b) =>
+          b.promotion_type !== "organization" &&
+          b.promotion_type !== "collection_id",
       );
       const organization_banner = validBanners.filter(
-        (b) => b.promotion_type === "organization",
+        (b) =>
+          b.promotion_type === "organization" ||
+          b.promotion_type === "collection_id",
       );
 
       return {
@@ -790,7 +921,7 @@ export class BuyerService {
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      return { promotional_banner: defaultBanner, organization_banner: defaultOrganizationBanner };
+      return { promotional_banner: defaultBanner, organization_banner: [] };
     }
   }
 
@@ -1262,23 +1393,14 @@ export class BuyerService {
       // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
       // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
-        .createQueryBuilder("sct")
-        .innerJoin("sct.store", "store")
-        .select("store.id", "store_id")
-        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
-        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
-        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
-        .getRawMany<{ store_id: number | string }>();
-      // Create a Set of restaurant IDs with active close timings for O(1) lookup
-      const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
-      );
+      const restaurantsWithActiveCloseTimings =
+        await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(
+          restaurantIds,
+        );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
-      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
-        restaurantIds,
-      );
+      const restaurantsWithHolidayToday =
+        await this.storeAvailability.getStoreIdsWithHolidayToday(restaurantIds);
 
       // Calculate ratings and additional data for each restaurant
       const restaurantsWithData = await Promise.all(
@@ -1291,7 +1413,7 @@ export class BuyerService {
           );
 
           // Check if store is open
-          const storeOpenData = await this.isStoreOpen(restaurant.s_id);
+          const storeOpenData = await this.storeAvailability.isStoreOpen(restaurant.s_id);
 
           // Calculate delivery time with hyperlocal improvements
           const deliveryTime = this.calculateDeliveryTime(
@@ -1316,7 +1438,7 @@ export class BuyerService {
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
           const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(
+          const timings = expandStoreTimingsToDisplayDays(
             store_timings,
             hasActiveCloseTiming,
             isHolidayToday,
@@ -1881,7 +2003,7 @@ export class BuyerService {
       const ratingData = await this.calculateRestaurantRating(restaurant.id);
 
       // Check if store is open
-      const storeOpenData = await this.isStoreOpen(restaurant.id);
+      const storeOpenData = await this.storeAvailability.isStoreOpen(restaurant.id);
 
       // Calculate delivery time with hyperlocal improvements
       const deliveryTime = this.calculateDeliveryTime(
@@ -1921,24 +2043,16 @@ export class BuyerService {
       const deliveryFeeRaw = await this.appSettingsService.getNumber("DELIVERY_FEE", 30);
       const deliveryFee = Number(deliveryFeeRaw ?? 30);
 
-      // Compute expanded timings with consistent "active close timing" detection.
-      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
-      const hasActiveCloseTimingForDetails = await this.storeCloseTimingsRepository
-        .createQueryBuilder("sct")
-        .where("sct.storeId = :storeId", { storeId: restaurant.id })
-        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
-        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
-        .getExists();
-      const istComponents = TimezoneUtil.getISTComponents();
-      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
-      const isHolidayTodayForDetails =
-        (restaurant.locations || []).some(
-          (loc) =>
-            Array.isArray(loc.schedule_holidays) &&
-            loc.schedule_holidays.includes(todayYYYYMMDD),
-        ) || false;
+      // Compute expanded timings with consistent "active close timing" + holiday detection.
+      const hasActiveCloseTimingForDetails =
+        await this.storeAvailability.hasActiveCloseTimingForStore(restaurant.id);
+      const holidayTodaySet =
+        await this.storeAvailability.getStoreIdsWithHolidayToday([
+          restaurant.id,
+        ]);
+      const isHolidayTodayForDetails = holidayTodaySet.has(restaurant.id);
       const expandedTimingsForDetails = restaurant.timings
-        ? this.expandTimingsToDays(
+        ? expandStoreTimingsToDisplayDays(
             restaurant.timings,
             hasActiveCloseTimingForDetails,
             isHolidayTodayForDetails,
@@ -2077,198 +2191,6 @@ export class BuyerService {
   }
 
   /**
-   * Check if restaurant is open based on current time and day
-   */
-  private checkRestaurantOpen(timings: StoreTimings[]): boolean {
-    if (!timings || timings.length === 0) return false;
-
-    // Use IST timezone
-    const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
-    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
-
-    const todayTiming = timings.find(
-      (timing) => timing.day_from <= currentDay && timing.day_to >= currentDay,
-    );
-    if (!todayTiming) return false;
-
-    const openTime = parseInt(todayTiming.time_from);
-    const closeTime = parseInt(todayTiming.time_to);
-
-    // Handle cases where closing time is next day (e.g., 2300 to 0200)
-    if (closeTime < openTime) {
-      return currentTime >= openTime || currentTime <= closeTime;
-    }
-
-    return currentTime >= openTime && currentTime <= closeTime;
-  }
-
-  /**
-   * Check if restaurant is open now based on timing window
-   * @param dayFrom - Starting day (1-7, where 1=Monday, 7=Sunday)
-   * @param dayTo - Ending day (1-7, where 1=Monday, 7=Sunday)
-   * @param openTime - Opening time in HHMM format
-   * @param closeTime - Closing time in HHMM format
-   */
-  private isDayOpen(
-    dayFrom: number,
-    dayTo: number,
-    openTime: string,
-    closeTime: string,
-  ): boolean {
-    // Use IST timezone
-    const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
-
-    // Check if current day is within the day range
-    let isDayInRange = false;
-    if (dayFrom <= dayTo) {
-      // Normal range (e.g., Monday to Friday: 1-5)
-      isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
-    } else {
-      // Wrapped range (e.g., Saturday to Monday: 6-1)
-      isDayInRange = currentDay >= dayFrom || currentDay <= dayTo;
-    }
-
-    if (!isDayInRange) return false;
-
-    // Check if current time is within operating hours
-    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
-    const open = parseInt(openTime);
-    const close = parseInt(closeTime);
-
-    if (close < open) {
-      // Overnight hours (e.g., 2200 to 0200)
-      return currentTime >= open || currentTime <= close;
-    }
-
-    return currentTime >= open && currentTime <= close;
-  }
-
-  /**
-   * Convert database day format to display format
-   * Database: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
-   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
-   */
-  private convertDbDayToDisplayDay(dbDay: number): number {
-    // Database 7 (Sunday) → Display 1 (Sunday)
-    // Database 1-6 (Mon-Sat) → Display 2-7 (Mon-Sat)
-    return dbDay === 7 ? 1 : dbDay + 1;
-  }
-
-  /**
-   * Convert display day format to database format
-   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
-   * Database: 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday, 7=Sunday
-   */
-  private convertDisplayDayToDbDay(displayDay: number): number {
-    // Display 1 (Sunday) → Database 7 (Sunday)
-    // Display 2-7 (Mon-Sat) → Database 1-6 (Mon-Sat)
-    return displayDay === 1 ? 7 : displayDay - 1;
-  }
-
-  /**
-   * Convert JavaScript getDay() to display format
-   * JS: 0=Sunday, 1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday
-   * Display: 1=Sunday, 2=Monday, 3=Tuesday, 4=Wednesday, 5=Thursday, 6=Friday, 7=Saturday
-   */
-  private convertJsDayToDisplayDay(jsDay: number): number {
-    return jsDay === 0 ? 1 : jsDay + 1;
-  }
-
-  /**
-   * Expand timing ranges into individual day entries
-   * Transforms timings with day_from-day_to ranges into separate entries for each day
-   * Days are converted to display format: 1=Sunday, 2=Monday, ..., 7=Saturday
-   * @param timings - Array of timing objects with day_from, day_to, time_from, time_to (in database format)
-   * @param hasActiveCloseTiming - Whether the store has an active close timing (pre-computed to avoid N+1 queries)
-   * @param isHolidayToday - If true, today's entry will have is_open=false (from location schedule_holidays)
-   * @returns Array of expanded timing entries, one per day (in display format)
-   */
-  private expandTimingsToDays(
-    timings: StoreTimings[],
-    hasActiveCloseTiming: boolean = false,
-    isHolidayToday: boolean = false,
-  ): Array<{
-    day: number;
-    open_time: string;
-    close_time: string;
-    is_open: boolean;
-  }> {
-    const expandedTimings: Array<{
-      day: number;
-      open_time: string;
-      close_time: string;
-      is_open: boolean;
-    }> = [];
-
-    // Use IST timezone for current day and time calculation
-    const now = TimezoneUtil.getCurrentISTTime();
-    // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
-    // JS getUTCDay(): 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
-    // Display format: 1=Sun, 2=Mon, 3=Tue, 4=Wed, 5=Thu, 6=Fri, 7=Sat
-    const jsDay = now.getUTCDay();
-    const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
-    const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
-
-    for (const timing of timings) {
-      // Database format: 1=Monday, 7=Sunday
-      const dayFromDb = timing.day_from;
-      const dayToDb = timing.day_to;
-
-      // Generate days in the range (in database format)
-      const daysDb: number[] = [];
-
-      if (dayFromDb <= dayToDb) {
-        // Normal range (e.g., Monday to Friday: 1-5)
-        for (let day = dayFromDb; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      } else {
-        // Wrapped range (e.g., Friday to Monday: 5-1)
-        // Handle as two separate ranges: from dayFromDb to 7, and from 1 to dayToDb
-        for (let day = dayFromDb; day <= 7; day++) {
-          daysDb.push(day);
-        }
-        for (let day = 1; day <= dayToDb; day++) {
-          daysDb.push(day);
-        }
-      }
-
-      // Create an entry for each day, converting to display format
-      for (const dayDb of daysDb) {
-        const dayDisplay = this.convertDbDayToDisplayDay(dayDb); // Convert to display format (1=Sun, 7=Sat)
-
-        // Calculate is_open: true only if this day is today AND current time is within operating hours AND no active close timing
-        let isOpen = false;
-
-        // Check if this day entry is today (compare in display format)
-        if (dayDisplay === currentDayDisplay && !hasActiveCloseTiming && !isHolidayToday) {
-          // Check if current time is within operating hours for this timing entry
-          const openTime = parseInt(timing.time_from);
-          const closeTime = parseInt(timing.time_to);
-
-          if (closeTime < openTime) {
-            // Overnight hours (e.g., 2200 to 0200)
-            isOpen = currentTime >= openTime || currentTime <= closeTime;
-          } else {
-            // Normal hours (e.g., 0900 to 2200)
-            isOpen = currentTime >= openTime && currentTime <= closeTime;
-          }
-        }
-
-        expandedTimings.push({
-          day: dayDisplay, // Return in display format: 1=Sunday, 7=Saturday
-          open_time: timing.time_from,
-          close_time: timing.time_to,
-          is_open: isOpen,
-        });
-      }
-    }
-
-    // Sort by day (1-7) for consistent ordering: Sunday (1) to Saturday (7)
-    return expandedTimings.sort((a, b) => a.day - b.day);
-  }
-
-  /**
    * Check if an item is currently available based on its timing window
    * Note: Uses database format internally (1=Monday, 7=Sunday)
    * @param dayFrom - Starting day in database format (1-7, where 1=Monday, 7=Sunday)
@@ -2312,45 +2234,6 @@ export class BuyerService {
   }
 
   /**
-   * Helper method to check if current day/time falls within timing range
-   * Uses display format for days (1=Sunday, 7=Saturday)
-   * @param dayFrom - Starting day in display format (1-7, where 1=Sunday, 7=Saturday)
-   * @param dayTo - Ending day in display format (1-7, where 1=Sunday, 7=Saturday)
-   * @param timeFrom - Start time in HHMM format
-   * @param timeTo - End time in HHMM format
-   * @param currentDay - Current day in display format (1=Sunday, 7=Saturday)
-   * @param currentTime - Current time in HHMM format
-   * @returns boolean indicating if item is available now
-   */
-  private checkTimingAvailability(
-    dayFrom: number,
-    dayTo: number,
-    timeFrom: string,
-    timeTo: string,
-    currentDay: number,
-    currentTime: number,
-  ): boolean {
-    // Check if current day is within range
-    const isDayInRange = currentDay >= dayFrom && currentDay <= dayTo;
-
-    if (!isDayInRange) {
-      return false;
-    }
-
-    // Check if current time is within range
-    const openTime = parseInt(timeFrom);
-    const closeTime = parseInt(timeTo);
-
-    if (closeTime < openTime) {
-      // Overnight hours (e.g., 2200 to 0200)
-      return currentTime >= openTime || currentTime <= closeTime;
-    } else {
-      // Normal hours (e.g., 0900 to 2200)
-      return currentTime >= openTime && currentTime <= closeTime;
-    }
-  }
-
-  /**
    * Normalize item timings by splitting wrapped ranges into readable ranges
    * Ensures day_from < day_to in display format (1=Sunday, 7=Saturday)
    * @param itemTimings - Array of ItemTimings entities (in database format)
@@ -2382,17 +2265,17 @@ export class BuyerService {
     // IMPORTANT: getCurrentISTTime() stores IST in UTC fields - must use getUTCDay/getUTCHours/getUTCMinutes
     const now = TimezoneUtil.getCurrentISTTime();
     const jsDay = now.getUTCDay(); // 0=Sun, 1=Mon, ..., 6=Sat
-    const currentDayDisplay = this.convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
+    const currentDayDisplay = convertJsDayToDisplayDay(jsDay); // 1=Sunday, 7=Saturday
     const currentTime = now.getUTCHours() * 100 + now.getUTCMinutes(); // HHMM format
 
     for (const timing of itemTimings) {
       // Convert database format to display format
-      const dayFromDisplay = this.convertDbDayToDisplayDay(timing.day_from);
-      const dayToDisplay = this.convertDbDayToDisplayDay(timing.day_to);
+      const dayFromDisplay = convertDbDayToDisplayDay(timing.day_from);
+      const dayToDisplay = convertDbDayToDisplayDay(timing.day_to);
 
       if (dayFromDisplay <= dayToDisplay) {
         // Normal range - no splitting needed (e.g., 1-7, 2-5)
-        const isAvailableNow = this.checkTimingAvailability(
+        const isAvailableNow = checkTimingAvailabilityDisplay(
           dayFromDisplay,
           dayToDisplay,
           timing.time_from,
@@ -2415,7 +2298,7 @@ export class BuyerService {
         //   Range 2: 1-2 (Sunday to Monday)
 
         // First range: from day_from to Saturday (7)
-        const isAvailableNow1 = this.checkTimingAvailability(
+        const isAvailableNow1 = checkTimingAvailabilityDisplay(
           dayFromDisplay,
           7, // Saturday
           timing.time_from,
@@ -2434,7 +2317,7 @@ export class BuyerService {
 
         // Second range: from Sunday (1) to day_to
         if (dayToDisplay >= 1) {
-          const isAvailableNow2 = this.checkTimingAvailability(
+          const isAvailableNow2 = checkTimingAvailabilityDisplay(
             1, // Sunday
             dayToDisplay,
             timing.time_from,
@@ -2532,7 +2415,7 @@ export class BuyerService {
           const newDayTo = Math.max(lastMerged.day_to, timing.day_to);
 
           // Recalculate availability for merged range
-          const isAvailableNow = this.checkTimingAvailability(
+          const isAvailableNow = checkTimingAvailabilityDisplay(
             newDayFrom,
             newDayTo,
             lastMerged.time_from,
@@ -3591,23 +3474,14 @@ export class BuyerService {
       // Batch fetch all active close timings for all restaurants at once (optimization to avoid N+1 queries).
       // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
       const restaurantIds = restaurants.map((r) => r.s_id);
-      const activeCloseTimingStoreRows = await this.storeCloseTimingsRepository
-        .createQueryBuilder("sct")
-        .innerJoin("sct.store", "store")
-        .select("store.id", "store_id")
-        .where("store.id IN (:...storeIds)", { storeIds: restaurantIds })
-        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
-        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
-        .getRawMany<{ store_id: number | string }>();
-      // Create a Set of restaurant IDs with active close timings for O(1) lookup
-      const restaurantsWithActiveCloseTimings = new Set(
-        activeCloseTimingStoreRows.map((row) => Number(row.store_id)),
-      );
+      const restaurantsWithActiveCloseTimings =
+        await this.storeAvailability.getStoreIdsWithActiveCloseTimingNow(
+          restaurantIds,
+        );
 
       // Batch fetch store IDs where today is a holiday (schedule_holidays)
-      const restaurantsWithHolidayToday = await this.getStoreIdsWithHolidayToday(
-        restaurantIds,
-      );
+      const restaurantsWithHolidayToday =
+        await this.storeAvailability.getStoreIdsWithHolidayToday(restaurantIds);
 
       // Process and enrich restaurant data
       const topRatedRestaurants = await Promise.all(
@@ -3616,7 +3490,7 @@ export class BuyerService {
           const avgRating = parseFloat(restaurant.avg_rating) || 0;
 
           // Check if store is open
-          const storeOpenData = await this.isStoreOpen(restaurant.s_id);
+          const storeOpenData = await this.storeAvailability.isStoreOpen(restaurant.s_id);
 
           // Calculate delivery time with hyperlocal improvements
           const deliveryTime = this.calculateDeliveryTime(
@@ -3641,7 +3515,7 @@ export class BuyerService {
 
           const hasActiveCloseTiming = restaurantsWithActiveCloseTimings.has(restaurant.s_id);
           const isHolidayToday = restaurantsWithHolidayToday.has(restaurant.s_id);
-          const timings = this.expandTimingsToDays(
+          const timings = expandStoreTimingsToDisplayDays(
             store_timings,
             hasActiveCloseTiming,
             isHolidayToday,
@@ -3683,135 +3557,6 @@ export class BuyerService {
         error.stack,
       );
       return [];
-    }
-  }
-
-  /**
-   * Get store IDs where today (IST) is in any active location's schedule_holidays
-   */
-  private async getStoreIdsWithHolidayToday(
-    storeIds: number[],
-  ): Promise<Set<number>> {
-    if (storeIds.length === 0) return new Set();
-    const istComponents = TimezoneUtil.getISTComponents();
-    const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
-    const locations = await this.storeLocationRepository.find({
-      where: { store: { id: In(storeIds) }, status: true },
-      relations: ["store"],
-    });
-    return new Set(
-      locations
-        .filter(
-          (loc) =>
-            Array.isArray(loc.schedule_holidays) &&
-            loc.schedule_holidays.includes(todayYYYYMMDD),
-        )
-        .map((loc) => loc.store.id),
-    );
-  }
-
-  /**
-   * Check if store is currently open
-   */
-  private async isStoreOpen(
-    storeId: number,
-  ): Promise<{ isOpen: boolean; nextOpenTime?: string }> {
-    try {
-      // Use IST timezone for all time calculations
-      const currentDay = TimezoneUtil.getCurrentISTDay(); // Monday=1, ..., Saturday=6, Sunday=7
-      const currentTime = TimezoneUtil.getCurrentISTTimeHHMM(); // HHMM format
-
-      this.logger.log(
-        `🕐 Checking store ${storeId} open status - IST Day: ${currentDay}, Time: ${currentTime} (${TimezoneUtil.formatTimeHHMM(currentTime)})`,
-      );
-
-      // Check regular timings (Order timings only), including wrapped day ranges
-      const applicableTimings = await this.storeTimingsRepository
-        .createQueryBuilder("st")
-        .where("st.storeId = :storeId", { storeId })
-        .andWhere(
-          `(
-            (st.day_from <= st.day_to AND st.day_from <= :day AND st.day_to >= :day)
-            OR
-            (st.day_from > st.day_to AND (:day >= st.day_from OR :day <= st.day_to))
-          )`,
-          {
-            day: currentDay,
-          },
-        )
-        .orderBy("st.time_from", "ASC")
-        .addOrderBy("st.id", "ASC")
-        .getMany();
-
-      if (!applicableTimings.length) {
-        return { isOpen: false };
-      }
-
-      // Check if current time falls in ANY matching timing window
-      let isWithinHours = false;
-      const nextOpenTime = applicableTimings[0]?.time_from;
-      for (const timing of applicableTimings) {
-        const openTime = parseInt(timing.time_from, 10);
-        const closeTime = parseInt(timing.time_to, 10);
-
-        if (!Number.isFinite(openTime) || !Number.isFinite(closeTime)) {
-          continue;
-        }
-
-        if (closeTime < openTime) {
-          // Handle overnight operations (e.g., 2300 to 0200)
-          if (currentTime >= openTime || currentTime <= closeTime) {
-            isWithinHours = true;
-            break;
-          }
-        } else if (currentTime >= openTime && currentTime <= closeTime) {
-          isWithinHours = true;
-          break;
-        }
-      }
-
-      if (!isWithinHours) {
-        return nextOpenTime ? { isOpen: false, nextOpenTime } : { isOpen: false };
-      }
-
-      // Check for special closures (holidays, maintenance, etc.)
-      // IMPORTANT: store_close_timings uses timezone-naive timestamp fields, so compare using DB UTC wall clock.
-      const hasActiveSpecialClosure = await this.storeCloseTimingsRepository
-        .createQueryBuilder("sct")
-        .where("sct.storeId = :storeId", { storeId })
-        .andWhere("sct.close_start_datetime <= (NOW() AT TIME ZONE 'UTC')")
-        .andWhere("sct.close_end_datetime >= (NOW() AT TIME ZONE 'UTC')")
-        .getExists();
-
-      if (hasActiveSpecialClosure) {
-        return { isOpen: false };
-      }
-
-      // Check location schedule_holidays: if today (IST) is in any active location's holidays, store is closed
-      const istComponents = TimezoneUtil.getISTComponents();
-      const todayYYYYMMDD = `${istComponents.year}-${String(istComponents.month).padStart(2, "0")}-${String(istComponents.day).padStart(2, "0")}`;
-      const locationsWithHolidays = await this.storeLocationRepository.find({
-        where: { store: { id: storeId }, status: true },
-        select: ["id", "schedule_holidays"],
-      });
-      const isHolidayToday = locationsWithHolidays.some(
-        (loc) =>
-          Array.isArray(loc.schedule_holidays) &&
-          loc.schedule_holidays.includes(todayYYYYMMDD),
-      );
-      if (isHolidayToday) {
-        this.logger.log(
-          `🕐 Store ${storeId} closed today: ${todayYYYYMMDD} is in location schedule_holidays`,
-        );
-        return { isOpen: false };
-      }
-
-      return { isOpen: true };
-    } catch (error) {
-      this.logger.warn(
-        `Failed to check store timing for store ${storeId}: ${error.message}`,
-      );
-      return { isOpen: false };
     }
   }
 

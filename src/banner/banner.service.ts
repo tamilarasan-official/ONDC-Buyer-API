@@ -13,6 +13,8 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { PaginationDto } from "src/shared/dto/pagination.dto";
 import { UploadService } from "src/shared/upload.service";
 import { Store } from "../store/entities/store.entity";
+import { Collection } from "../collection/entities/collection.entity";
+import { TimezoneUtil } from "../shared/utils/timezone.util";
 
 @Injectable()
 export class BannerService {
@@ -21,12 +23,207 @@ export class BannerService {
     private readonly bannerRepository: Repository<Banner>,
     @InjectRepository(Store)
     private readonly storeRepository: Repository<Store>,
+    @InjectRepository(Collection)
+    private readonly collectionRepository: Repository<Collection>,
     private readonly uploadService: UploadService,
   ) {}
+
+  private toBoolean(value: unknown, fallback = false): boolean {
+    if (value === undefined || value === null || value === "") return fallback;
+    if (typeof value === "boolean") return value;
+    if (typeof value === "string") {
+      const normalized = value.trim().toLowerCase();
+      if (normalized === "true") return true;
+      if (normalized === "false") return false;
+    }
+    return Boolean(value);
+  }
+
+  private normalizeHHMM(value: unknown): number {
+    if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value);
+    if (typeof value !== "string") return 0;
+    const raw = value.trim();
+    if (!raw) return 0;
+    if (/^\d{1,4}$/.test(raw)) return parseInt(raw, 10);
+    const match = raw.match(/^(\d{1,2}):(\d{2})(?::\d{1,2}(?:\.\d+)?)?$/);
+    if (match) return Number(match[1]) * 100 + Number(match[2]);
+    return 0;
+  }
+
+  private normalizeBannerSessions(rawSessions?: unknown): Array<{
+    day_from: number;
+    day_to: number;
+    start_hhmm: number;
+    end_hhmm: number;
+    label?: string;
+    status: boolean;
+  }> {
+    if (rawSessions === undefined || rawSessions === null || rawSessions === "") {
+      return [];
+    }
+    let parsed: unknown = rawSessions;
+    if (typeof rawSessions === "string") {
+      try {
+        parsed = JSON.parse(rawSessions);
+      } catch {
+        throw new BadRequestException("Invalid sessions format. Expected JSON array.");
+      }
+    }
+    if (!Array.isArray(parsed)) {
+      throw new BadRequestException("Invalid sessions format. Expected JSON array.");
+    }
+    type NormalizedBannerSession = {
+      day_from: number;
+      day_to: number;
+      start_hhmm: number;
+      end_hhmm: number;
+      label?: string;
+      status: boolean;
+    };
+    const sessions: Array<NormalizedBannerSession | null> = parsed
+      .map((row: any, idx: number) => {
+      // Ignore blank placeholder rows from multipart/form UIs.
+      const hasAnyValue =
+        row &&
+        typeof row === "object" &&
+        (row.day_from !== undefined ||
+          row.dayFrom !== undefined ||
+          row.day_to !== undefined ||
+          row.dayTo !== undefined ||
+          row.start_hhmm !== undefined ||
+          row.startTime !== undefined ||
+          row.from !== undefined ||
+          row.end_hhmm !== undefined ||
+          row.endTime !== undefined ||
+          row.to !== undefined);
+      if (!hasAnyValue) {
+        return null;
+      }
+      const dayFrom = Number(row?.day_from ?? row?.dayFrom);
+      const dayTo = Number(row?.day_to ?? row?.dayTo);
+      const start = this.normalizeHHMM(row?.start_hhmm ?? row?.startTime ?? row?.from);
+      const end = this.normalizeHHMM(row?.end_hhmm ?? row?.endTime ?? row?.to);
+      if (!Number.isFinite(dayFrom) || dayFrom < 1 || dayFrom > 7) {
+        throw new BadRequestException(`Invalid day_from at session index ${idx}`);
+      }
+      if (!Number.isFinite(dayTo) || dayTo < 1 || dayTo > 7) {
+        throw new BadRequestException(`Invalid day_to at session index ${idx}`);
+      }
+      if (start < 0 || start > 2359 || end < 0 || end > 2359) {
+        throw new BadRequestException(`Invalid session time at session index ${idx}`);
+      }
+      if (start === end) {
+        throw new BadRequestException(`start_hhmm and end_hhmm cannot be equal at session index ${idx}`);
+      }
+      return {
+        day_from: dayFrom,
+        day_to: dayTo,
+        start_hhmm: start,
+        end_hhmm: end,
+        label: row?.label ? String(row.label) : undefined,
+        status: row?.status !== false,
+      };
+      })
+      .filter((session) => session !== null);
+    return sessions as NormalizedBannerSession[];
+  }
+
+  private isSessionActiveNow(session: {
+    day_from: number;
+    day_to: number;
+    start_hhmm: number;
+    end_hhmm: number;
+    status?: boolean;
+  }): boolean {
+    if (session.status === false) return false;
+    const currentDay = TimezoneUtil.getCurrentISTDay();
+    const currentTime = TimezoneUtil.getCurrentISTTimeHHMM();
+    const inDayRange =
+      session.day_from <= session.day_to
+        ? currentDay >= session.day_from && currentDay <= session.day_to
+        : currentDay >= session.day_from || currentDay <= session.day_to;
+    if (!inDayRange) return false;
+    if (session.end_hhmm < session.start_hhmm) {
+      return currentTime >= session.start_hhmm || currentTime <= session.end_hhmm;
+    }
+    return currentTime >= session.start_hhmm && currentTime <= session.end_hhmm;
+  }
+
+  private isBannerVisibleNow(banner: Banner): boolean {
+    const scheduleEnabled = this.toBoolean((banner as any).schedule_enabled, false);
+    if (!scheduleEnabled) return true;
+    const sessions = Array.isArray((banner as any).sessions)
+      ? ((banner as any).sessions as any[])
+      : [];
+    if (sessions.length === 0) return false;
+    return sessions.some((session) => this.isSessionActiveNow(session));
+  }
+
+  private async validatePromotionData(
+    promotionType?: string,
+    promotionLink?: string | null,
+  ): Promise<void> {
+    if (!promotionType) return;
+
+    if (promotionType === "restaurant_id") {
+      const store = await this.storeRepository.findOne({
+        where: { reference_id: promotionLink || "" },
+      });
+      if (!store) {
+        throw new BadRequestException("Restaurant not found");
+      }
+      return;
+    }
+
+    if (promotionType === "category_id") {
+      if (!promotionLink) {
+        throw new BadRequestException(
+          "promotion_link is required for category_id type",
+        );
+      }
+      return;
+    }
+
+    if (promotionType === "collection_id") {
+      if (!promotionLink) {
+        throw new BadRequestException(
+          "promotion_link is required for collection_id type",
+        );
+      }
+      const collectionId = Number(promotionLink);
+      if (!Number.isFinite(collectionId) || collectionId <= 0) {
+        throw new BadRequestException(
+          "promotion_link must be a valid collection id for collection_id type",
+        );
+      }
+      const collection = await this.collectionRepository.findOne({
+        where: { id: collectionId, status: true },
+      });
+      if (!collection) {
+        throw new BadRequestException("Active collection not found");
+      }
+      return;
+    }
+
+    if (promotionType === "url") {
+      if (!promotionLink) {
+        throw new BadRequestException("promotion_link is required for url type");
+      }
+      try {
+        new URL(promotionLink);
+      } catch {
+        throw new BadRequestException(
+          "promotion_link must be a valid URL for url type",
+        );
+      }
+    }
+    // organization type: no link validation required.
+  }
 
   async create(
     createBannerDto: CreateBannerDto,
     imageFile: Express.Multer.File,
+    rawSessions?: unknown,
   ) {
     try {
       // Validate file type
@@ -42,38 +239,17 @@ export class BannerService {
         );
       }
 
-      const promotion_type = createBannerDto.promotion_type;
-      const promotion_link = createBannerDto.promotion_link;
-      let promotion_id: number | null = null;
-      if (promotion_type === "restaurant_id") {
-        const store = await this.storeRepository.findOne({
-          where: { reference_id: promotion_link },
-        });
-        promotion_id = store?.id || null;
-        if (!promotion_id) {
-          throw new BadRequestException("Restaurant not found");
-        }
-      } else if (promotion_type === "category_id") {
-        if (!promotion_link) {
-          throw new BadRequestException(
-            "promotion_link is required for category_id type",
-          );
-        }
-      } else if (promotion_type === "url") {
-        if (!promotion_link) {
-          throw new BadRequestException(
-            "promotion_link is required for url type",
-          );
-        }
-        try {
-          new URL(promotion_link);
-        } catch {
-          throw new BadRequestException(
-            "promotion_link must be a valid URL for url type",
-          );
-        }
-      }
-      // organization type: no store lookup required, promotion_link and cta_button are optional
+      await this.validatePromotionData(
+        createBannerDto.promotion_type,
+        createBannerDto.promotion_link,
+      );
+      const scheduleEnabled = this.toBoolean(
+        (createBannerDto as any).schedule_enabled,
+        false,
+      );
+      const normalizedSessions = this.normalizeBannerSessions(
+        rawSessions !== undefined ? rawSessions : (createBannerDto as any).sessions,
+      );
 
       // Generate file name from banner title (remove spaces and special characters)
       // Include timestamp for cache busting
@@ -100,6 +276,8 @@ export class BannerService {
       // Create banner with image URL and sequence
       const banner = this.bannerRepository.create({
         ...createBannerDto,
+        schedule_enabled: scheduleEnabled,
+        sessions: normalizedSessions,
         image_url: imageUrl,
         sequence: sequence,
       });
@@ -286,11 +464,11 @@ export class BannerService {
 
   async findActive() {
     try {
-      const banners = await this.bannerRepository.find({
+      const bannersRaw = await this.bannerRepository.find({
         where: { status: true },
         order: { sequence: "ASC" },
       });
-      return banners;
+      return bannersRaw.filter((banner) => this.isBannerVisibleNow(banner));
     } catch (error) {
       throw new BadRequestException("Failed to retrieve active banners.");
     }
@@ -300,6 +478,7 @@ export class BannerService {
     id: number,
     updateBannerDto: UpdateBannerDto,
     imageFile?: Express.Multer.File,
+    rawSessions?: unknown,
   ) {
     try {
       const banner = await this.bannerRepository.findOne({ where: { id } });
@@ -308,6 +487,35 @@ export class BannerService {
       }
 
       const updateData = { ...updateBannerDto };
+      const effectivePromotionType =
+        updateBannerDto.promotion_type ?? banner.promotion_type;
+      const effectivePromotionLink =
+        updateBannerDto.promotion_link ?? banner.promotion_link;
+      await this.validatePromotionData(
+        effectivePromotionType,
+        effectivePromotionLink,
+      );
+      const scheduleEnabled =
+        (updateBannerDto as any).schedule_enabled !== undefined
+          ? this.toBoolean((updateBannerDto as any).schedule_enabled, false)
+          : this.toBoolean((banner as any).schedule_enabled, false);
+      // Prefer rawSessions (raw string/value from @Body("sessions")) over DTO-transformed value,
+      // which may be stripped by the class-validator whitelist pipeline for multipart requests.
+      const incomingSessions =
+        rawSessions !== undefined
+          ? rawSessions
+          : (updateBannerDto as any).sessions;
+      const scheduleConfigUpdated =
+        (updateBannerDto as any).schedule_enabled !== undefined ||
+        incomingSessions !== undefined;
+      const normalizedSessions =
+        incomingSessions !== undefined
+          ? this.normalizeBannerSessions(incomingSessions)
+          : Array.isArray((banner as any).sessions)
+            ? ((banner as any).sessions as any[])
+            : [];
+      (updateData as any).schedule_enabled = scheduleEnabled;
+      (updateData as any).sessions = normalizedSessions;
 
       // Handle file upload if provided
       if (imageFile) {
@@ -353,8 +561,8 @@ export class BannerService {
         (updateData as any).image_url = imageUrl;
       }
 
-      await this.bannerRepository.update(id, updateData);
-      return await this.bannerRepository.findOne({ where: { id } });
+      const updatedBanner = this.bannerRepository.merge(banner, updateData);
+      return await this.bannerRepository.save(updatedBanner);
     } catch (error) {
       if (
         error instanceof NotFoundException ||

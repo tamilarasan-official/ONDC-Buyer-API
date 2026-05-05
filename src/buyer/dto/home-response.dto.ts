@@ -403,6 +403,47 @@ export class WhatsOnYourMindDto {
   updated_at: Date;
 }
 
+export class FilterOptionDto {
+  @ApiProperty({
+    description: "Display label for filter option",
+    example: "Distance",
+  })
+  label: string;
+
+  @ApiProperty({
+    description: "Filter option value sent in request",
+    example: "distance",
+  })
+  value: string;
+}
+
+export class HomeFilterDto {
+  @ApiProperty({
+    description: "Filter key expected by API",
+    example: "sort_by",
+  })
+  key: string;
+
+  @ApiProperty({
+    description: "Filter display label",
+    example: "Sort By",
+  })
+  label: string;
+
+  @ApiProperty({
+    description: "Selection behavior for this filter",
+    enum: ["single", "multiple"],
+    example: "single",
+  })
+  selection_type: "single" | "multiple";
+
+  @ApiProperty({
+    description: "Available options for this filter",
+    type: [FilterOptionDto],
+  })
+  options: FilterOptionDto[];
+}
+
 export class PromotionalBannerDto {
   @ApiProperty({
     description: "Banner title",
@@ -550,6 +591,13 @@ export class HomeDataDto {
     type: [WhatsOnYourMindDto],
   })
   whats_on_your_mind: WhatsOnYourMindDto[];
+
+  @ApiProperty({
+    description:
+      "Dynamic filter configuration for home screen (sort, veg_mode, cuisines, availability)",
+    type: [HomeFilterDto],
+  })
+  filters: HomeFilterDto[];
 
   @ApiProperty({
     description:
