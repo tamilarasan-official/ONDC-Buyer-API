@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from "@nestjs/common";
 import { LoginDto } from "./dto/login.dto";
 import { InjectRepository } from "@nestjs/typeorm";
 import { User } from "src/user/entities/user.entity";
@@ -148,7 +153,7 @@ export class AuthenticationService {
     try {
       const user = verifyRefreshToken(refreshTokenDto.refresh_token) as any;
       if (!user) {
-        throw new BadRequestException("Invalid refresh token");
+        throw new UnauthorizedException("Invalid or expired refresh token");
       }
 
       const newPayload = {
@@ -161,10 +166,13 @@ export class AuthenticationService {
         refresh_token: generateRefreshToken(newPayload),
       };
     } catch (error) {
-      if (error instanceof BadRequestException) {
+      if (
+        error instanceof BadRequestException ||
+        error instanceof UnauthorizedException
+      ) {
         throw error;
       }
-      throw new BadRequestException("Failed to refresh token", error.message);
+      throw new UnauthorizedException("Invalid or expired refresh token");
     }
   }
 
