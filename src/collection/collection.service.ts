@@ -375,7 +375,23 @@ export class CollectionService {
     if (!collection) {
       throw new NotFoundException("Collection not found");
     }
-    return this.resolveCollectionEntries(collection, paginationDto, runtimeOverrides);
+    const resolved = await this.resolveCollectionEntries(
+      collection,
+      paginationDto,
+      runtimeOverrides,
+    );
+
+    return {
+      collection: {
+        id: collection.id,
+        title: collection.title,
+        description: collection.description,
+        image_url: collection.image_url,
+        type: collection.type,
+        page: collection.page,
+      },
+      ...resolved,
+    };
   }
 
   async findActiveCollections(paginationDto: PaginationDto) {

@@ -786,18 +786,6 @@ export class BuyerService {
     promotional_banner: any[];
     organization_banner: any[];
   }> {
-    const defaultBanner = [
-      {
-        title: "Craving Something Delicious?",
-        subtitle:
-          "Get your favorite meals delivered hot & fast—right to your doorstep.",
-        cta_button: "Order Now!",
-        image_url:
-          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-        background_color: "#14b8a6",
-      },
-    ];
-
     const defaultOrganizationBanner = [
       {
         title: "50% OFF",
@@ -830,8 +818,10 @@ export class BuyerService {
 
       // Keep a single fallback banner when no active banners are visible.
       if (!visibleBanners || visibleBanners.length === 0) {
-        this.logger.warn("No active banners found, returning fallback banner");
-        return { promotional_banner: defaultBanner, organization_banner: [] };
+        this.logger.warn(
+          "No active banners found, returning empty promotional banners",
+        );
+        return { promotional_banner: [], organization_banner: [] };
       }
 
       // Map all banners to their response shape
@@ -921,7 +911,7 @@ export class BuyerService {
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      return { promotional_banner: defaultBanner, organization_banner: [] };
+      return { promotional_banner: [], organization_banner: [] };
     }
   }
 
