@@ -786,31 +786,6 @@ export class BuyerService {
     promotional_banner: any[];
     organization_banner: any[];
   }> {
-    const defaultBanner = [
-      {
-        title: "Craving Something Delicious?",
-        subtitle:
-          "Get your favorite meals delivered hot & fast—right to your doorstep.",
-        cta_button: "Order Now!",
-        image_url:
-          "https://sqc-bucket.in-maa-1.linodeobjects.com/chinese-noodles-fast-food-with-soda%20(1).jpg",
-        background_color: "#14b8a6",
-      },
-    ];
-
-    const defaultOrganizationBanner = [
-      {
-        title: "50% OFF",
-        subtitle:
-          "Fresh flavours, delivered fast — order now and save big on every bite.",
-        image_url:
-          "https://in-maa-1.linodeobjects.com/sqc-bucket/staging/banners/50OFF-1775645094098.jpg",
-        background_color: "#8b1d2c",
-        promotion_type: "organization",
-        sequence: 1,
-      },
-    ];
-
     try {
       // Get all active banners ordered by sequence
       const banners = await this.bannerRepository.find({
@@ -830,8 +805,10 @@ export class BuyerService {
 
       // Keep a single fallback banner when no active banners are visible.
       if (!visibleBanners || visibleBanners.length === 0) {
-        this.logger.warn("No active banners found, returning fallback banner");
-        return { promotional_banner: defaultBanner, organization_banner: [] };
+        this.logger.warn(
+          "No active banners found, returning empty promotional banners",
+        );
+        return { promotional_banner: [], organization_banner: [] };
       }
 
       // Map all banners to their response shape
@@ -911,17 +888,14 @@ export class BuyerService {
 
       return {
         promotional_banner,
-        organization_banner:
-          organization_banner.length > 0
-            ? organization_banner
-            : defaultOrganizationBanner,
+        organization_banner,
       };
     } catch (error) {
       this.logger.error(
         `Error fetching promotional banners: ${error.message}`,
         error.stack,
       );
-      return { promotional_banner: defaultBanner, organization_banner: [] };
+      return { promotional_banner: [], organization_banner: [] };
     }
   }
 
