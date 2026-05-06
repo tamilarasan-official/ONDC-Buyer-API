@@ -786,19 +786,6 @@ export class BuyerService {
     promotional_banner: any[];
     organization_banner: any[];
   }> {
-    const defaultOrganizationBanner = [
-      {
-        title: "50% OFF",
-        subtitle:
-          "Fresh flavours, delivered fast — order now and save big on every bite.",
-        image_url:
-          "https://in-maa-1.linodeobjects.com/sqc-bucket/staging/banners/50OFF-1775645094098.jpg",
-        background_color: "#8b1d2c",
-        promotion_type: "organization",
-        sequence: 1,
-      },
-    ];
-
     try {
       // Get all active banners ordered by sequence
       const banners = await this.bannerRepository.find({
@@ -901,10 +888,7 @@ export class BuyerService {
 
       return {
         promotional_banner,
-        organization_banner:
-          organization_banner.length > 0
-            ? organization_banner
-            : defaultOrganizationBanner,
+        organization_banner,
       };
     } catch (error) {
       this.logger.error(
